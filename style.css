@@ -1439,3 +1439,36 @@ html.np-fakefs .bnav, html.np-fakefs .topbar, html.np-fakefs .fab-wrap { display
 .np-tier.q2 { background: rgba(167, 139, 250, .72); }
 .np-tier.q3 { background: rgba(196, 181, 253, .92); }
 .np-bar:hover .np-tiers, .np.drag .np-tiers { height: 6px; }
+
+/* ===== ربط الأجهزة: QR، بحث من التلفون، شغّل على جهاز تاني ===== */
+.qr-ov { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10000; background: rgba(0,0,0,.7); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.qr-card { position: relative; width: min(420px, 100%); background: var(--bg2, #111827); color: var(--text); border: 1px solid var(--line); border-radius: 22px; padding: 22px 20px 18px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.qr-card h2 { margin: 0 0 12px; font-size: 1.2rem; }
+.qr-x { position: absolute; top: 10px; left: 10px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--card, rgba(255,255,255,.08)); color: var(--text); font-size: 1rem; cursor: pointer; }
+.qr-box { width: min(260px, 70vw); aspect-ratio: 1; margin: 0 auto; background: #fff; border-radius: 16px; padding: 10px; display: grid; place-items: center; overflow: hidden; }
+.qr-box svg { width: 100%; height: 100%; }
+.qr-cam { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; background: #000; }
+.qr-spin { width: 36px; height: 36px; border-radius: 50%; border: 3px solid rgba(0,0,0,.12); border-top-color: #7c3aed; animation: embspin .8s linear infinite; }
+.qr-code { margin-top: 12px; font: 800 1.5rem/1 ui-monospace, monospace; letter-spacing: .18em; direction: ltr; }
+.qr-card p { margin: 10px 4px 0; font-size: .88rem; }
+.qr-status { margin-top: 10px; font-weight: 700; min-height: 1.2em; }
+html.tv .qr-card { width: min(640px, 90vw); } html.tv .qr-box { width: 40vh; } html.tv .qr-card h2 { font-size: 1.6rem; }
+.auth-qr { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 12px; }
+.auth-qr svg { width: 20px; height: 20px; fill: currentColor; }
+.pair-page { max-width: 460px; margin: 24px auto; padding: 0 16px; text-align: center; }
+.pair-page h1 { font-size: 1.35rem; margin: 10px 0 6px; }
+.pair-acts { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
+.remote-form { margin-top: 16px; display: grid; gap: 10px; }
+.remote-row { display: flex; gap: 8px; }
+.remote-in { flex: 1; font-size: 1.1rem; }
+.remote-mic { width: 54px; flex-shrink: 0; border: 0; border-radius: 14px; background: var(--card, rgba(255,255,255,.08)); color: var(--text); cursor: pointer; display: grid; place-items: center; }
+.remote-mic svg { width: 24px; height: 24px; }
+.remote-mic.on { background: #ef4444; color: #fff; animation: micpulse 1s ease-in-out infinite; }
+@keyframes micpulse { 50% { transform: scale(1.06); } }
+.remote-sent { display: grid; gap: 6px; text-align: right; }
+.remote-item { padding: 8px 12px; border-radius: 12px; background: var(--card, rgba(255,255,255,.06)); font-size: .9rem; }
+.tv-srow { display: flex; gap: 14px; align-items: center; }
+.tv-srow .tv-sinput { flex: 1; }
+.tv-phone { white-space: nowrap; }
+.search .qr-search { flex-shrink: 0; width: 40px; border: 0; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.search .qr-search svg { width: 20px; height: 20px; fill: currentColor; }

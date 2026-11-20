@@ -1844,6 +1844,7 @@ async function renderWatch(id, startTime) {
   const artistOf = () => ({ id: (current && current.data.authorId) || (shown && shown.authorId) || (pv && pv.authorId), name: (current && current.data.author) || (shown && shown.author) || (pv && pv.author), avatar: (current && current.data.avatar) || (shown && shown.avatar) });
   let np = new NuvioPlayer(box, {
     onStall: t => recover(t), onError: t => recover(t),
+    onOther: () => openCastSheet({ id, title: (shown && shown.title) || (pv && pv.title) || document.title.replace(/ — Nuvio$/, ''), t: np && np.video ? np.video.currentTime : 0 }),
     copyIcon: music ? 'plus' : 'copy',
     onCopy: music ? () => toggleArtist(artistOf()) : () => {
       const u = `https://youtu.be/${id}`;
@@ -2014,7 +2015,10 @@ async function renderWatch(id, startTime) {
     np.enableCast(true);
     const opened = await np.cast().catch(() => false);
     note(opened ? 'اختار الشاشة' : 'جاهز — اكبس زر الشاشة بالمشغّل لتختار التلفزيون');
-  }, music ? [{ ico: 'star', label: 'ضيف المطرب للمفضّلين', fn: () => toggleArtist(artistOf()) }] : []));
+  }, [
+    { ico: 'tvout', label: 'شغّل على جهاز تاني', fn: () => np && np.opts.onOther && np.opts.onOther() },
+    ...(music ? [{ ico: 'star', label: 'ضيف المطرب للمفضّلين', fn: () => toggleArtist(artistOf()) }] : []),
+  ]));
   if (pv) document.title = `${pv.title} — Nuvio`;
 
   /* ---- مشغّل يوتيوب الاحتياطي (بس إذا مصادرنا ما زبطت) ----
@@ -2464,6 +2468,7 @@ function castSource(id) {
 /* ================= الزر العايم (صفحة الفيديو) =================
    مشاركة، إعادة تحميل، مؤقت النوم، تكرار، AirPlay، صورة داخل صورة */
 const FAB_ICO = {
+  tvout: '<svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.5 20h7M12 16.5V20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M10 8.2v5l4-2.5z"/></svg>',
   more: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
   share: '<svg viewBox="0 0 24 24"><path d="M12 15V3.5M7.5 8L12 3.5 16.5 8"/><path d="M5 12.5v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>',
   reload: '<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
@@ -2871,7 +2876,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120204925';
+const APP_VERSION = '20261120210057';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -3013,6 +3018,7 @@ async function routeInner() {
   if (path === '/settings') return renderSettings();
   if (path === '/login') return renderLogin(p.get('m') || 'login');
   if (path === '/admin') return renderAdmin();
+  if (path === '/pair') return renderPair(p.get('c') || '');
   if (path === '/lib') return renderLibView(p.get('t') || 'videos', p.get('k') || 'hist');
   if (path === '/plist' && p.get('id')) return renderUserPlaylist(p.get('id'));
   if (path === '/later') return renderLibrary('later');
@@ -3116,6 +3122,17 @@ discover();
 checkUpdate();
 setInterval(() => probeAll(), 10 * 60e3);
 // التشغيل: كل خطوة لحالها، إذا وحدة فشلت الباقي بيكمّل
+// الشاشات الكبيرة: زر QR جنب البحث — بتكتب أو بتحكي عالتلفون وبيبحث هون
+(function addRemoteSearchBtn() {
+  try {
+    if (matchMedia('(pointer: coarse)').matches || innerWidth < 900) return;
+    const form = document.getElementById('searchForm'); if (!form || form.querySelector('.qr-search')) return;
+    const b = el('button', 'qr-search'); b.type = 'button'; b.title = 'ابحث من تلفونك'; b.setAttribute('aria-label', 'ابحث من تلفونك');
+    b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"/></svg>';
+    b.onclick = () => openRemoteQr(q => { location.hash = '#/search?q=' + encodeURIComponent(q); });
+    form.insertBefore(b, form.querySelector('button[type=submit]'));
+  } catch { /* */ }
+})();
 for (const name of ['buildBottomNav', 'tvInit', 'accInit']) {
   try { const f = ext(name); if (f) { const r = f(); if (r && r.catch) r.catch(e => console.warn('[nuvio]', name, e)); } } catch (e) { console.warn('[nuvio]', name, e); }
 }

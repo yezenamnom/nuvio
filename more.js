@@ -349,6 +349,7 @@ function cardMenu(v) {
     ['saved', lib.has('favs', v.id) ? 'شيل من المحفوظة' : 'حفظ', () => note(lib.toggle('favs', v) ? 'انحفظ ✓' : 'انشال من المحفوظة')],
     ['list', 'ضيف لقائمة تشغيل', () => addToPlaylist(v)],
     ['share', 'مشاركة', () => shareVideo(v)],
+    ['laptop', 'شغّل على جهاز تاني', () => openCastSheet({ id: v.id, title: v.title, t: 0 })],
     ['ban', 'مش مهتم', () => { addNope('nope', v.id); hideCards(`a.card[data-vid="${CSS.escape(v.id)}"]`); note('تمام، ما رح نقترحلك ياه'); }],
     v.authorId && author ? ['userx', `ما تقترحلي «${author.slice(0, 30)}»`, () => {
       addNope('nopeCh', v.authorId); hideCards(`a.card[data-ch="${CSS.escape(v.authorId)}"]`);
@@ -1208,12 +1209,14 @@ function renderMe() {
   const acts = el('div', 'me-acts');
   if (me) {
     if (me.admin) { const adm = el('a', 'me-btn soon', 'لوحة التحكّم'); adm.href = '#/admin'; acts.append(adm); }
+    const link = el('button', 'me-btn', 'سجّل دخول جهاز تاني'); link.onclick = openScanner;
     const out = el('button', 'me-btn', 'تسجيل خروج'); out.onclick = confirmLogout;
-    acts.append(out);
+    acts.append(link, out);
   } else {
     const login = el('a', 'me-btn soon', 'تسجيل الدخول'); login.href = '#/login';
     const reg = el('a', 'me-btn', 'حساب جديد'); reg.href = '#/login?m=register';
-    acts.append(login, reg);
+    const qr = el('button', 'me-btn', 'دخول بـ QR'); qr.onclick = showQrLogin;
+    acts.append(login, reg, qr);
   }
   const body = liveSection(['hist', 'likes', 'favs', 'later', 'mhist', 'artists', 'subs', 'ytlists', 'playlists', 'searches', 'pos'], () => {
     const rows = el('div', 'lib-rows');

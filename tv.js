@@ -254,7 +254,11 @@ function renderTVSearch() {
     if (!q) { draw(store.get('searches', []), 'آخر بحوثك'); return; }
     t = setTimeout(function () { googleSuggest(q).then(function (l) { if (inp.value.trim() === q) draw(l); }).catch(function () {}); }, 200);
   });
-  box.append(inp, sug);
+  // ابحث من تلفونك: كود QR، بتكتب أو بتحكي عالتلفون وبيبحث هون
+  var phone = el('button', 'tv-sb tv-phone', '📱 ابحث من تلفونك');
+  phone.onclick = function () { openRemoteQr(function (q) { go(q); }); };
+  var top = el('div', 'tv-srow'); top.append(inp, phone);
+  box.append(top, sug);
   view.replaceChildren(box);
   draw(store.get('searches', []), store.get('searches', []).length ? 'آخر بحوثك' : '');
   setTimeout(function () { inp.focus(); }, 100);

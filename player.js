@@ -590,6 +590,7 @@
         ch: '<path class="s" d="M4 6h16M4 12h10M4 18h13"/>',
         ap: '<path class="s" d="M4 6.5v11l7-5.5zM13 6.5v11l7-5.5z"/>',
         sb: '<path class="s" d="M5 5l7 7-7 7M13 5l7 7-7 7"/>',
+        tv: '<rect class="s" x="3" y="4.5" width="18" height="12" rx="2"/><path class="s" d="M8.5 20h7M12 16.5V20"/>',
       };
       const icon = k => `<svg viewBox="0 0 24 24">${I[k]}</svg>`;
       const row = (k, label, value, onClick, toggle) => {
@@ -655,6 +656,8 @@
           sh.append(row('sl', 'مؤقّت إيقاف التشغيل', val, () => sub('مؤقّت إيقاف التشغيل',
             SLEEP_OPTS.map(([m, label]) => [label, m === 0 ? !st.at && !st.endOfVideo : m === -1 ? !!st.endOfVideo : false, () => setSleep(m, () => this)]))));
         }
+        // شغّل على جهاز تاني (كمبيوتر / تلفزيون فاتح Nuvio بنفس الحساب)
+        if (this.opts.onOther) sh.append(row('tv', 'شغّل على جهاز تاني', '', () => { this._closeSheet(); this.opts.onOther(); }));
         // تكرار
         sh.append(row('lp', 'تكرار الفيديو', '', r => { this.setLoop(!this.loop); r.querySelector('.np-sw').classList.toggle('on', this.loop); }, !!this.loop));
         // إعدادات عامة من app.js
