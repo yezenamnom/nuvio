@@ -2299,7 +2299,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120174256';
+const APP_VERSION = '20261120175157';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -2344,7 +2344,7 @@ function restorePage(key) {
   view.replaceChildren(...c.nodes);
   document.title = c.title;
   refreshLive(); // اشتركت/شفت/بحثت عن شي من وقتها؟ بيبيّن فوراً
-  tvAfterRestore();
+  if (ext('tvAfterRestore')) ext('tvAfterRestore')();
   refreshBars(view);
   markLoaded(view);
   window.scrollTo(0, c.y);
@@ -2384,7 +2384,20 @@ function restorePage(key) {
 
 /* ================= التنقّل ================= */
 let routeSeq = 0;
+// دوال من ملفات تانية: إذا ملف ما وصل (مثلاً لحظة تحديث)، منكمّل بلاه بدل ما يوقف كل الموقع
+const ext = name => (typeof window[name] === 'function' ? window[name] : null);
+const tvOn = () => { const f = ext('isTV'); return !!(f && f()); };
 async function route() {
+  try { await routeInner(); } catch (e) {
+    console.error('[nuvio] route', e);
+    const box = el('div', 'empty');
+    box.append(el('p', null, 'صار خطأ بهالصفحة 😕'));
+    const b = el('button', 'btn btn-main', 'حدّث الصفحة'); b.onclick = () => location.reload();
+    box.append(b);
+    view.replaceChildren(box);
+  }
+}
+async function routeInner() {
   const seq = ++routeSeq;
   const hash = location.hash.slice(1) || '/';
   savePage();
@@ -2400,7 +2413,7 @@ async function route() {
   if (path === '/watch' && miniOn) await closeMini();
   if (path === '/watch' && active && !miniOn && active.id !== p.get('v')) { const n = active.np(); if (n) n.destroy(); active = null; }
   // طلعت من صفحة الفيديو (كبست عالقناة، رجعت، فتحت صفحة تانية): الفيديو بيصغر للشريط تحت متل يوتيوب
-  if (path !== '/watch' && active && !miniOn && active.np() && active.box.isConnected && !isTV()) minimize(false);
+  if (path !== '/watch' && active && !miniOn && active.np() && active.box.isConnected && !tvOn()) minimize(false);
   // إذا طلعت من الفيديو وهو مش مصغّر (ما اشتغل أصلاً)، منوقّفو
   if (path !== '/watch' && !miniOn) { await destroyPlayer(); if (active) { const n = active.np(); if (n) { n.pauseAll(); n.destroy(); } active = null; } }
   if (seq !== routeSeq) return; // صار في تنقّل أحدث وإحنا ناطرين
@@ -2434,7 +2447,7 @@ async function route() {
   if (path === '/list' && p.get('id')) return renderList(p.get('id'));
   $('#q').value = '';
   setMode('video');
-  if (isTV()) return renderTVHome();
+  if (tvOn()) return renderTVHome();
   return renderHome();
 }
 window.addEventListener('hashchange', route);
@@ -2523,7 +2536,8 @@ probeAll();
 discover();
 checkUpdate();
 setInterval(() => probeAll(), 10 * 60e3);
-buildBottomNav();
-tvInit();
-accInit();
+// التشغيل: كل خطوة لحالها، إذا وحدة فشلت الباقي بيكمّل
+for (const name of ['buildBottomNav', 'tvInit', 'accInit']) {
+  try { const f = ext(name); if (f) { const r = f(); if (r && r.catch) r.catch(e => console.warn('[nuvio]', name, e)); } } catch (e) { console.warn('[nuvio]', name, e); }
+}
 route();

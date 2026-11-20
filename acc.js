@@ -235,7 +235,18 @@ async function renderAdmin() {
       tbl.append(r);
     });
     us.append(tbl);
-    body.replaceChildren(cards, charts, onl, us);
+    const er = el('div', 'adm-panel');
+    er.append(el('h2', null, `آخر الأخطاء عند المستخدمين (${nf.format((s.errors || []).length)})`));
+    if (!(s.errors || []).length) er.append(el('div', 'muted', 'ما في أخطاء 👌'));
+    (s.errors || []).forEach(x => {
+      const r = el('div', 'adm-row');
+      const tx = el('div', 'adm-tx');
+      const m = el('b', null, x.m); m.dir = 'ltr';
+      tx.append(m, el('span', 'muted', `${agoAr(x.at)} · ${x.dev}${x.standalone ? ' (أيقونة الشاشة)' : ''} · ${pageAr(x.p || '/')} · ${x.s}:${x.l} · نسخة ${x.v || '?'}`));
+      r.append(el('span', 'adm-av guest', '!'), tx);
+      er.append(r);
+    });
+    body.replaceChildren(cards, charts, onl, us, er);
   };
   await draw();
   admTimer = setInterval(() => { if (!document.hidden) draw(); }, 5000);
