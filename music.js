@@ -62,10 +62,10 @@ function setMode(m, animate) {
     name.textContent = full;
     name.classList.remove('shrink'); void name.offsetWidth;
     name.classList.add('intro');
-    document.querySelector('.logo')?.classList.add('pulse');
+    { const lg = document.querySelector('.logo'); if (lg) lg.classList.add('pulse'); }
     brandTimer = setTimeout(() => {
       name.classList.add('shrink');
-      brandTimer = setTimeout(() => { name.textContent = short; name.classList.remove('intro', 'shrink'); document.querySelector('.logo')?.classList.remove('pulse'); }, 320);
+      brandTimer = setTimeout(() => { name.textContent = short; name.classList.remove('intro', 'shrink'); { const lg = document.querySelector('.logo'); if (lg) lg.classList.remove('pulse'); } }, 320);
     }, 1700);
   } else name.textContent = short;
 }

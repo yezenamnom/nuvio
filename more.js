@@ -490,6 +490,13 @@ function drawerSettings(d, sep, closeDrawerFn) {
     prefs.set('saver', nx); sval.textContent = SAVER[nx];
     if (typeof player !== 'undefined' && player) try { player.configure(saverCfg()); } catch { /* */ }
   };
+  const TVM = { auto: 'تلقائي', on: 'دايماً', off: 'أبداً' };
+  const tvBtn = el('button', 'drawer-item');
+  const tvic = el('span', 'drawer-ico'); tvic.innerHTML = window.ico ? window.ico('subs') : '';
+  const tvval = el('span', 'drawer-count', TVM[prefs.get('tvMode') || 'auto']);
+  const tvtx = el('span', 'drawer-tx'); tvtx.append(el('span', null, 'وضع التلفزيون'), el('small', 'muted', 'واجهة كبيرة وتنقّل بالريموت'));
+  tvBtn.append(tvic, tvtx, tvval);
+  tvBtn.onclick = () => { const order = ['auto', 'on', 'off']; const nx = order[(order.indexOf(prefs.get('tvMode') || 'auto') + 1) % 3]; tvval.textContent = TVM[nx]; setTVMode(nx); };
   const hidden = store.get('nope', []).length + store.get('nopeCh', []).length;
   // المظهر: 3 ثيمات
   const themeRow = el('div', 'drawer-item theme-row');
@@ -519,6 +526,7 @@ function drawerSettings(d, sep, closeDrawerFn) {
     sw('skip', 'تخطّي الدعايات جوّا الفيديو', () => prefs.get('sb'), v => prefs.set('sb', v), 'بخدمة SponsorBlock المجانية'),
     sw('eye', 'خبّي اللي شفتو من المقترحات', () => prefs.get('hideWatched'), v => prefs.set('hideWatched', v)),
     saverBtn,
+    tvBtn,
     hidden ? act('ban', `رجّع اللي خبّيتو (${nf.format(hidden)})`, () => { store.set('nope', []); store.set('nopeCh', []); note('رجعوا كلهن للمقترحات'); }) : null,
     sep('بياناتك'),
     act('download', 'صدّر نسخة احتياطية', exportBackup),

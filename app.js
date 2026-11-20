@@ -241,7 +241,7 @@ const Invidious = {
   item(base, v) {
     return {
       id: v.videoId, title: v.title, author: v.author, authorId: v.authorId,
-      duration: v.lengthSeconds, views: v.viewCount ?? null, viewsText: v.viewCountText,
+      duration: v.lengthSeconds, views: v.viewCount != null ? v.viewCount : null, viewsText: v.viewCountText,
       published: v.publishedText || '', ts: v.published || 0, thumb: Invidious.pickThumb(base, v.videoThumbnails, v.videoId),
       live: !!v.liveNow,
     };
@@ -313,11 +313,11 @@ const Invidious = {
 };
 
 const Piped = {
-  idOf: url => (url || '').split('v=')[1]?.split('&')[0] || '',
+  idOf: url => ((url || '').split('v=')[1] || '').split('&')[0] || '',
   item(v) {
     const id = Piped.idOf(v.url);
     return {
-      id, title: v.title, author: v.uploaderName, authorId: (v.uploaderUrl || '').split('/channel/')[1] || '', duration: v.duration, views: v.views ?? null,
+      id, title: v.title, author: v.uploaderName, authorId: (v.uploaderUrl || '').split('/channel/')[1] || '', duration: v.duration, views: v.views != null ? v.views : null,
       published: v.uploadedDate || '', thumb: v.thumbnail || ytThumb(id), live: v.duration === -1,
     };
   },
@@ -360,7 +360,7 @@ const Piped = {
     const txt = new DOMParser().parseFromString((d.description || '').replace(/<br\s*\/?>/gi, '\n'), 'text/html').body.textContent;
     return {
       id, title: d.title, author: d.uploader, authorId: (d.uploaderUrl || '').split('/channel/')[1] || '',
-      avatar: d.uploaderAvatar || '', subs: d.uploaderSubscriberCount > 0 ? `${nf.format(d.uploaderSubscriberCount)} مشترك` : '', views: d.views, published: d.uploadDate?.slice(0, 10) || '',
+      avatar: d.uploaderAvatar || '', subs: d.uploaderSubscriberCount > 0 ? `${nf.format(d.uploaderSubscriberCount)} مشترك` : '', views: d.views, published: (d.uploadDate || '').slice(0, 10) || '',
       likes: d.likes, description: txt || '', audio: aud ? aud.url : '',
       related: (d.relatedStreams || []).filter(v => v.type === 'stream').map(Piped.item),
       sources,
@@ -1441,7 +1441,7 @@ async function resolveUrl(u, tries = 8) {
     const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 5000);
     try {
       const r = await fetch(u, { signal: ctl.signal, cache: 'no-store' });
-      if (r.ok) { r.body?.cancel?.(); return r.url || u; }
+      if (r.ok) { try { if (r.body && r.body.cancel) r.body.cancel(); } catch { /* */ } return r.url || u; }
       last = new Error('HTTP ' + r.status);
       if (r.status >= 400 && r.status < 500) break;
     } catch (e) { last = e; } finally { clearTimeout(t); }
@@ -2299,7 +2299,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120172347';
+const APP_VERSION = '20261120174256';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -2344,6 +2344,7 @@ function restorePage(key) {
   view.replaceChildren(...c.nodes);
   document.title = c.title;
   refreshLive(); // اشتركت/شفت/بحثت عن شي من وقتها؟ بيبيّن فوراً
+  tvAfterRestore();
   refreshBars(view);
   markLoaded(view);
   window.scrollTo(0, c.y);
@@ -2399,7 +2400,7 @@ async function route() {
   if (path === '/watch' && miniOn) await closeMini();
   if (path === '/watch' && active && !miniOn && active.id !== p.get('v')) { const n = active.np(); if (n) n.destroy(); active = null; }
   // طلعت من صفحة الفيديو (كبست عالقناة، رجعت، فتحت صفحة تانية): الفيديو بيصغر للشريط تحت متل يوتيوب
-  if (path !== '/watch' && active && !miniOn && active.np() && active.box.isConnected) minimize(false);
+  if (path !== '/watch' && active && !miniOn && active.np() && active.box.isConnected && !isTV()) minimize(false);
   // إذا طلعت من الفيديو وهو مش مصغّر (ما اشتغل أصلاً)، منوقّفو
   if (path !== '/watch' && !miniOn) { await destroyPlayer(); if (active) { const n = active.np(); if (n) { n.pauseAll(); n.destroy(); } active = null; } }
   if (seq !== routeSeq) return; // صار في تنقّل أحدث وإحنا ناطرين
@@ -2415,6 +2416,7 @@ async function route() {
   if (path === '/channel' && p.get('id')) return renderChannel(p.get('id'), p.get('tab') || 'home', p.get('sort') || '');
   if (path === '/pl' && p.get('id')) return renderPlaylist(p.get('id'));
   if (path === '/shorts') return renderShorts(p.get('v'), p.get('ch'));
+  if (path === '/tvsearch') return renderTVSearch();
   if (path === '/me') return renderMe();
   if (path === '/settings') return renderSettings();
   if (path === '/login') return renderLogin(p.get('m') || 'login');
@@ -2432,6 +2434,7 @@ async function route() {
   if (path === '/list' && p.get('id')) return renderList(p.get('id'));
   $('#q').value = '';
   setMode('video');
+  if (isTV()) return renderTVHome();
   return renderHome();
 }
 window.addEventListener('hashchange', route);
@@ -2521,5 +2524,6 @@ discover();
 checkUpdate();
 setInterval(() => probeAll(), 10 * 60e3);
 buildBottomNav();
+tvInit();
 accInit();
 route();

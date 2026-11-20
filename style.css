@@ -186,7 +186,7 @@ main { padding: 16px; max-width: 1500px; margin: 0 auto; }
 }
 .player-box video, .player-box iframe { width: 100%; height: 100%; display: block; border: 0; background: #000; }
 .player-msg {
-  position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center; text-align: center;
   color: var(--muted); padding: 20px; pointer-events: none;
 }
 .v-title { font-size: 1.25rem; margin: 14px 0 6px; }
@@ -274,7 +274,7 @@ main { padding: 16px; max-width: 1500px; margin: 0 auto; }
 .np { position: relative; overflow: hidden; outline: none; user-select: none; -webkit-user-select: none; touch-action: manipulation; font-family: "Cairo", "Segoe UI", system-ui, sans-serif; }
 .np video { width: 100%; height: 100%; display: block; background: #000; object-fit: contain; }
 .np.fs { border-radius: 0 !important; }
-.np-ui { position: absolute; inset: 0; cursor: default; }
+.np-ui { position: absolute; top: 0; right: 0; bottom: 0; left: 0; cursor: default; }
 .np:not(.ui) .np-ui { cursor: none; }
 .np-bottom {
   position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 12px 6px;
@@ -641,7 +641,7 @@ html { overscroll-behavior-y: contain; }
 .card-x.static { position: static; opacity: 1; flex-shrink: 0; }
 
 /* ---------- القائمة الجانبية ☰ ---------- */
-.drawer-ov { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0); pointer-events: none; transition: background .25s; }
+.drawer-ov { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 60; background: rgba(0,0,0,0); pointer-events: none; transition: background .25s; }
 .drawer-ov.open { background: rgba(0,0,0,.5); pointer-events: auto; }
 .drawer {
   position: absolute; top: 0; bottom: 0; right: 0; width: min(300px, 84vw); background: var(--bg2); border-inline-start: 1px solid var(--line);
@@ -659,7 +659,7 @@ html { overscroll-behavior-y: contain; }
 
 /* ---------- اختيار Nuvio / Nuvio Music (ضغطة مطوّلة على اللوغو) ---------- */
 .brand { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
-.mode-ov { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,0); display: flex; align-items: flex-start; justify-content: center; padding-top: 70px; pointer-events: none; transition: background .2s; }
+.mode-ov { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 70; background: rgba(0,0,0,0); display: flex; align-items: flex-start; justify-content: center; padding-top: 70px; pointer-events: none; transition: background .2s; }
 .mode-ov.open { background: rgba(0,0,0,.55); pointer-events: auto; }
 .mode-box { width: min(360px, 92vw); background: var(--bg2); border: 1px solid var(--line); border-radius: 18px; padding: 14px; transform: translateY(-12px) scale(.97); opacity: 0; transition: transform .22s, opacity .22s; }
 .mode-ov.open .mode-box { transform: none; opacity: 1; }
@@ -683,7 +683,7 @@ body.music-mode .logo circle { fill: #f43f5e; }
 @media (max-width: 600px) { .brand-name { display: inline; font-size: 1.05rem; } .m-tabs { top: 50px; } }
 
 /* ---------- إعدادات المشغّل: بتطلع من تحت لفوق ---------- */
-.np-sheet-ov { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,0); transition: background .25s; display: flex; align-items: flex-end; justify-content: center; }
+.np-sheet-ov { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 80; background: rgba(0,0,0,0); transition: background .25s; display: flex; align-items: flex-end; justify-content: center; }
 .np-sheet-ov.in-fs { position: absolute; }
 .np-sheet-ov.open { background: rgba(0,0,0,.45); }
 .np-sheet {
@@ -787,7 +787,7 @@ body.music-mode .sec-ico { color: #fb7185; }
 
 /* ===== تحميل الصور (قاعدة عامة): هيكل نابض لحد ما تجهز الصورة، وبعدين بتبيّن بنعومة ===== */
 .thumb::before {
-  content: ''; position: absolute; inset: 0; background: var(--card);
+  content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: var(--card);
   animation: sk-pulse 1.2s ease-in-out infinite;
 }
 .thumb:has(img.ok)::before, .thumb:has(img.bad)::before { animation: none; }
@@ -855,7 +855,7 @@ img.author-avatar.ok:not(.now), img.ch-banner.ok:not(.now) { animation: img-in .
 
 /* ===== «الفيديو الجاي» ===== */
 .np-next {
-  position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; justify-content: center; gap: 10px;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 6; display: flex; flex-direction: column; justify-content: center; gap: 10px;
   padding: 16px 20px; background: rgba(5,8,18,.82); color: #fff; animation: np-in .25s ease;
 }
 @keyframes np-in { from { opacity: 0; } to { opacity: 1; } }
@@ -890,7 +890,7 @@ img.author-avatar.ok:not(.now), img.ch-banner.ok:not(.now) { animation: img-in .
 body.shorts-mode { overflow: hidden; }
 body.shorts-mode .topbar, body.shorts-mode .fab, body.shorts-mode .mini, body.shorts-mode #mini { display: none !important; }
 .shorts {
-  position: fixed; inset: 0; z-index: 60; background: #000; overflow-y: auto; scroll-snap-type: y mandatory;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 60; background: #000; overflow-y: auto; scroll-snap-type: y mandatory;
   overscroll-behavior: contain; scrollbar-width: none; outline: none;
 }
 .shorts::-webkit-scrollbar { display: none; }
@@ -898,7 +898,7 @@ body.shorts-mode .topbar, body.shorts-mode .fab, body.shorts-mode .mini, body.sh
   position: relative; height: 100vh; height: 100dvh; scroll-snap-align: start; scroll-snap-stop: always;
   display: flex; align-items: center; justify-content: center; overflow: hidden; max-width: 560px; margin: 0 auto;
 }
-.short-poster, .short-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.short-poster, .short-video { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 .short-poster { object-fit: cover; }
 .short-info {
   position: absolute; left: 70px; right: 14px; bottom: 22px; z-index: 2; color: #fff; text-shadow: 0 1px 6px rgba(0,0,0,.8);
@@ -1288,3 +1288,96 @@ a.me-btn { display: grid; place-items: center; text-decoration: none; }
 .adm-dot.on { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,.2); }
 .adm-umeta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: .78rem; color: var(--muted); text-align: left; }
 @media (max-width: 600px) { .adm-user { flex-wrap: wrap; } .adm-umeta { width: 100%; align-items: flex-start; padding-inline-start: 23px; } }
+
+/* ===================== وضع التلفزيون ===================== */
+.tv-rail { display: none; }
+html.tv { font-size: 22px; }
+@media (max-width: 1300px) { html.tv { font-size: 18px; } }
+html.tv body { overflow-x: hidden; }
+html.tv .topbar, html.tv .bnav, html.tv .fab-wrap, html.tv .mini, html.tv .card-menu, html.tv .card-x, html.tv .hs-btn { display: none !important; }
+html.tv main { max-width: none; padding: 28px 150px 60px 48px; }
+html.tv body.watching main { padding: 0; }
+/* التركيز: إطار أبيض واضح من بعيد */
+html.tv a:focus, html.tv button:focus, html.tv input:focus { outline: none; }
+html.tv a.card { border-radius: 16px; transition: transform .18s ease, box-shadow .18s ease; }
+html.tv a.card:focus { transform: scale(1.07); box-shadow: 0 0 0 5px #fff, 0 18px 46px rgba(0,0,0,.6); z-index: 3; position: relative; }
+html.tv a.card:focus .title { color: #fff; }
+html.tv button:focus, html.tv .f-chip:focus, html.tv .sec-more:focus, html.tv .lib-row:focus, html.tv .drawer-item:focus, html.tv .me-btn:focus, html.tv .sub-chip:focus, html.tv .ch-card:focus { box-shadow: 0 0 0 4px #fff; border-radius: 14px; }
+html.tv .card:hover { transform: none; }
+html.tv .grid { grid-template-columns: repeat(4, 1fr); gap: 34px 24px; }
+html.tv .shelf { grid-auto-columns: 22vw; padding: 14px 6px 18px; scroll-snap-type: none; }
+
+/* الشريط الجانبي (يمين) */
+html.tv .tv-rail {
+  display: flex; flex-direction: column; gap: 8px; position: fixed; top: 0; bottom: 0; right: 0; z-index: 30;
+  width: 110px; padding: 30px 16px; background: linear-gradient(270deg, rgba(5,8,18,.96), rgba(5,8,18,.85));
+  border-left: 1px solid rgba(255,255,255,.06); transition: width .22s ease; overflow: hidden;
+}
+html.tv .tv-rail:focus-within { width: 300px; box-shadow: -30px 0 60px rgba(0,0,0,.5); }
+html.tv body.watching .tv-rail { display: none; }
+.tv-logo { width: 64px; height: 64px; margin: 0 7px 22px; border-radius: 20px; display: grid; place-items: center; font-weight: 900; font-size: 1.6rem; color: #fff; background: var(--grad-d); flex-shrink: 0; }
+.tv-ri { display: flex; align-items: center; gap: 18px; height: 64px; padding: 0 20px; border-radius: 18px; color: rgba(255,255,255,.7); white-space: nowrap; }
+.tv-ric { width: 36px; height: 36px; flex-shrink: 0; display: grid; place-items: center; }
+.tv-ric svg, .tv-ric .ic { width: 32px; height: 32px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tv-rl { font-weight: 700; font-size: 1.05rem; opacity: 0; transition: opacity .2s; }
+html.tv .tv-rail:focus-within .tv-rl { opacity: 1; }
+.tv-ri.on { color: #fff; background: rgba(255,255,255,.08); }
+html.tv .tv-ri:focus { color: #111; background: #fff; box-shadow: none; }
+
+/* الرئيسية: صورة كبيرة فوق + رفوف */
+.tv-hero { position: relative; height: 46vh; margin: -28px -150px 10px -48px; overflow: hidden; }
+.tv-hero img { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .5s; }
+.tv-hero img.ok { opacity: 1; }
+.tv-hero::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: linear-gradient(0deg, var(--bg) 2%, rgba(11,18,32,.55) 45%, rgba(11,18,32,.15)), linear-gradient(270deg, rgba(11,18,32,.9), transparent 60%); }
+.tv-htx { position: absolute; z-index: 1; right: 150px; bottom: 40px; max-width: 55%; color: #fff; }
+.tv-ht { font-size: 2.1rem; font-weight: 900; line-height: 1.25; text-shadow: 0 2px 18px rgba(0,0,0,.6); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tv-hm { margin-top: 10px; font-size: 1.05rem; color: rgba(255,255,255,.85); }
+.tv-row { margin-bottom: 22px; }
+.tv-row h2 { margin: 0 0 6px; font-size: 1.3rem; }
+.tv-strip { display: flex; gap: 24px; overflow-x: auto; overflow-y: visible; padding: 16px 8px 22px; scrollbar-width: none; }
+.tv-strip::-webkit-scrollbar { display: none; }
+.tv-strip .card { flex: 0 0 22vw; width: 22vw; }
+
+/* البحث */
+.tv-search { max-width: 1100px; }
+.tv-sinput { width: 100%; padding: 22px 28px; border-radius: 22px; border: 2px solid var(--line); background: var(--bg2); color: var(--text); font: inherit; font-size: 1.5rem; outline: none; }
+.tv-sinput:focus { border-color: #fff; box-shadow: 0 0 0 4px rgba(255,255,255,.25); }
+.tv-sug h2 { margin: 26px 0 12px; font-size: 1.2rem; color: var(--muted); }
+.tv-sugs { display: flex; flex-wrap: wrap; gap: 12px; }
+.tv-sb { border: 0; border-radius: 999px; padding: 14px 26px; background: var(--card); color: var(--text); font: inherit; font-size: 1.1rem; cursor: pointer; }
+html.tv .tv-sb:focus { background: #fff; color: #111; }
+
+/* المشغّل: شاشة كاملة، والمشابه بيطلع من تحت بالسهم ↓ */
+html.tv body.watching .watch { display: block; }
+html.tv body.watching .player-box {
+  position: fixed !important; top: 0 !important; right: 0; bottom: 0; left: 0; width: 100vw !important; height: 100vh !important;
+  z-index: 40; border-radius: 0 !important; margin: 0 !important; max-width: none !important; transform: none !important;
+}
+html.tv body.watching .player-box video { width: 100%; height: 100%; }
+html.tv body.watching .watch .info, html.tv body.watching .fab-wrap, html.tv body.watching .np-copy { display: none !important; }
+html.tv body.watching .related {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; padding: 30px 60px 40px; max-height: none;
+  background: linear-gradient(transparent, rgba(0,0,0,.92) 30%); transform: translateY(105%); transition: transform .3s ease;
+}
+html.tv body.watching.tv-more .related { transform: none; }
+html.tv body.watching .related .section-title { color: #fff; }
+html.tv body.watching .related-list { display: flex; flex-direction: row; gap: 22px; overflow-x: auto; padding: 14px 6px 10px; scrollbar-width: none; }
+html.tv body.watching .related-list > .card, html.tv body.watching .related-list > .card.row { flex: 0 0 20vw; width: 20vw; display: block; content-visibility: visible; }
+html.tv body.watching .related-list .card.row .thumb { width: 100%; }
+html.tv body.watching .np-bottom { padding: 0 60px 40px; }
+html.tv .np-row { height: 64px; }
+html.tv .np-btn svg { width: 34px; height: 34px; }
+html.tv .np-time { font-size: 1.1rem; }
+html.tv .np-bar { height: 26px; }
+html.tv .np-bar::before, html.tv .np-buf, html.tv .np-fill { height: 7px; }
+html.tv .np-big { width: 120px; height: 120px; }
+html.tv .np-speed { font-size: 1.2rem; }
+/* ماوس ريموت LG: لمّا يتحرّك */
+html.tv.tv-pointer a.card:hover { transform: scale(1.04); }
+
+/* التلفزيون: علامة التركيز (حتى لو المتصفح ما رسم :focus) */
+html.tv a.card.tv-f { transform: scale(1.07); box-shadow: 0 0 0 5px #fff, 0 18px 46px rgba(0,0,0,.6); z-index: 3; position: relative; }
+html.tv .tv-ri.tv-f { color: #111; background: #fff; }
+html.tv button.tv-f, html.tv .f-chip.tv-f, html.tv .lib-row.tv-f, html.tv .drawer-item.tv-f, html.tv .me-btn.tv-f, html.tv .sub-chip.tv-f, html.tv .ch-card.tv-f, html.tv .sec-more.tv-f { box-shadow: 0 0 0 4px #fff; border-radius: 14px; }
+html.tv .tv-sb.tv-f { background: #fff; color: #111; }
+html.tv .tv-sinput.tv-f { border-color: #fff; }
