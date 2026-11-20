@@ -316,8 +316,63 @@ div.ch-avatar.sk { border-radius: 50%; }
   background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; padding: 6px 0;
   box-shadow: 0 12px 30px rgba(0,0,0,.45); max-height: 60vh; overflow: auto;
 }
-.sug-item {
-  display: block; width: 100%; text-align: start; border: 0; background: none; color: var(--text);
-  padding: 8px 18px; font: inherit; font-size: .95rem; cursor: pointer;
+.sug-row {
+  display: flex; align-items: center; gap: 14px; padding: 7px 16px; cursor: pointer; direction: rtl;
 }
-.sug-item:hover, .sug-item.on { background: var(--card); }
+.sug-row:hover, .sug-row.on { background: var(--card); }
+.sug-ico svg, .sug-fill svg { width: 20px; height: 20px; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; display: block; }
+.sug-row.hist .sug-txt { color: #c4b5fd; }
+.sug-txt { flex: 1; min-width: 0; text-align: right; font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; unicode-bidi: plaintext; }
+.sug-txt b { font-weight: 800; }
+.sug-x, .sug-fill { border: 0; background: none; color: var(--muted); cursor: pointer; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; font-size: 13px; }
+.sug-x:hover, .sug-fill:hover { background: var(--line); color: var(--text); }
+.sug-fill svg { transform: scaleX(-1); }
+
+/* ---------- مكتبتي: أزرار فوق ---------- */
+.top-nav { display: flex; gap: 6px; flex-shrink: 0; }
+.top-nav .icon-btn { display: grid; place-items: center; }
+.top-nav .icon-btn.on { border-color: var(--accent); }
+.top-nav .icon-btn.on svg { stroke: var(--accent); }
+
+/* آخر البحوث + آخر اللي شفتو */
+.chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 14px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip-q { flex-shrink: 0; background: var(--bg2); border: 1px solid var(--line); border-radius: 999px; padding: 5px 14px; font-size: .88rem; white-space: nowrap; }
+.chip-q:hover { border-color: var(--accent); }
+.sec-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0 12px; }
+.sec-head .section-title { margin: 0; }
+.sec-more { color: var(--accent); font-size: .9rem; font-weight: 700; }
+.shelf { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 260px); gap: 14px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 22px; scroll-snap-type: x proximity; scrollbar-width: thin; }
+.shelf .card { scroll-snap-align: start; }
+.card-x { position: absolute; top: 6px; left: 6px; width: 28px; height: 28px; border-radius: 50%; border: 0; background: rgba(0,0,0,.7); color: #fff; cursor: pointer; font-size: 13px; opacity: 0; transition: opacity .15s; }
+.card:hover .card-x { opacity: 1; }
+@media (hover: none) { .card-x { opacity: 1; } }
+
+/* أزرار إعجاب + حفظ */
+.v-row { justify-content: space-between; }
+.v-row .v-actions { margin-top: 0; }
+.author-name { display: flex; flex-direction: column; line-height: 1.3; }
+.pill { display: inline-flex; align-items: center; gap: 6px; border: 0; background: var(--bg2); color: var(--text); border-radius: 999px; padding: 7px 14px; font: inherit; font-size: .9rem; font-weight: 600; cursor: pointer; }
+.pill:hover { background: var(--card); }
+.pill svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+.pill.on { background: linear-gradient(90deg, #8b5cf6, #ec4899); color: #fff; }
+.pill.on svg { fill: currentColor; stroke: none; }
+
+/* الوصف متل يوتيوب */
+.desc.yt { max-height: none; cursor: pointer; white-space: normal; }
+.desc.yt:hover { background: var(--card); }
+.desc-meta { font-weight: 700; margin-bottom: 4px; }
+.desc-body { white-space: pre-wrap; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.desc.yt.open { cursor: default; }
+.desc.yt.open .desc-body { display: block; -webkit-line-clamp: unset; }
+.desc-more { border: 0; background: none; color: var(--text); font: inherit; font-weight: 700; padding: 4px 0 0; cursor: pointer; }
+.lnk { color: #93c5fd; }
+.lnk:hover { text-decoration: underline; }
+
+@media (max-width: 600px) {
+  .top-nav { gap: 4px; }
+  .top-nav .icon-btn { width: 34px; height: 34px; }
+  .top-nav .icon-btn svg { width: 18px; height: 18px; }
+  .shelf { grid-auto-columns: 72%; }
+  .v-row { flex-direction: column; align-items: stretch; }
+}

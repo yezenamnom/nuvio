@@ -435,33 +435,142 @@ function channelCard(ch) {
   return a;
 }
 
+/* ================= مكتبتك (محفوظة على جهازك بس) ================= */
+const slim = v => ({ id: v.id, title: v.title, thumb: v.thumb || ytThumb(v.id), author: v.author, authorId: v.authorId, duration: v.duration, views: v.views, published: v.published });
+const lib = {
+  list: k => store.get(k, []),
+  has: (k, id) => store.get(k, []).some(v => v.id === id),
+  add(k, v, max = 500) {
+    const arr = store.get(k, []).filter(x => x.id !== v.id);
+    arr.unshift({ ...slim(v), at: Date.now() });
+    store.set(k, arr.slice(0, max));
+  },
+  remove(k, id) { store.set(k, store.get(k, []).filter(x => x.id !== id)); },
+  toggle(k, v) { if (lib.has(k, v.id)) { lib.remove(k, v.id); return false; } lib.add(k, v); return true; },
+  clear: k => store.set(k, []),
+};
+function addSearch(q) {
+  if (parseYT(q)) return;
+  const arr = store.get('searches', []).filter(x => x.toLowerCase() !== q.toLowerCase());
+  arr.unshift(q); store.set('searches', arr.slice(0, 40));
+}
+
+/* ---- خلاصة الرئيسية: أول شي حسب ذوقك (آخر تشغيلات، آخر بحوث، إعجابات، مفضلة)،
+        وإذا خلصو منكمّل باقتراحات عامة ومشابهاتها — تقريباً بلا نهاية ---- */
+function makeHomeFeed(seen) {
+  const watched = new Set(lib.list('hist').map(v => v.id));
+  const hist = lib.list('hist').slice(0, 12), likes = lib.list('likes').slice(0, 6), favs = lib.list('favs').slice(0, 6);
+  const searches = store.get('searches', []).slice(0, 6);
+  const seeds = [];
+  const pushSeed = v => { if (v && !seeds.some(s => s.id === v.id)) seeds.push(v); };
+  for (let i = 0; i < 12; i++) { pushSeed(hist[i]); pushSeed(likes[i]); pushSeed(favs[i]); }
+  // مهام بالتناوب: مشابهات فيديو شفتو، بعدين نتائج بحث عملتو، وهيك
+  const tasks = [];
+  for (let i = 0; i < Math.max(seeds.length, searches.length); i++) {
+    if (seeds[i]) tasks.push(() => getVideo(seeds[i].id).then(r => r.res.related));
+    if (searches[i]) tasks.push(() => cached('s:' + searches[i], 10 * 60e3, () => withFallback(x => apiFor(x).search(x.url, searches[i], 1))).then(r => r.res.items));
+  }
+  tasks.push(() => withFallback(x => apiFor(x).trending(x.url)).then(r => r.res));
+  const expand = []; // فيديوهات منفتح مشابهاتها لاحقاً (لا نهائي)
+  const fresh = list => {
+    const out = [];
+    for (const v of list || []) {
+      if (!v.id || seen.has(v.id)) continue;
+      seen.add(v.id); expand.push(v.id);
+      if (!watched.has(v.id)) out.push(v);
+    }
+    // خلط خفيف لحتى ما تطلع كلها من نفس المصدر ورا بعض
+    for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
+    return out;
+  };
+  return async () => {
+    while (tasks.length) {
+      try { const got = fresh(await tasks.shift()()); if (got.length) return got; } catch { /* اللي بعدو */ }
+    }
+    while (expand.length) {
+      const id = expand.splice(Math.floor(Math.random() * Math.min(expand.length, 30)), 1)[0];
+      try { const { res } = await getVideo(id); const got = fresh(res.related); if (got.length) return got; } catch { /* اللي بعدو */ }
+    }
+    return [];
+  };
+}
+
 /* ================= الصفحات ================= */
 async function renderHome() {
   document.title = 'Nuvio — فيديو بلا إعلانات';
+  view.replaceChildren();
+  // آخر البحوث
+  const searches = store.get('searches', []).slice(0, 12);
+  if (searches.length) {
+    const row = el('div', 'chips');
+    searches.forEach(s => { const a = el('a', 'chip-q', s); a.href = `#/search?q=${encodeURIComponent(s)}`; a.dir = 'auto'; row.append(a); });
+    view.append(row);
+  }
+  // آخر التشغيلات (كمّل المشاهدة)
+  const hist = lib.list('hist').slice(0, 16);
+  if (hist.length) {
+    const head = el('div', 'sec-head');
+    const more = el('a', 'sec-more', 'الكل'); more.href = '#/history';
+    head.append(el('h2', 'section-title', 'آخر اللي شفتو'), more);
+    const shelf = el('div', 'shelf');
+    hist.forEach(v => shelf.append(card(v)));
+    view.append(head, shelf);
+  }
+  view.append(el('h2', 'section-title', hist.length || searches.length ? 'مقترحات إلك' : 'مقترحات'));
   const g = el('div', 'grid'); g.append(skCards(12));
-  view.replaceChildren(el('h2', 'section-title', 'مقترحات لك'), g);
+  view.append(g);
+  const seen = new Set();
+  const feed = makeHomeFeed(seen);
   try {
-    const { res } = await withFallback(inst => apiFor(inst).trending(inst.url));
+    // أول دفعة كبيرة لحتى تتعبّى الشاشة فوراً
+    let first = [];
+    for (let i = 0; i < 3 && first.length < 24; i++) first = first.concat(await feed());
     if (!g.isConnected) return;
     g.replaceChildren();
-    const seen = new Set();
-    res.forEach(v => { seen.add(v.id); g.append(card(v)); });
-    const feed = relatedFeed(res.map(v => v.id), seen);
+    if (!first.length) throw new Error('فاضي');
+    first.forEach(v => g.append(card(v)));
     infinite(g, async () => { const more = await feed(); more.forEach(v => g.append(card(v))); return more.length > 0; });
   } catch {
-    view.replaceChildren();
+    if (!g.isConnected) return;
     const d = el('div', 'empty');
     d.append(el('p', null, 'ابحث عن شي بدّك ياه، أو الصق رابط يوتيوب فوق:'));
     const row = el('div', 'v-actions'); row.style.justifyContent = 'center';
     for (const s of ['أخبار', 'وثائقي', 'موسيقى عربية', 'طبخ', 'lofi', 'برمجة']) {
       const b = el('a', 'btn', s); b.href = `#/search?q=${encodeURIComponent(s)}`; row.append(b);
     }
-    d.append(row); view.append(d);
+    d.append(row); g.replaceWith(d);
   }
+}
+
+/* سجل المشاهدة / الإعجابات / المفضلة */
+function renderLibrary(kind) {
+  const titles = { hist: 'سجل المشاهدة', likes: 'الإعجابات', favs: 'القائمة المفضلة' };
+  const empties = { hist: 'لسا ما شفت شي.', likes: 'لسا ما عملت إعجاب لأي فيديو. اكبس 👍 تحت أي فيديو.', favs: 'القائمة فاضية. اكبس «حفظ» تحت أي فيديو.' };
+  document.title = `${titles[kind]} — Nuvio`;
+  const items = lib.list(kind);
+  const head = el('div', 'sec-head');
+  head.append(el('h2', 'section-title', `${titles[kind]} (${items.length})`));
+  if (items.length) {
+    const clr = el('button', 'btn', kind === 'hist' ? 'امسح السجل' : 'امسح الكل');
+    clr.onclick = () => { if (confirm('متأكد؟ ما في رجعة.')) { lib.clear(kind); if (kind === 'hist') store.set('searches', []); renderLibrary(kind); } };
+    head.append(clr);
+  }
+  view.replaceChildren(head);
+  if (!items.length) { view.append(el('div', 'empty', empties[kind])); return; }
+  const g = el('div', 'grid');
+  items.forEach(v => {
+    const c = card(v);
+    const x = el('button', 'card-x', '✕'); x.title = 'شيل';
+    x.onclick = e => { e.preventDefault(); e.stopPropagation(); lib.remove(kind, v.id); c.remove(); };
+    c.querySelector('.thumb').append(x);
+    g.append(c);
+  });
+  view.append(g);
 }
 
 async function renderSearch(q) {
   document.title = `${q} — Nuvio`;
+  addSearch(q);
   $('#q').value = q;
   const chWrap = el('div', 'ch-strip');
   const g = el('div', 'grid'); g.append(skCards(12));
@@ -618,10 +727,15 @@ async function renderWatch(id, startTime) {
   const side = el('aside', 'related');
   main.append(box, info); layout.append(main, side);
 
-  const chip = el('span', 'chip');
-  const setChip = (text, cls) => { chip.textContent = text; chip.className = 'chip ' + (cls || ''); };
+  const setChip = () => {};
 
-  let np = new NuvioPlayer(box, { onStall: t => recover(t), onError: t => recover(t) });
+  let np = new NuvioPlayer(box, {
+    onStall: t => recover(t), onError: t => recover(t),
+    onCopy: () => {
+      const u = `https://youtu.be/${id}`;
+      (navigator.clipboard ? navigator.clipboard.writeText(u) : Promise.reject()).then(() => note('انسخ الرابط ✓'), () => note(u));
+    },
+  });
   np.video.poster = ytThumb(id, 'hqdefault');
   box.classList.add('loading');
 
@@ -762,21 +876,41 @@ async function renderWatch(id, startTime) {
     const au = el(d.authorId ? 'a' : 'span', 'author');
     if (d.authorId) { au.href = chHref(d.authorId); chPreview.set(d.authorId, { name: d.author }); }
     if (d.avatar) { const im = el('img', 'author-avatar'); im.alt = ''; setImg(im, d.avatar); au.append(im); }
-    const an = el('span', null, d.author || ''); an.dir = 'auto'; au.append(an);
-    if (d.subs) au.append(el('span', 'author-subs', d.subs));
-    metaRow.append(au, el('span', null, fmtViews(d.views)), el('span', null, d.published || ''));
-    if (d.likes > 0) metaRow.append(el('span', null, `👍 ${nf.format(d.likes)}`));
+    const nameBox = el('span', 'author-name');
+    const an = el('span', null, d.author || ''); an.dir = 'auto'; nameBox.append(an);
+    if (d.subs) nameBox.append(el('span', 'author-subs', d.subs));
+    au.append(nameBox);
 
+    // إعجاب + حفظ بالمفضلة (محفوظين على جهازك)
+    const item = { id, title: d.title, thumb: ytThumb(id), author: d.author, authorId: d.authorId, views: d.views, published: d.published, duration: pv && pv.duration };
+    lib.add('hist', item);
     const actions = el('div', 'v-actions');
-    const share = el('button', 'btn', 'انسخ الرابط الأصلي');
-    share.onclick = () => navigator.clipboard?.writeText(`https://youtu.be/${id}`).then(() => note('انسخ ✓'), () => note(`https://youtu.be/${id}`));
-    actions.append(share, chip);
+    const likeBtn = el('button', 'pill');
+    const favBtn = el('button', 'pill');
+    const drawBtns = () => {
+      const liked = lib.has('likes', id), faved = lib.has('favs', id);
+      likeBtn.classList.toggle('on', liked);
+      likeBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M7 10v11H3V10h4zm2 11h8.3a2 2 0 0 0 2-1.6l1.6-7.4A2 2 0 0 0 19 9.5h-5.3l.8-3.9a1.6 1.6 0 0 0-2.7-1.4L9 8v13z"/></svg><span>${d.likes > 0 ? nf.format(d.likes + (liked ? 1 : 0)) : 'إعجاب'}</span>`;
+      favBtn.classList.toggle('on', faved);
+      favBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg><span>${faved ? 'محفوظ' : 'حفظ'}</span>`;
+    };
+    likeBtn.onclick = () => { note(lib.toggle('likes', item) ? 'انضاف للإعجابات 👍' : 'انشال من الإعجابات'); drawBtns(); };
+    favBtn.onclick = () => { note(lib.toggle('favs', item) ? 'انحفظ بالقائمة المفضلة' : 'انشال من القائمة المفضلة'); drawBtns(); };
+    drawBtns();
+    actions.append(likeBtn, favBtn);
+    metaRow.append(au, actions);
 
-    const desc = el('div', 'desc', d.description || '');
-    desc.dir = 'auto';
-    desc.onclick = () => desc.classList.toggle('open');
-    descSk.replaceWith(actions);
-    if (d.description) actions.after(desc);
+    // الوصف تحت الفيديو متل يوتيوب: مشاهدات وتاريخ، نص مختصر، «المزيد»
+    const desc = el('div', 'desc yt');
+    desc.append(el('div', 'desc-meta', [fmtViews(d.views), d.published].filter(Boolean).join('  •  ')));
+    const body = el('div', 'desc-body'); body.dir = 'auto';
+    renderRich(body, d.description || '', s => { if (np) { np.video.currentTime = s; np.video.play().catch(() => {}); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
+    desc.append(body);
+    const moreBtn = el('button', 'desc-more', 'المزيد');
+    moreBtn.onclick = e => { e.stopPropagation(); desc.classList.toggle('open'); moreBtn.textContent = desc.classList.contains('open') ? 'عرض أقل' : 'المزيد'; };
+    desc.onclick = e => { if (!desc.classList.contains('open') && !e.target.closest('a')) moreBtn.click(); };
+    if (d.description) desc.append(moreBtn);
+    descSk.replaceWith(desc);
 
     // المشابهة + تحميل لا نهائي
     sideList.replaceChildren();
@@ -790,6 +924,31 @@ async function renderWatch(id, startTime) {
 
   setChip('…');
   await tryNext(startTime);
+}
+
+/* نص الوصف: الروابط بتصير قابلة للكبس، والأوقات (1:23) بتنقلك لهديك الثانية */
+function renderRich(node, text, onTime) {
+  const re = /(https?:\/\/[^\s]+)|(\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b)/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) node.append(text.slice(last, m.index));
+    if (m[1]) {
+      const yt = parseYT(m[1]);
+      const a = el('a', 'lnk', m[1].length > 60 ? m[1].slice(0, 57) + '…' : m[1]);
+      if (yt && yt.type === 'video') a.href = `#/watch?v=${yt.id}${yt.t ? `&t=${yt.t}` : ''}`;
+      else if (yt && yt.type === 'channel') a.href = chHref(yt.id);
+      else { a.href = m[1]; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+      node.append(a);
+    } else {
+      const parts = m[2].split(':').map(Number);
+      const s = parts.reduce((acc, x) => acc * 60 + x, 0);
+      const a = el('a', 'lnk', m[2]); a.href = '#';
+      a.onclick = e => { e.preventDefault(); e.stopPropagation(); onTime(s); };
+      node.append(a);
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) node.append(text.slice(last));
 }
 
 /* ================= البحث: روابط + اقتراحات ================= */
@@ -829,31 +988,71 @@ async function openQuery(q) {
 }
 
 const sug = $('#suggest');
-let sugItems = [], sugIdx = -1, sugTimer, sugSeq = 0;
+const ICO_HIST = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>';
+const ICO_FIND = '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>';
+let sugItems = [], sugIdx = -1, sugTimer, sugSeq = 0, sugQ = '';
 function hideSug() { sug.hidden = true; sugIdx = -1; }
+/* بحوثك القديمة اللي بتبلّش متل اللي عم تكتبو (أو كلها إذا الخانة فاضية) */
+function histMatches(q) {
+  const all = store.get('searches', []);
+  const s = q.toLowerCase();
+  return (s ? all.filter(x => x.toLowerCase().startsWith(s) || x.toLowerCase().includes(' ' + s)) : all).slice(0, s ? 4 : 10);
+}
 function drawSug() {
   sug.replaceChildren();
-  sugItems.forEach((s, i) => {
-    const b = el('button', 'sug-item' + (i === sugIdx ? ' on' : ''), s);
-    b.type = 'button'; b.dir = 'auto';
-    b.onmousedown = e => { e.preventDefault(); $('#q').value = s; hideSug(); openQuery(s); };
-    sug.append(b);
+  sugItems.forEach((it, i) => {
+    const row = el('div', 'sug-row' + (i === sugIdx ? ' on' : '') + (it.hist ? ' hist' : ''));
+    row.setAttribute('role', 'option');
+    const ico = el('span', 'sug-ico'); ico.innerHTML = it.hist ? ICO_HIST : ICO_FIND;
+    const txt = el('span', 'sug-txt'); txt.dir = 'auto';
+    // متل يوتيوب: اللي كتبتو عادي، والتكملة بالعريض
+    const q = sugQ.toLowerCase();
+    if (q && it.text.toLowerCase().startsWith(q)) {
+      txt.append(it.text.slice(0, q.length));
+      txt.append(el('b', null, it.text.slice(q.length)));
+    } else txt.append(el('b', null, it.text));
+    row.append(ico, txt);
+    if (it.hist) {
+      const x = el('button', 'sug-x'); x.type = 'button'; x.title = 'شيل من السجل'; x.textContent = '✕';
+      x.onmousedown = e => {
+        e.preventDefault(); e.stopPropagation();
+        store.set('searches', store.get('searches', []).filter(s => s !== it.text));
+        sugItems = sugItems.filter(s => s !== it); drawSug();
+      };
+      row.append(x);
+    } else {
+      // سهم: بيحط الاقتراح بالخانة لتكمّل عليه بلا ما يبحث
+      const f = el('button', 'sug-fill'); f.type = 'button'; f.title = 'حطّو بالخانة';
+      f.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17 17L7 7M7 15V7h8"/></svg>';
+      f.onmousedown = e => { e.preventDefault(); e.stopPropagation(); $('#q').value = it.text + ' '; $('#q').dispatchEvent(new Event('input')); };
+      row.append(f);
+    }
+    row.onmousedown = e => { e.preventDefault(); $('#q').value = it.text; hideSug(); $('#q').blur(); openQuery(it.text); };
+    sug.append(row);
   });
   sug.hidden = !sugItems.length;
 }
-$('#q').addEventListener('input', () => {
+function updateSug() {
   clearTimeout(sugTimer);
   const q = $('#q').value.trim();
-  if (!q || parseYT(q)) { sugItems = []; hideSug(); return; }
+  sugQ = q;
+  if (parseYT(q)) { sugItems = []; hideSug(); return; }
+  const hist = histMatches(q).map(text => ({ text, hist: true }));
+  sugItems = hist; sugIdx = -1; drawSug();
+  if (!q) return;
   const seq = ++sugSeq;
   sugTimer = setTimeout(async () => {
     try {
-      const { res } = await cached('sg:' + q, 30 * 60e3, () => withFallback(i => apiFor(i).suggest(i.url, q), { stagger: 1200 }));
+      const { res } = await cached('sg:' + q.toLowerCase(), 30 * 60e3, () => withFallback(i => apiFor(i).suggest(i.url, q), { stagger: 1200 }));
       if (seq !== sugSeq) return;
-      sugItems = res.slice(0, 8); sugIdx = -1; drawSug();
+      const seen = new Set(hist.map(h => h.text.toLowerCase()));
+      sugItems = hist.concat(res.filter(s => !seen.has(s.toLowerCase())).slice(0, 10 - hist.length).map(text => ({ text, hist: false })));
+      sugIdx = -1; drawSug();
     } catch { /* بلا اقتراحات */ }
-  }, 140);
-});
+  }, 120);
+}
+$('#q').addEventListener('input', updateSug);
+$('#q').addEventListener('focus', updateSug);
 $('#q').addEventListener('keydown', e => {
   if (sug.hidden || !sugItems.length) return;
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -862,7 +1061,7 @@ $('#q').addEventListener('keydown', e => {
     if (e.key === 'ArrowDown') sugIdx = sugIdx + 1 >= n ? -1 : sugIdx + 1;
     else sugIdx = sugIdx - 1 < -1 ? n - 1 : sugIdx - 1;
     drawSug();
-    if (sugIdx >= 0) $('#q').value = sugItems[sugIdx];
+    $('#q').value = sugIdx >= 0 ? sugItems[sugIdx].text : sugQ;
   } else if (e.key === 'Escape') hideSug();
 });
 $('#q').addEventListener('blur', () => setTimeout(hideSug, 150));
@@ -880,11 +1079,15 @@ async function route() {
   const [path, qs] = hash.split('?');
   const p = new URLSearchParams(qs || '');
   hideSug();
+  document.querySelectorAll('.top-nav a').forEach(x => x.classList.toggle('on', x.getAttribute('href') === '#' + path));
   if (path !== '/watch') await destroyPlayer();
   window.scrollTo(0, 0);
   if (path === '/search' && p.get('q')) return renderSearch(p.get('q'));
   if (path === '/watch' && p.get('v')) return renderWatch(p.get('v'), +p.get('t') || 0);
   if (path === '/channel' && p.get('id')) return renderChannel(p.get('id'));
+  if (path === '/history') return renderLibrary('hist');
+  if (path === '/likes') return renderLibrary('likes');
+  if (path === '/favs') return renderLibrary('favs');
   $('#q').value = '';
   return renderHome();
 }

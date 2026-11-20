@@ -14,6 +14,7 @@
     gear: svg('<path class="s" d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle class="s" cx="15" cy="7" r="2.2"/><circle class="s" cx="9" cy="17" r="2.2"/>'),
     fs: svg('<path class="s" d="M4 9V4.8c0-.4.4-.8.8-.8H9M15 4h4.2c.4 0 .8.4.8.8V9M20 15v4.2c0 .4-.4.8-.8.8H15M9 20H4.8c-.4 0-.8-.4-.8-.8V15"/>'),
     fsx: svg('<path class="s" d="M9 4v4.2c0 .4-.4.8-.8.8H4M20 9h-4.2c-.4 0-.8-.4-.8-.8V4M15 20v-4.2c0-.4.4-.8.8-.8H20M4 15h4.2c.4 0 .8.4.8.8V20"/>'),
+    copy: svg('<rect class="s" x="8.5" y="8.5" width="11" height="11" rx="2.2"/><path class="s" d="M15.5 8.5V6.2c0-1-.8-1.7-1.7-1.7H6.2c-1 0-1.7.8-1.7 1.7v7.6c0 1 .8 1.7 1.7 1.7h2.3"/>'),
     back: svg('<path d="M11 6.5v11L3 12zM20 6.5v11L12 12z"/>'),
     fwd: svg('<path d="M13 6.5v11l8-5.5zM4 6.5v11l8-5.5z"/>'),
   };
@@ -58,10 +59,11 @@
       this.vol = mk('input', 'np-vol'); Object.assign(this.vol, { type: 'range', min: 0, max: 1, step: 0.05, value: v.muted ? 0 : v.volume });
       this.time = mk('div', 'np-time', '0:00 / 0:00');
       this.qBadge = mk('span', 'np-q');
+      this.bCopy = mk('button', 'np-btn', ICON.copy); this.bCopy.setAttribute('aria-label', 'نسخ الرابط'); this.bCopy.title = 'نسخ الرابط';
       this.bGear = mk('button', 'np-btn', ICON.gear); this.bGear.setAttribute('aria-label', 'الإعدادات');
       this.bFs = mk('button', 'np-btn', ICON.fs); this.bFs.setAttribute('aria-label', 'ملء الشاشة');
       const volWrap = mk('div', 'np-volwrap'); volWrap.append(this.bVol, this.vol);
-      row.append(this.bPlay, volWrap, this.time, mk('div', 'np-space'), this.qBadge, this.bGear, this.bFs);
+      row.append(this.bPlay, volWrap, this.time, mk('div', 'np-space'), this.bCopy, this.qBadge, this.bGear, this.bFs);
       bottom.append(this.bar, row);
 
       this.menu = mk('div', 'np-menu'); this.menu.dir = 'rtl'; this.menu.hidden = true;
@@ -187,6 +189,7 @@
       this.bVol.onclick = () => { v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = 0.5; };
       this.vol.oninput = () => { v.volume = +this.vol.value; v.muted = v.volume === 0; };
       this.bFs.onclick = () => this.fullscreen();
+      this.bCopy.onclick = e => { e.stopPropagation(); this.opts.onCopy && this.opts.onCopy(); };
       this.bGear.onclick = e => { e.stopPropagation(); this._menu(); };
 
       // شريط التقدّم: سحب بالماوس أو بالإصبع
