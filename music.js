@@ -8,6 +8,16 @@
 
 /* ================= أيقونات SVG (بدل الإيموجي) ================= */
 const ICO = {
+  later: '<path d="M4 6h11M4 11h11M4 16h7"/><path d="M15 14.5v6l5-3z"/>',
+  share: '<path d="M14 5l6 6-6 6"/><path d="M20 11H11a6 6 0 0 0-6 6v2"/>',
+  ban: '<circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/>',
+  userx: '<circle cx="10" cy="8.5" r="3.5"/><path d="M3.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16.5 6.5l4 4M20.5 6.5l-4 4"/>',
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/>',
+  download: '<path d="M12 4v11M7 10.5l5 5 5-5M5 19.5h14"/>',
+  upload: '<path d="M12 16V5M7 9.5l5-5 5 5M5 19.5h14"/>',
+  skip: '<path d="M5 5l7 7-7 7M13 5l7 7-7 7"/>',
+  wifi: '<path d="M3 9.5a13 13 0 0 1 18 0M6 13a8.5 8.5 0 0 1 12 0M9 16.5a4 4 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/>',
+  shorts: '<rect x="7" y="3" width="10" height="18" rx="3"/><path d="M11 9.5v5l4-2.5z"/>',
   home: '<path d="M3.5 11L12 4l8.5 7v8.5a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z"/>',
   subs: '<rect x="3" y="5" width="18" height="13" rx="2.5"/><path d="M10 9.3v5.4l4.6-2.7z"/><path d="M8 21h8"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
@@ -265,6 +275,8 @@ function openDrawer() {
     item('clock', 'سجل المشاهدة', '#/history', lib.list('hist').length),
     item('like', 'الإعجابات', '#/likes', lib.list('likes').length),
     item('saved', 'المحفوظة', '#/favs', lib.list('favs').length),
+    item('later', 'شغّل بعدين', '#/later', store.get('later', []).length),
+    item('shorts', 'شورتس', '#/shorts'),
     item('search', 'سجل البحث', '#/searches', store.get('searches', []).length),
   );
   if (store.get('ytlists', []).length) d.append(item('folder', 'قوائم التشغيل', '#/lists', store.get('ytlists', []).length));
@@ -275,6 +287,7 @@ function openDrawer() {
     item('phones', 'السجل السماعي', '#/music/hist', lib.list('mhist').length),
     item('mic', 'بودكاست', '#/music/podcast'),
   );
+  if (typeof drawerSettings === 'function') drawerSettings(d, sep, closeDrawer);
   if (!ov.classList.contains('open') && window.nuvioLockScroll) window.nuvioLockScroll(true);
   requestAnimationFrame(() => ov.classList.add('open'));
 }

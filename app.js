@@ -689,7 +689,7 @@ function relatedFeed(seedIds, seen) {
       const id = queue.shift();
       try {
         const related = await relatedOf(id);
-        const fresh = related.filter(v => v.id && !seen.has(v.id));
+        const fresh = related.filter(v => v.id && !seen.has(v.id) && wanted(v));
         fresh.forEach(v => { seen.add(v.id); queue.push(v.id); });
         if (fresh.length) return fresh;
       } catch { /* جرّب اللي بعدو */ }
@@ -712,7 +712,17 @@ function card(v, { row = false, noAuthorLink = false } = {}) {
   if (v.authorId && v.author) chPreview.set(v.authorId, { name: v.author });
   const c = $('#cardTpl').content.firstElementChild.cloneNode(true);
   if (row) c.classList.add('row');
-  c.href = `#/watch?v=${encodeURIComponent(v.id)}`;
+  c.href = v.short ? `#/shorts?v=${encodeURIComponent(v.id)}${v.authorId ? `&ch=${encodeURIComponent(v.authorId)}` : ''}` : `#/watch?v=${encodeURIComponent(v.id)}`;
+  c.dataset.vid = v.id;
+  if (v.authorId) c.dataset.ch = v.authorId;
+  if (v.short) {
+    c.dataset.short = '1';
+    // الشورتس من صفحة القناة: منحفظ ترتيبها لحتى تكمّل فيها بالسحب
+    c.addEventListener('click', () => {
+      const list = [...(c.parentElement ? c.parentElement.querySelectorAll('a.card[data-short]') : [])].map(x => preview.get(x.dataset.vid)).filter(Boolean);
+      shortsCtx = { ch: v.authorId || '', items: list };
+    });
+  }
   const img = c.querySelector('img');
   img.src = v.thumb;
   img.onerror = () => { if (img.src !== ytThumb(v.id)) img.src = ytThumb(v.id); };
@@ -729,6 +739,11 @@ function card(v, { row = false, noAuthorLink = false } = {}) {
   } else if (v.author) sub.append(v.author);
   const rest = [views, v.published].filter(Boolean).join(' • ');
   if (rest) sub.append((v.author ? ' • ' : '') + rest);
+  const wb = progBar(v.id); if (wb) c.querySelector('.thumb').append(wb);
+  const mb = el('button', 'card-menu'); mb.setAttribute('aria-label', 'خيارات');
+  mb.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="5.5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="18.5" r="1.8"/></svg>';
+  mb.onclick = e => { e.preventDefault(); e.stopPropagation(); cardMenu(v); };
+  c.querySelector('.meta').append(mb);
   let pre;
   const warm = () => { clearTimeout(pre); pre = setTimeout(() => { prefetchVideo(v.id, true); if (ytiUsable()) ytNext(v.id).catch(() => {}); }, 150); };
   c.addEventListener('pointerenter', warm);
@@ -875,6 +890,8 @@ function subButton(ch) {
   b.onclick = e => {
     e.preventDefault(); e.stopPropagation();
     const on = subs.toggle(ch);
+    // أول اشتراك: آخر فيديو هلّق هو الأساس (النقطة بتطلع بس للجديد بعد هيك)
+    if (on) getChannel(ch.id).then(({ res }) => { const top = res.items && res.items[0] && res.items[0].id; if (top && !(ch.id in chNew.seen())) chNew.markSeen(ch.id, top); }).catch(() => {});
     draw();
     note(on ? `اشتركت بـ ${ch.name}` : `لغيت الاشتراك بـ ${ch.name}`);
   };
@@ -896,6 +913,10 @@ function channelBubble(c) {
   a.onpointerenter = () => getChannel(c.id).catch(() => {});
   const img = el('img'); img.alt = ''; img.loading = 'lazy';
   const ph = el('span', 'sub-ph', (c.name || '?').trim().charAt(0));
+  if (chNew.has(c.id)) {
+    a.classList.add('new');
+    a.addEventListener('click', () => { const tp = chNew.tops()[c.id]; if (tp) chNew.markSeen(c.id, tp.top); });
+  }
   if (c.avatar) setImg(img, c.avatar);
   else if (c.id && !avatarAsked.has(c.id)) {
     // ما في صورة محفوظة: منجيبها من القناة، ومنحطها مكان الحرف
@@ -958,7 +979,7 @@ function homeTop() {
     out.push(sectionHead('سجل البحث', '#/searches'), row);
   }
   // ٢) القنوات المشترك فيها
-  const mySubs = subs.list().slice(0, 20);
+  const mySubs = subs.list().slice(0, 30).sort((x, y) => chNew.has(y.id) - chNew.has(x.id)).slice(0, 20); // الجديد أول
   if (mySubs.length) {
     const row = el('div', 'sub-strip');
     mySubs.forEach(c => row.append(channelBubble(c)));
@@ -975,7 +996,8 @@ function homeTop() {
 }
 async function renderHome(force) {
   document.title = 'Nuvio — فيديو بلا إعلانات';
-  view.replaceChildren(liveSection(['searches', 'subs', 'hist'], homeTop));
+  view.replaceChildren(liveSection(['searches', 'subs', 'hist', 'chTop', 'chSeen'], homeTop));
+  setTimeout(() => refreshChannelTops(), 2500);
   const personal = store.get('searches', []).length || subs.list().length || lib.list('hist').length;
   // ٤) مقترح لك (بيتحمّل شوي شوي مع التمرير)
   view.append(sectionHead(personal ? 'مقترح لك' : 'مقترحات'));
@@ -997,11 +1019,13 @@ async function renderHome(force) {
       first = await feed();
       keep(first);
     }
+    let shownFirst = first.filter(suggestOk);
+    for (let k = 0; !shownFirst.length && k < 3; k++) { const m = await feed(); keep(m); shownFirst = m.filter(suggestOk); if (!m.length) break; }
     if (!g.isConnected) return;
     g.replaceChildren();
-    if (!first.length) throw new Error('فاضي');
-    first.forEach(v => g.append(card(v)));
-    infinite(g, async () => { const more = await feed(); more.forEach(v => g.append(card(v))); keep(more); return more.length > 0; });
+    if (!shownFirst.length) throw new Error('فاضي');
+    shownFirst.forEach(v => g.append(card(v)));
+    infinite(g, async () => { const more = await feed(); more.filter(suggestOk).forEach(v => g.append(card(v))); keep(more); return more.length > 0; });
   } catch {
     if (!g.isConnected) return;
     const d = el('div', 'empty');
@@ -1043,8 +1067,9 @@ function renderSearches() {
 async function renderSubs(mode = 'new') {
   document.title = 'القنوات — Nuvio';
   const list = subs.list();
-  const top = liveSection(['subs'], () => {
-    const l = subs.list();
+  setTimeout(() => refreshChannelTops(), 2500);
+  const top = liveSection(['subs', 'chTop', 'chSeen'], () => {
+    const l = subs.list().slice().sort((x, y) => chNew.has(y.id) - chNew.has(x.id));
     const strip = el('div', 'sub-strip');
     l.forEach(c => strip.append(channelBubble(c)));
     return [sectionHead(`القنوات المشترك فيها (${l.length})`), l.length ? strip : null];
@@ -1121,8 +1146,8 @@ function renderList(id) {
 
 /* سجل المشاهدة / الإعجابات / المفضلة / السجل السماعي */
 function renderLibrary(kind) {
-  const titles = { hist: 'سجل المشاهدة', likes: 'الإعجابات', favs: 'المحفوظة', mhist: 'السجل السماعي' };
-  const empties = { hist: 'لسا ما شفت شي.', likes: 'لسا ما عملت إعجاب لأي فيديو. اكبس «إعجاب» تحت أي فيديو.', favs: 'ما في شي محفوظ. اكبس «حفظ» تحت أي فيديو.', mhist: 'لسا ما سمعت شي بـ Nuvio Music.' };
+  const titles = { hist: 'سجل المشاهدة', likes: 'الإعجابات', favs: 'المحفوظة', mhist: 'السجل السماعي', later: 'شغّل بعدين' };
+  const empties = { later: 'القائمة فاضية. من زر ⋮ على أي فيديو اختار «شغّل بعدين»، وبتشتغل ورا بعض لحالها.', hist: 'لسا ما شفت شي.', likes: 'لسا ما عملت إعجاب لأي فيديو. اكبس «إعجاب» تحت أي فيديو.', favs: 'ما في شي محفوظ. اكبس «حفظ» تحت أي فيديو.', mhist: 'لسا ما سمعت شي بـ Nuvio Music.' };
   document.title = `${titles[kind]} — Nuvio`;
   const items = lib.list(kind);
   const head = sectionHead(`${titles[kind]} (${items.length})`);
@@ -1130,6 +1155,11 @@ function renderLibrary(kind) {
     const clr = el('button', 'btn', kind === 'hist' || kind === 'mhist' ? 'امسح السجل' : 'امسح الكل');
     clr.onclick = () => { if (confirm('متأكد؟ ما في رجعة.')) { lib.clear(kind); renderLibrary(kind); } };
     head.append(clr);
+    if (kind === 'later') {
+      const go = el('button', 'btn btn-main', '▶ شغّل الكل');
+      go.onclick = () => goNext({ v: items[0], fromQueue: true });
+      head.append(go);
+    }
   }
   view.replaceChildren(head);
   if (!items.length) { view.append(el('div', 'empty', empties[kind])); return; }
@@ -1186,7 +1216,8 @@ async function renderSearch(q, f = {}) {
     if (!g.isConnected) return;
     g.replaceChildren();
     if (!res.items.length) { g.replaceWith(el('div', 'empty', 'ما في نتائج.')); return; }
-    if (!filtered) apiFor(inst).channels(inst.url, q).then(list => list.forEach(ch => chWrap.append(channelCard(ch)))).catch(() => {});
+    if (!filtered) cached('sc:' + q, 10 * 60e3, () => withFallback(i => apiFor(i).channels(i.url, q).then(l => { if (!l.length) throw new Error('فاضي'); return l; }), { yti: true }))
+      .then(({ res }) => { if (chWrap.isConnected) res.forEach(ch => chWrap.append(channelCard(ch))); }).catch(() => {});
     const seen = new Set();
     res.items.forEach(v => { seen.add(v.id); g.append(card(v)); });
     let next = res.next;
@@ -1223,7 +1254,8 @@ function channelTab(id, tab, sort, cont) {
       ? { lists: (d.playlists || []).map(p => ({ id: p.playlistId, title: p.title, count: p.videoCount, thumb: abs(i.url, p.playlistThumbnail || '') })), next: d.continuation || null }
       : { items: (d.videos || []).map(v => Invidious.item(i.url, v)), next: d.continuation || null });
   }, { prefer: 'invidious', yti: true }).then(r => r.res);
-  return cont ? run() : cached(`ct:${id}:${tab}:${sort || ''}`, 10 * 60e3, run);
+  const markShorts = r => (tab === 'shorts' && r && r.items ? { ...r, items: r.items.map(v => ({ ...v, short: true })) } : r);
+  return (cont ? run() : cached(`ct:${id}:${tab}:${sort || ''}`, 10 * 60e3, run)).then(markShorts);
 }
 function plCard(l) {
   const a = el('a', 'card list-card'); a.href = `#/pl?id=${encodeURIComponent(l.id)}`;
@@ -1266,6 +1298,8 @@ async function renderChannel(id, tab = 'home', sort = '') {
 
   // معلومات القناة (الراس) — بنفس الوقت مع المحتوى
   getChannel(id).then(({ res }) => {
+    // فتت عالقناة: ما عاد في شي جديد فيها
+    if (subs.has(id)) chNew.markSeen(id, (res.items && res.items[0] && res.items[0].id) || (chNew.tops()[id] || {}).top);
     if (!head.isConnected) return;
     const { info } = res;
     document.title = `${info.name} — Nuvio`;
@@ -1432,6 +1466,9 @@ async function destroyPlayer() {
 
 async function renderWatch(id, startTime) {
   const seq = routeSeq;
+  // كمّل من وين وقفت (إذا ما في وقت محدّد بالرابط)
+  const resumed = !startTime ? resumeAt(id) : 0;
+  if (resumed) startTime = resumed;
   await destroyPlayer();
   // إذا تركت الصفحة قبل ما تجهز (رجعت للرئيسية أو صغّرت)، ما منرسم الفيديو فوقها
   const [hp, hq] = (location.hash.slice(1) || '/').split('?');
@@ -1493,8 +1530,11 @@ async function renderWatch(id, startTime) {
   const sideList = el('div', 'related-list'); sideList.append(skCards(8, true));
   side.append(el('h2', 'section-title', 'فيديوهات مشابهة'), sideList);
   let relShown = false;
-  const fillRelated = list => {
-    if (relShown || !list || !list.length) return;
+  const fillRelated = list0 => {
+    if (relShown || !list0 || !list0.length) return;
+    // «مش مهتم» دايماً بينشال؛ واللي شفتو بينشال من المقترحات إذا الخيار شغّال (مش بالموسيقى)
+    let list = list0.filter(v => wanted(v) && (music || !prefs.get('hideWatched') || !isWatched(v.id)));
+    if (list.length < 4) list = list0.filter(wanted);
     relShown = true;
     sideList.replaceChildren();
     const seen = new Set([id]);
@@ -1504,6 +1544,9 @@ async function renderWatch(id, startTime) {
   };
   if (ytiUsable()) relatedOf(id).then(fillRelated).catch(() => {});
   view.replaceChildren(layout);
+  if (openInMini) { openInMini = false; requestAnimationFrame(() => minimize()); } // الجاي بيكمّل بالمشغّل الصغير
+  if (resumed) setTimeout(() => note(`كمّلنا من ${fmtT(resumed)} — وين وقفت`), 900);
+  const extras = watchExtras({ id, getNp: () => np, box, music, related: () => (shown && shown.related) || (current && current.data.related) || [] });
   layout.append(buildFab(() => np, id, () => (current && current.data.title) || (pv && pv.title) || '', async () => {
     if (!np) return;
     const t = np.video.currentTime;
@@ -1565,6 +1608,7 @@ async function renderWatch(id, startTime) {
         manifest: { retryParameters: { maxAttempts: 3, baseDelay: 400, timeout: 12000 }, dash: { ignoreMinBufferTime: true } },
         abr: { enabled: true, defaultBandwidthEstimate: 1.6e6, switchInterval: 2 }, // بداية سريعة، والجودة بتطلع لحالها
       });
+      player.configure(saverCfg()); // توفير الإنترنت: لحد 480p
       const me = player;
       player.addEventListener('error', ev => {
         console.warn('[nuvio] shaka', ev.detail);
@@ -1650,7 +1694,7 @@ async function renderWatch(id, startTime) {
     shown = d;
     document.title = `${d.title} — Nuvio`;
     if (np) {
-      np.opts.onNext = d.related[0] ? () => { location.hash = `#/watch?v=${encodeURIComponent(d.related[0].id)}`; } : null;
+      np.opts.onNext = () => goNext(pickNext(id, d.related, music, true));
       np.setMeta({ title: d.title, artist: d.author, art: ytThumb(id, 'hqdefault') });
     }
     h1.textContent = d.title;
@@ -1723,6 +1767,7 @@ async function renderWatch(id, startTime) {
     };
     if (d.description) { desc.append(moreBtn); chev.hidden = false; }
     descSk.replaceWith(desc);
+    if (extras.chapters) extras.chapters(d.description || '');
 
     // المشابهة + تحميل لا نهائي
     fillRelated(d.related);
@@ -2186,7 +2231,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120063056';
+const APP_VERSION = '20261120064843';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -2231,6 +2276,7 @@ function restorePage(key) {
   view.replaceChildren(...c.nodes);
   document.title = c.title;
   refreshLive(); // اشتركت/شفت/بحثت عن شي من وقتها؟ بيبيّن فوراً
+  refreshBars(view);
   markLoaded(view);
   window.scrollTo(0, c.y);
   requestAnimationFrame(() => window.scrollTo(0, c.y));
@@ -2274,6 +2320,7 @@ async function route() {
   const hash = location.hash.slice(1) || '/';
   savePage();
   const [path, qs] = hash.split('?');
+  if (path !== '/shorts') shortsExit();
   const p = new URLSearchParams(qs || '');
   hideSug();
   document.querySelectorAll('.top-nav a').forEach(x => x.classList.toggle('on', x.getAttribute('href') === '#' + path));
@@ -2296,6 +2343,8 @@ async function route() {
   if (path === '/watch' && p.get('v')) return renderWatch(p.get('v'), +p.get('t') || 0);
   if (path === '/channel' && p.get('id')) return renderChannel(p.get('id'), p.get('tab') || 'home', p.get('sort') || '');
   if (path === '/pl' && p.get('id')) return renderPlaylist(p.get('id'));
+  if (path === '/shorts') return renderShorts(p.get('v'), p.get('ch'));
+  if (path === '/later') return renderLibrary('later');
   if (path === '/history') return renderLibrary('hist');
   if (path === '/likes') return renderLibrary('likes');
   if (path === '/favs') return renderLibrary('favs');
@@ -2374,6 +2423,10 @@ function markLoaded(root) {
 }
 document.addEventListener('load', e => { if (e.target.tagName === 'IMG') imgReady(e.target); }, true);
 document.addEventListener('error', e => { if (e.target.tagName === 'IMG') e.target.classList.add('bad'); }, true);
+
+if (navigator.connection && navigator.connection.addEventListener) {
+  navigator.connection.addEventListener('change', () => { if (player) try { player.configure(saverCfg()); } catch { /* */ } });
+}
 
 /* اتصال مسبق مع أسرع سيرفر وصوره */
 function preconnect(origin) {

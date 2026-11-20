@@ -81,6 +81,9 @@
       this.bVol = mk('button', 'np-btn', v.muted ? ICON.mute : ICON.vol); this.bVol.setAttribute('aria-label', 'الصوت');
       this.vol = mk('input', 'np-vol'); Object.assign(this.vol, { type: 'range', min: 0, max: 1, step: 0.05, value: v.muted ? 0 : v.volume });
       this.time = mk('div', 'np-time', '0:00 / 0:00');
+      this.chapEl = mk('button', 'np-chap'); this.chapEl.hidden = true; this.chapEl.dir = 'auto';
+      this.chapEl.onclick = e => { e.stopPropagation(); this._menu('ch'); };
+      this.segs = []; this.chapters = [];
       this.qBadge = mk('span', 'np-q');
       // بوضع الميوزك: زر ➕ (ضيف المطرب لمفضّلينك) بدل زر النسخ
       const plus = opts.copyIcon === 'plus';
@@ -94,7 +97,7 @@
       this.bPip = mk('button', 'np-btn', ICON.pip); this.bPip.title = 'شاشة عايمة'; this.bPip.setAttribute('aria-label', 'شاشة عايمة');
       this.bPip.hidden = !(DESKTOP && this.canPip());
       this.bPip.onclick = e => { e.stopPropagation(); this.pip().catch(() => {}); };
-      row.append(this.bPlay, volWrap, this.time, mk('div', 'np-space'), this.bCast, this.bCopy, this.qBadge, this.bPip, this.bGear, this.bFs);
+      row.append(this.bPlay, volWrap, this.time, this.chapEl, mk('div', 'np-space'), this.bCast, this.bCopy, this.qBadge, this.bPip, this.bGear, this.bFs);
       bottom.append(this.bar, row);
 
       this.menu = mk('div', 'np-menu'); this.menu.dir = 'rtl'; this.menu.hidden = true;
@@ -115,6 +118,30 @@
       }
       this.video.playbackRate = this.rate;
       this._updQ();
+    }
+    setMarks(segs) { this.segs = segs || []; this._drawMarks(); }
+    setChapters(ch) { this.chapters = ch || []; this._drawMarks(); this._chapLabel(true); }
+    _chapAt(t) { let c = null; for (const x of this.chapters) { if (x.t <= t) c = x; else break; } return c; }
+    _chapLabel(force) {
+      if (!this.chapters.length) { this.chapEl.hidden = true; return; }
+      const c = this._chapAt(this.video.currentTime || 0);
+      if (!force && c === this._chapCur) return;
+      this._chapCur = c;
+      this.chapEl.hidden = !c || !c.title;
+      this.chapEl.textContent = c && c.title ? `• ${c.title} ›` : '';
+    }
+    _drawMarks() {
+      if (!this.marks) { this.marks = mk('div', 'np-marks'); this.bar.insertBefore(this.marks, this.fill); }
+      const d = this.video.duration;
+      this.marks.replaceChildren();
+      if (!isFinite(d) || d <= 0) return;
+      for (const s of this.segs) {
+        const m = mk('i', 'np-seg');
+        m.style.left = `${(s.start / d) * 100}%`;
+        m.style.width = `${Math.max(0.4, ((s.end - s.start) / d) * 100)}%`;
+        this.marks.append(m);
+      }
+      for (const c of this.chapters.slice(1)) { const g = mk('i', 'np-gap'); g.style.left = `${(c.t / d) * 100}%`; this.marks.append(g); }
     }
     message(t) { this.msgEl.textContent = t || ''; this.msgEl.classList.toggle('on', !!t); }
     destroy() {
@@ -190,6 +217,7 @@
         this.bg.preload = 'auto';
         this.bg.setAttribute('playsinline', '');
         this.bg.addEventListener('ended', () => { this.bgOn = false; }); this.bg.loop = !!this.loop;
+        this.box.dispatchEvent(new CustomEvent('npbg', { detail: this.bg }));
       }
       if (!this._vis) {
         this._vis = () => {
@@ -246,7 +274,7 @@
       v.addEventListener('loadstart', () => box.classList.add('loading'));
       v.addEventListener('timeupdate', () => this._progress());
       v.addEventListener('progress', () => this._progress());
-      v.addEventListener('durationchange', () => this._progress());
+      v.addEventListener('durationchange', () => { this._progress(); if (this.segs.length || this.chapters.length) this._drawMarks(); });
       v.addEventListener('volumechange', () => {
         this.bVol.innerHTML = v.muted || v.volume === 0 ? ICON.mute : ICON.vol;
         this.vol.value = v.muted ? 0 : v.volume;
@@ -268,7 +296,8 @@
       this.bar.addEventListener('pointerdown', e => { drag = true; this.bar.setPointerCapture(e.pointerId); box.classList.add('drag'); this._seekTo(frac(e)); });
       this.bar.addEventListener('pointermove', e => {
         const f = frac(e);
-        this.tip.textContent = fmt(f * (v.duration || 0)); this.tip.style.left = `${f * 100}%`;
+        const ct = this.chapters.length ? this._chapAt(f * (v.duration || 0)) : null;
+        this.tip.textContent = fmt(f * (v.duration || 0)) + (ct && ct.title ? `  •  ${ct.title}` : ''); this.tip.style.left = `${f * 100}%`;
         if (drag) this._seekTo(f);
       });
       const end = () => { drag = false; box.classList.remove('drag'); };
@@ -392,6 +421,7 @@
       for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= v.currentTime + 1) b = Math.max(b, v.buffered.end(i));
       this.buf.style.width = `${Math.min(1, b / d) * 100}%`;
       this.time.textContent = `${fmt(v.currentTime)} / ${fmt(d)}`;
+      if (this.chapters.length) this._chapLabel();
     }
 
     _showUI(stay) {
@@ -440,7 +470,7 @@
     }
 
     /* ---------- قائمة الإعدادات: بتطلع من تحت لفوق متل يوتيوب، وكل خيار بيبيّن بس إذا متوفر ---------- */
-    _menu() {
+    _menu(open) {
       if (this._sheet) { this._closeSheet(); return; }
       const v = this.video;
       const fs = document.fullscreenElement === this.box;
@@ -461,6 +491,9 @@
         au: '<circle class="s" cx="9" cy="8" r="3.2"/><path class="s" d="M3.5 19c.8-3.2 3-5 5.5-5s4.7 1.8 5.5 5M17 8.5a3.5 3.5 0 0 1 0 5M19.5 6.5a6.5 6.5 0 0 1 0 9"/>',
         sl: '<path class="s" d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/>',
         lp: '<path class="s" d="M17 2.5l3 3-3 3M4 11V9.5a4 4 0 0 1 4-4h12M7 21.5l-3-3 3-3M20 13v1.5a4 4 0 0 1-4 4H4"/>',
+        ch: '<path class="s" d="M4 6h16M4 12h10M4 18h13"/>',
+        ap: '<path class="s" d="M4 6.5v11l7-5.5zM13 6.5v11l7-5.5z"/>',
+        sb: '<path class="s" d="M5 5l7 7-7 7M13 5l7 7-7 7"/>',
       };
       const icon = k => `<svg viewBox="0 0 24 24">${I[k]}</svg>`;
       const row = (k, label, value, onClick, toggle) => {
@@ -528,8 +561,21 @@
         }
         // تكرار
         sh.append(row('lp', 'تكرار الفيديو', '', r => { this.setLoop(!this.loop); r.querySelector('.np-sw').classList.toggle('on', this.loop); }, !!this.loop));
+        // إعدادات عامة من app.js
+        const P = window.nuvioPref;
+        if (P) {
+          sh.append(row('ap', 'تشغيل تلقائي', '', r => { P.set('autoplay', !P.get('autoplay')); r.querySelector('.np-sw').classList.toggle('on', P.get('autoplay')); }, !!P.get('autoplay')));
+          sh.append(row('sb', 'تخطّي الدعايات جوّا الفيديو', '', r => { P.set('sb', !P.get('sb')); r.querySelector('.np-sw').classList.toggle('on', P.get('sb')); }, !!P.get('sb')));
+        }
+        // الفصول (إذا في)
+        if (this.chapters.length) {
+          const c = this._chapAt(v.currentTime || 0);
+          sh.insertBefore(row('ch', 'الفصول', c && c.title ? c.title.slice(0, 22) : `${this.chapters.length}`, chSub), sh.children[1] || null);
+        }
       };
+      const chSub = () => sub('الفصول', this.chapters.map(c => [`${fmt(c.t)}   ${c.title || ''}`, this._chapAt(v.currentTime || 0) === c, () => { v.currentTime = c.t + 0.05; v.play().catch(() => {}); }]));
       main();
+      if (open === 'ch' && this.chapters.length) chSub();
       requestAnimationFrame(() => ov.classList.add('open'));
     }
     _closeSheet() {
@@ -544,6 +590,7 @@
     applySavedQuality() {
       const q = ls.get('q', 0);
       if (!q || !this.shaka) return;
+      if (window.nuvioSaver && window.nuvioSaver() && q > 480) return; // توفير الإنترنت
       // منبلّش خفيف (بداية أسرع)، ومنحوّل للجودة اللي اخترتها أول ما يبلّش الفيديو
       const sp = this.shaka;
       this.video.addEventListener('playing', () => setTimeout(() => {
