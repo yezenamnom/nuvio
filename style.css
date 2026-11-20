@@ -1400,3 +1400,9 @@ html.tv .tv-sinput.tv-f { border-color: #fff; }
 .emb-msg { position: relative; color: #fff; font-size: .9rem; font-weight: 700; text-shadow: 0 1px 6px rgba(0,0,0,.7); text-align: center; padding: 0 14px; }
 .emb-fail { background: rgba(0,0,0,.85); }
 @keyframes embspin { to { transform: rotate(360deg); } }
+
+/* مشغّل يوتيوب المضمّن بواجهتنا: الإطار مقصوص من فوق وتحت (العنوان وشعار يوتيوب برّا الصورة) ومسكّر عاللمس */
+.yt-frame { position: absolute; top: 0; right: 0; bottom: 0; left: 0; overflow: hidden; background: #000; --crop: 60px; }
+.player-box .yt-frame iframe { position: absolute; left: 0; top: calc(-1 * var(--crop)); width: 100%; height: calc(100% + 2 * var(--crop)); border: 0; pointer-events: none; }
+.player-box.fs .yt-frame, :fullscreen .yt-frame { --crop: 110px; }
+.yt-frame .emb-cover { z-index: 1; }

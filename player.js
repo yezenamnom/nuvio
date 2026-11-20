@@ -56,7 +56,7 @@
       this.box = box; this.opts = opts; this.shaka = null; this.dead = false;
       box.classList.add('np'); box.dir = 'ltr'; box.tabIndex = 0;
 
-      const v = this.video = document.createElement('video');
+      const v = this.video = opts.media || document.createElement('video'); // opts.media: مشغّل يوتيوب المضمّن (YtMedia)
       v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto'; v.autoplay = true;
       v.setAttribute('x-webkit-airplay', 'allow'); v.disableRemotePlayback = false;
       v.volume = ls.get('vol', 1); v.muted = ls.get('muted', false);
@@ -107,7 +107,7 @@
       this.unmuteEl.onclick = e => { e.stopPropagation(); this._unmute(); };
       ['pointerdown', 'pointerup'].forEach(n => this.unmuteEl.addEventListener(n, e => e.stopPropagation())); // الكبسة عالزر ما بتوقّف الفيديو
       this.ui.append(this.spinner, this.big, this.seekL, this.seekR, this.msgEl, this.speedEl, this.unmuteEl, bottom, this.menu);
-      box.replaceChildren(v, this.ui);
+      box.replaceChildren(opts.media ? opts.media.el : v, this.ui);
       this._bind();
       this._showUI();
       this._watchdog();
@@ -150,6 +150,7 @@
     message(t) { this.msgEl.textContent = t || ''; this.msgEl.classList.toggle('on', !!t); }
     destroy() {
       this.dead = true; clearInterval(this._wd); clearTimeout(this._hideT); clearTimeout(this._apT);
+      if (this.opts.media && this.opts.media.destroy) this.opts.media.destroy();
       if (this._orient) { window.removeEventListener('orientationchange', this._orient); try { screen.orientation.removeEventListener('change', this._orient); } catch { /* */ } }
       document.removeEventListener('keydown', this._key); document.removeEventListener('fullscreenchange', this._fsc);
       document.removeEventListener('visibilitychange', this._vis);
@@ -310,7 +311,7 @@
       v.addEventListener('volumechange', () => {
         this.bVol.innerHTML = v.muted || v.volume === 0 ? ICON.mute : ICON.vol;
         this.vol.value = v.muted ? 0 : v.volume;
-        if (!this._autoMuted) { ls.set('vol', v.volume); ls.set('muted', v.muted); }
+        if (!this._autoMuted && !this.opts.media) { ls.set('vol', v.volume); ls.set('muted', v.muted); } // بمشغّل يوتيوب ما منحفظ (حالتو مش دايماً منّا)
       });
       v.addEventListener('error', () => this.opts.onError && this.opts.onError(v.currentTime));
 
@@ -670,5 +671,126 @@
     }
   }
 
+
+  /* ================= مشغّل يوتيوب المضمّن بواجهتنا =================
+     بيتصرّف متل عنصر <video> (play / pause / currentTime / الأحداث…) فمشغّلنا كلّو بيشتغل فوقو،
+     بس التشغيل الفعلي جوّا إطار يوتيوب على جهاز المستخدم: منبعتلو أوامر رسمية (postMessage) ومنسمع حالتو.
+     الإطار مقصوص من فوق ومن تحت (العنوان وشعار يوتيوب برّا الصورة) ومسكّر عاللمس — كل الكبسات لواجهتنا.
+     قبل ما نتأكد إنو الفيديو نفسو هو اللي عم يمشي (مش إعلان)، ما منحكي لمشغّلنا شي (revealed = false). */
+  class YtMedia extends EventTarget {
+    constructor(id) {
+      super();
+      this.id = id;
+      this.el = mk('div', 'yt-frame');
+      const f = this.f = document.createElement('iframe');
+      f.allow = 'autoplay; encrypted-media; picture-in-picture';
+      f.referrerPolicy = 'strict-origin-when-cross-origin'; // بلاها يوتيوب بيطلّع «خطأ 153»
+      f.tabIndex = -1; f.setAttribute('aria-hidden', 'true');
+      this.el.append(f);
+      this.st = -1; this.ct = 0; this.ctAt = 0; this.ct0 = -1; this.ctMoveAt = 0; this.dur = 0; this.curDur = 0; this.frac = 0; this.vid = '';
+      this.revealed = false; this.wantPlay = true; this.seekingTo = null; this.loop = false;
+      this._muted = true; this._vol = 1; this._wantMuted = false; this._wantVol = 1; this._wantRate = 1;
+      this.playsInline = true; this.preload = 'auto'; this.autoplay = true; this.poster = ''; this.disableRemotePlayback = true; this.error = null;
+      this._onMsg = e => this._msg(e);
+      window.addEventListener('message', this._onMsg);
+      f.addEventListener('load', () => { this._listen(); setTimeout(() => this._listen(), 400); setTimeout(() => this._listen(), 1200); });
+    }
+    setAttribute() { /* متل <video> */ }
+    removeAttribute() { /* */ }
+    get isConnected() { return this.el.isConnected; }
+    load(start) {
+      this.revealed = false;
+      this.st = -1; this.vid = ''; this.curDur = 0; this.ct0 = -1; this.ctMoveAt = 0; this.seekingTo = null;
+      this.t0 = Math.max(0, Math.floor(start || 0)); this.ct = this.t0; this.ctAt = 0;
+      this.loadAt = Date.now();
+      this.f.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(this.id)}?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&iv_load_policy=3&rel=0&playsinline=1&enablejsapi=1&start=${this.t0}&origin=${encodeURIComponent(location.origin)}&_=${Date.now()}`;
+      this._emit('loadstart'); this._emit('waiting');
+    }
+    _post(o) { try { this.f.contentWindow.postMessage(JSON.stringify({ id: 'nuvio', channel: 'widget', ...o }), '*'); } catch { /* */ } }
+    _listen() { this._post({ event: 'listening' }); }
+    cmd(func, args = []) { this._post({ event: 'command', func, args }); }
+    _emit(n) { this.dispatchEvent(new Event(n)); }
+    _msg(e) {
+      if (e.source !== this.f.contentWindow) return;
+      let d = e.data; try { d = typeof d === 'string' ? JSON.parse(d) : d; } catch { return; }
+      if (!d || typeof d !== 'object') return;
+      if (d.event === 'onError') { this.errorCode = d.info; this._emit('yterror'); return; }
+      const i = d.info; if (!i || typeof i !== 'object') return;
+      if (i.videoData && i.videoData.video_id) this.vid = i.videoData.video_id;
+      const pd = (i.progressState && i.progressState.duration) || i.duration;
+      if (pd > 0) {
+        this.curDur = pd;
+        if (!this.dur && i.playerState !== 1 && this.st !== 1) this.dur = pd; // أول مدة قبل التشغيل = مدة الفيديو نفسو
+      }
+      if (typeof i.videoLoadedFraction === 'number') { this.frac = i.videoLoadedFraction; if (this.revealed) this._emit('progress'); }
+      const mv0 = this._muted;
+      if (typeof i.muted === 'boolean') this._muted = i.muted;
+      if (typeof i.volume === 'number') this._vol = i.volume / 100;
+      if (this.revealed && mv0 !== this._muted) this._emit('volumechange');
+      if (typeof i.currentTime === 'number') {
+        if (this.ct0 < 0) this.ct0 = i.currentTime;
+        if (Math.abs(i.currentTime - this.ct) > 0.05) this.ctMoveAt = Date.now();
+        this.ct = i.currentTime; this.ctAt = performance.now();
+        if (this.seekingTo != null && Math.abs(this.ct - this.seekingTo) < 2) { this.seekingTo = null; if (this.revealed) this._emit('seeked'); }
+        if (this.revealed) this._emit('timeupdate');
+      }
+      if (typeof i.playerState === 'number' && i.playerState !== this.st) {
+        const prev = this.st; this.st = i.playerState;
+        if (this.revealed) this._stateEvents(prev);
+      }
+    }
+    _stateEvents(prev) {
+      const s = this.st;
+      if (s === 1) { if (prev !== 3) this._emit('play'); this._emit('playing'); this._emit('canplay'); }
+      else if (s === 2) this._emit('pause');
+      else if (s === 3) this._emit('waiting');
+      else if (s === 0) {
+        if (this.loop) { this.cmd('seekTo', [0, true]); this.cmd('playVideo'); return; }
+        this._emit('pause'); this._emit('ended');
+      }
+    }
+    /* تأكدنا إنو الفيديو نفسو: منكشفو لمشغّلنا ومنطبّق الصوت والسرعة */
+    reveal() {
+      if (this.revealed) return;
+      this.revealed = true;
+      this._muted = this._wantMuted;
+      this.cmd(this._wantMuted ? 'mute' : 'unMute');
+      this.cmd('setVolume', [Math.round(Math.max(0, Math.min(1, this._wantVol)) * 100)]);
+      if (this._wantRate !== 1) this.cmd('setPlaybackRate', [this._wantRate]);
+      if (!this.wantPlay) this.cmd('pauseVideo');
+      this._emit('durationchange'); this._emit('loadedmetadata'); this._emit('canplay'); this._emit('volumechange');
+      if (this.st === 1 && this.wantPlay) { this._emit('play'); this._emit('playing'); }
+    }
+    hide() { this.revealed = false; this._emit('waiting'); }
+    get currentTime() {
+      if (this.seekingTo != null) return this.seekingTo;
+      if (this.st === 1 && this.ctAt) return this.ct + Math.min(1, (performance.now() - this.ctAt) / 1000) * (this._wantRate || 1);
+      return this.ct;
+    }
+    set currentTime(t) {
+      t = Math.max(0, +t || 0);
+      this.seekingTo = t; this.ct = t; this.ctAt = 0;
+      this.cmd('seekTo', [t, true]);
+      this._emit('seeking'); this._emit('timeupdate');
+    }
+    get duration() { return this.dur || this.curDur || NaN; }
+    get paused() { return this.revealed ? !(this.st === 1 || this.st === 3) : !this.wantPlay; }
+    get ended() { return this.revealed && this.st === 0; }
+    get seeking() { return this.seekingTo != null; }
+    get readyState() { return this.revealed ? 4 : 0; }
+    get buffered() { const end = (this.frac || 0) * (this.duration || 0); return { length: end > 0 ? 1 : 0, start: () => 0, end: () => end }; }
+    get videoWidth() { return 1920; }
+    get videoHeight() { return 1080; }
+    get muted() { return this.revealed ? this._muted : this._wantMuted; }
+    set muted(m) { this._wantMuted = !!m; if (this.revealed) { this.cmd(m ? 'mute' : 'unMute'); this._muted = !!m; this._emit('volumechange'); } }
+    get volume() { return this._wantVol; }
+    set volume(x) { this._wantVol = +x; if (this.revealed) { this.cmd('setVolume', [Math.round(Math.max(0, Math.min(1, +x)) * 100)]); this._emit('volumechange'); } }
+    get playbackRate() { return this._wantRate || 1; }
+    set playbackRate(r) { this._wantRate = +r || 1; this.cmd('setPlaybackRate', [this._wantRate]); }
+    play() { this.wantPlay = true; this.cmd('playVideo'); return Promise.resolve(); }
+    pause() { this.wantPlay = false; this.cmd('pauseVideo'); if (this.revealed && this.st !== 2 && this.st !== 0) { this.st = 2; this._emit('pause'); } }
+    destroy() { window.removeEventListener('message', this._onMsg); try { this.f.src = 'about:blank'; } catch { /* */ } }
+  }
+  window.YtMedia = YtMedia;
   window.NuvioPlayer = NuvioPlayer;
 })();
