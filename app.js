@@ -538,6 +538,12 @@ async function renderHome() {
     hist.forEach(v => shelf.append(card(v)));
     view.append(head, shelf);
   }
+  if (!hist.length) {
+    const tip = el('a', 'import-tip');
+    tip.href = '#/history?import';
+    tip.append(el('span', null, '⬇️'), el('span', null, 'جيب سجلّك من يوتيوب لتصير المقترحات على ذوقك'));
+    view.append(tip);
+  }
   view.append(el('h2', 'section-title', hist.length || searches.length ? 'مقترحات إلك' : 'مقترحات'));
   const g = el('div', 'grid'); g.append(skCards(12));
   view.append(g);
@@ -564,6 +570,62 @@ async function renderHome() {
   }
 }
 
+/* ================= استيراد سجل يوتيوب (Google Takeout) ================= */
+function applyImport(res) {
+  // المشاهدات: منخلطها مع سجلّك ومنرتّبها من الأحدث
+  const map = new Map();
+  for (const v of lib.list('hist')) map.set(v.id, v);
+  let added = 0;
+  for (const v of res.watch) {
+    const old = map.get(v.id);
+    if (!old) added++;
+    if (!old || (v.at || 0) > (old.at || 0)) map.set(v.id, { ...(old || {}), id: v.id, title: v.title, thumb: ytThumb(v.id), author: v.author, authorId: v.authorId, at: v.at || (old && old.at) || 0 });
+  }
+  store.set('hist', [...map.values()].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 500));
+  // البحوث
+  const cur = store.get('searches', []);
+  const seenQ = new Set(cur.map(s => s.toLowerCase()));
+  const newQ = res.search.sort((a, b) => b.at - a.at).map(s => s.q).filter(q => { const k = q.toLowerCase(); if (seenQ.has(k)) return false; seenQ.add(k); return true; });
+  store.set('searches', cur.concat(newQ).slice(0, 40));
+  return { videos: added, searches: Math.min(newQ.length, Math.max(0, 40 - cur.length)) };
+}
+
+function importPanel(onDone) {
+  const box = el('div', 'import-box');
+  box.append(el('h3', 'import-title', 'جيب سجلّك من يوتيوب'));
+  box.append(el('p', 'muted', 'لحتى تبلّش المقترحات على ذوقك من أول يوم. الملف بينقرا جوّا جهازك بس وما بيطلع لأي مكان.'));
+  const ol = el('ol', 'import-steps');
+  const li1 = el('li');
+  li1.append('افتح ');
+  const a = el('a', 'lnk', 'takeout.google.com'); a.href = 'https://takeout.google.com/settings/takeout/custom/youtube'; a.target = '_blank'; a.rel = 'noopener noreferrer';
+  li1.append(a, ' وسجّل دخول بحساب يوتيوب تبعك.');
+  ol.append(li1);
+  ol.append(el('li', null, 'اختار بس «YouTube and YouTube Music»، وبـ «All YouTube data included» خلّي بس «history» (السجل).'));
+  ol.append(el('li', null, 'اختياري: من «Multiple formats» غيّر History لـ JSON (أدق). وإذا تركتها HTML كمان بتزبط.'));
+  ol.append(el('li', null, 'اكبس «Next step» ← «Create export». غوغل بتبعتلك إيميل فيه الرابط (عادةً خلال دقايق).'));
+  ol.append(el('li', null, 'نزّل الملف (zip) واختارو هون — ما في داعي تفكّو.'));
+  box.append(ol);
+  const input = el('input'); input.type = 'file'; input.accept = '.zip,.json,.html,application/zip,application/json,text/html'; input.multiple = true; input.hidden = true;
+  const pick = el('button', 'btn primary', '📂 اختار ملف Takeout');
+  const status = el('div', 'import-status');
+  pick.onclick = () => input.click();
+  input.onchange = async () => {
+    if (!input.files.length) return;
+    pick.disabled = true; status.textContent = 'عم اقرأ الملف…';
+    try {
+      const res = await NuvioImport.readFiles([...input.files]);
+      if (!res.watch.length && !res.search.length) { status.textContent = 'ما لقيت سجل بهالملف. تأكد إنك اخترت ملف Takeout تبع يوتيوب (فيه history).'; return; }
+      const r = applyImport(res);
+      status.textContent = `✓ انضاف ${nf.format(r.videos)} فيديو و ${nf.format(r.searches)} بحث لسجلّك.`;
+      note('انستورد السجل ✓');
+      if (onDone) setTimeout(onDone, 1200);
+    } catch (e) { status.textContent = 'ما زبط: ' + (e.message || e); }
+    finally { pick.disabled = false; input.value = ''; }
+  };
+  box.append(pick, input, status);
+  return box;
+}
+
 /* سجل المشاهدة / الإعجابات / المفضلة */
 function renderLibrary(kind) {
   const titles = { hist: 'سجل المشاهدة', likes: 'الإعجابات', favs: 'القائمة المفضلة' };
@@ -577,7 +639,14 @@ function renderLibrary(kind) {
     clr.onclick = () => { if (confirm('متأكد؟ ما في رجعة.')) { lib.clear(kind); if (kind === 'hist') store.set('searches', []); renderLibrary(kind); } };
     head.append(clr);
   }
-  view.replaceChildren(head);
+  if (kind === 'hist') {
+    const imp = el('button', 'btn', '⬇️ استورد من يوتيوب');
+    const wantPanel = !items.length || /import/.test(location.hash);
+    imp.onclick = () => { const ex = view.querySelector('.import-box'); if (ex) ex.remove(); else head.after(importPanel(() => renderLibrary('hist'))); };
+    head.append(imp);
+    view.replaceChildren(head);
+    if (wantPanel) head.after(importPanel(() => renderLibrary('hist')));
+  } else view.replaceChildren(head);
   if (!items.length) { view.append(el('div', 'empty', empties[kind])); return; }
   const g = el('div', 'grid');
   items.forEach(v => {
@@ -1302,7 +1371,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120041649';
+const APP_VERSION = '20261120042002';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

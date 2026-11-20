@@ -470,3 +470,11 @@ body.search-focus .search { max-width: none; }
 .shelf .sub { font-size: .75rem; }
 .shelf .thumb { border-radius: 10px; }
 @media (max-width: 600px) { .shelf { grid-auto-columns: 40%; } }
+
+/* ---------- استيراد من يوتيوب ---------- */
+.import-box { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 18px; }
+.import-title { margin: 0 0 4px; font-size: 1.1rem; }
+.muted { color: var(--muted); font-size: .9rem; margin: 0 0 10px; }
+.import-steps { margin: 0 0 14px; padding-inline-start: 22px; line-height: 1.8; }
+.import-status { margin-top: 10px; font-weight: 700; color: var(--accent); }
+.import-tip { display: flex; align-items: center; gap: 10px; background: linear-gradient(90deg, rgba(139,92,246,.18), rgba(236,72,153,.18)); border: 1px solid rgba(167,139,250,.35); border-radius: 14px; padding: 10px 14px; margin-bottom: 16px; font-weight: 600; font-size: .92rem; }
