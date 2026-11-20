@@ -21,23 +21,26 @@ const store = {
   set(k, v) { try { localStorage.setItem('nuvio:' + k, JSON.stringify(v)); } catch { /* ignore */ } },
 };
 
-let instances = mergeInstances(store.get('custom', []));
-let selected = store.get('selected', instances[0].url);
-const health = {}; // url -> 'ok' | 'bad'
+const instances = DEFAULT_INSTANCES;
+/* صحّة كل سيرفر وسرعتو، محفوظة لحتى الفتحة الجاية تبلّش بالأسرع */
+const health = store.get('health', {}); // url -> { ok: bool, ms: number, at: time }
 
-function mergeInstances(custom) {
-  const all = [...DEFAULT_INSTANCES];
-  for (const c of custom) if (!all.some(i => i.url === c.url)) all.push(c);
-  return all;
+function mark(url, ok, ms) {
+  health[url] = { ok, ms: ms || 99999, at: Date.now() };
+  store.set('health', health);
 }
-
-/* السيرفر المختار أولاً، بعدين الشغّالين، بعدين الباقي */
+/* الأسرع الشغّال أول، بعدين اللي ما انفحص، بعدين المعطوب */
 function orderedInstances() {
-  const rank = i => (i.url === selected ? 0 : health[i.url] === 'ok' ? 1 : health[i.url] === 'bad' ? 3 : 2);
-  return [...instances].sort((a, b) => rank(a) - rank(b));
+  const score = i => {
+    const h = health[i.url];
+    if (!h) return 50000;
+    if (!h.ok) return Date.now() - h.at > 10 * 60 * 1000 ? 60000 : 90000; // المعطوب منرجع نجرّبو بعد 10 دقايق
+    return h.ms;
+  };
+  return [...instances].sort((a, b) => score(a) - score(b));
 }
 
-async function fetchJSON(url, ms = 12000) {
+async function fetchJSON(url, ms = 9000) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), ms);
   try {
@@ -51,25 +54,49 @@ async function fetchJSON(url, ms = 12000) {
   } finally { clearTimeout(t); }
 }
 
-/* جرّب العملية على كل السيرفرات بالترتيب لحتى ينجح واحد */
-async function withFallback(op, { skip = [] } = {}) {
-  const errors = [];
-  for (const inst of orderedInstances()) {
-    if (skip.includes(inst.url)) continue;
-    try {
-      const res = await op(inst);
-      health[inst.url] = 'ok';
-      if (inst.url !== selected) note(`السيرفر المختار ما ردّ، استعملت ${host(inst.url)}`);
-      return { inst, res };
-    } catch (e) {
-      health[inst.url] = 'bad';
-      errors.push(`${host(inst.url)}: ${e.message || e}`);
-      console.warn('[nuvio]', inst.url, e);
-    }
+/* تبديل تلقائي سريع: منبلّش بالأسرع، وإذا تأخّر أكتر من ثانيتين ونص منبلّش بالتاني بنفس الوقت،
+   وإذا فشل واحد منروح فوراً عالي بعدو. أول واحد بيرد بيربح. */
+function withFallback(op, { skip = [], stagger = 2500 } = {}) {
+  const list = orderedInstances().filter(i => !skip.includes(i.url));
+  return new Promise((resolve, reject) => {
+    if (!list.length) return reject(new Error('ما في سيرفرات'));
+    let done = false, idx = 0, running = 0, timer;
+    const errors = [];
+    const launch = () => {
+      clearTimeout(timer);
+      if (done || idx >= list.length) return;
+      const inst = list[idx++]; running++;
+      const t0 = performance.now();
+      op(inst).then(res => {
+        running--;
+        if (done) return;
+        done = true; clearTimeout(timer);
+        mark(inst.url, true, performance.now() - t0);
+        resolve({ inst, res });
+      }, e => {
+        running--;
+        mark(inst.url, false);
+        errors.push(`${host(inst.url)}: ${e.message || e}`);
+        console.warn('[nuvio]', inst.url, e);
+        if (done) return;
+        if (idx < list.length) launch();
+        else if (!running) { const err = new Error('ما في سيرفر عم يرد هلّق، جرّب بعد شوي'); err.details = errors; reject(err); }
+      });
+      if (idx < list.length) timer = setTimeout(launch, stagger);
+    };
+    launch();
+  });
+}
+
+/* فحص خفيف بالخلفية أول ما يفتح الموقع، لحتى نعرف مين الأسرع */
+function probeAll() {
+  for (const inst of instances) {
+    const h = health[inst.url];
+    if (h && Date.now() - h.at < 5 * 60 * 1000) continue;
+    const t0 = performance.now();
+    const url = inst.type === 'piped' ? `${inst.url}/trending?region=DE` : `${inst.url}/api/v1/search?q=a&type=video`;
+    fetchJSON(url, 8000).then(() => mark(inst.url, true, performance.now() - t0), () => mark(inst.url, false));
   }
-  const err = new Error('كل السيرفرات فشلت');
-  err.details = errors;
-  throw err;
 }
 
 /* ---------------- محوّلات الـ API ---------------- */
@@ -440,6 +467,8 @@ async function renderWatch(id) {
 
   function embed() {
     destroyPlayer();
+    if (np) { np.destroy(); np = null; }
+    box.classList.remove('np', 'ui', 'paused', 'loading');
     box.replaceChildren();
     const f = document.createElement('iframe');
     f.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&modestbranding=1`;
@@ -447,70 +476,99 @@ async function renderWatch(id) {
     f.allowFullscreen = true;
     f.referrerPolicy = 'strict-origin-when-cross-origin';
     box.append(f);
-    setChip('مشغّل مضمّن (nocookie)', 'warn');
+    setChip('مشغّل احتياطي', 'warn');
   }
 
-  async function playSources(inst, sources) {
-    box.replaceChildren();
-    const video = document.createElement('video');
-    video.controls = true; video.autoplay = true; video.playsInline = true; video.preload = 'auto';
-    box.append(video);
-    msg('عم يجهّز البث…');
-    video.addEventListener('playing', () => msg(''), { once: true });
-    video.addEventListener('loadeddata', () => msg(''), { once: true });
+  let np = null, srcList = [], srcIdx = 0, curInst = null, reloads = 0;
 
-    for (let s of sources) {
+  async function loadSource(s, startAt) {
+    if (s.kind === 'mp4') {
+      await destroyPlayer();
+      np.setShaka(null);
+      np.video.src = s.url;
+      await new Promise((ok, bad) => {
+        np.video.addEventListener('loadedmetadata', ok, { once: true });
+        np.video.addEventListener('error', () => bad(new Error('mp4 فشل')), { once: true });
+        setTimeout(() => bad(new Error('مهلة')), 15000);
+      });
+      if (startAt) np.video.currentTime = startAt;
+    } else {
+      if (!window.shaka || !shaka.Player.isBrowserSupported()) throw new Error('Shaka مش متوفر');
+      await destroyPlayer();
+      player = new shaka.Player();
+      await player.attach(np.video);
+      player.getNetworkingEngine().registerRequestFilter(async (type, req) => {
+        req.uris = await Promise.all(req.uris.map(fixUrl));
+      });
+      player.configure({
+        preferredVideoCodecs: ['avc1', 'vp9'],
+        streaming: {
+          bufferingGoal: 40, rebufferingGoal: 1.5,
+          retryParameters: { maxAttempts: 4, baseDelay: 400, backoffFactor: 1.6, timeout: 12000 },
+          stallEnabled: true, stallThreshold: 1, stallSkip: 0.1,
+        },
+        manifest: { retryParameters: { maxAttempts: 3, baseDelay: 400, timeout: 12000 } },
+        abr: { enabled: true },
+      });
+      const me = player;
+      player.addEventListener('error', ev => {
+        console.warn('[nuvio] shaka', ev.detail);
+        if (player === me && ev.detail && ev.detail.severity === 2) recover(np.video.currentTime);
+      });
+      const url = await resolveUrl(s.url);
+      await player.load(url, startAt || null);
+      np.setShaka(player);
+      np.applySavedQuality();
+    }
+  }
+
+  async function playSources(inst, sources, startAt) {
+    curInst = inst; srcList = sources;
+    if (!np || !np.box.isConnected || !box.contains(np.video)) {
+      np = new NuvioPlayer(box, { onStall: t => recover(t), onError: t => recover(t) });
+    }
+    np.message('');
+    for (srcIdx = 0; srcIdx < srcList.length; srcIdx++) {
       try {
-        if (s.kind === 'mp4') {
-          await destroyPlayer();
-          video.src = s.url;
-          await new Promise((ok, bad) => {
-            video.addEventListener('loadedmetadata', ok, { once: true });
-            video.addEventListener('error', () => bad(new Error('mp4 فشل')), { once: true });
-            setTimeout(() => bad(new Error('مهلة')), 15000);
-          });
-        } else {
-          if (!window.shaka || !shaka.Player.isBrowserSupported()) throw new Error('Shaka مش متوفر');
-          await destroyPlayer();
-          player = new shaka.Player();
-          await player.attach(video);
-          player.getNetworkingEngine().registerRequestFilter(async (type, req) => {
-            req.uris = await Promise.all(req.uris.map(fixUrl));
-          });
-          s = { ...s, url: await resolveUrl(s.url) };
-          player.configure({
-            preferredVideoCodecs: ['avc1', 'vp9'],
-            streaming: { bufferingGoal: 30, retryParameters: { maxAttempts: 2, timeout: 15000 } },
-            manifest: { retryParameters: { maxAttempts: 2, timeout: 15000 } },
-          });
-          await player.load(s.url);
-        }
-        setChip(`بث مباشر بلا إعلانات • ${s.kind.toUpperCase()}${s.label ? ' ' + s.label : ''} • ${host(inst.url)}`, 'ok');
-        video.play().catch(() => { /* المتصفح ممكن يمنع التشغيل التلقائي */ });
+        await loadSource(srcList[srcIdx], startAt);
+        setChip('بلا إعلانات ✓', 'ok');
+        np.video.play().catch(() => { /* المتصفح ممكن يمنع التشغيل التلقائي */ });
         return true;
-      } catch (e) {
-        console.warn('[nuvio] source failed', s, e);
-      }
+      } catch (e) { console.warn('[nuvio] source failed', srcList[srcIdx], e); }
     }
     return false;
   }
 
-  async function tryNext() {
+  /* إذا علّق أو صار خطأ: أول شي منعيد تحميل نفس المصدر من نفس الثانية، بعدين منبدّل سيرفر لحالنا */
+  let recovering = false;
+  async function recover(t) {
+    if (recovering || !layout.isConnected || !np) return;
+    recovering = true;
+    try {
+      reloads++;
+      if (reloads <= 2 && srcList[srcIdx]) {
+        try { await loadSource(srcList[srcIdx], t); np.video.play().catch(() => {}); return; } catch { /* كمّل للسيرفر التاني */ }
+      }
+      reloads = 0;
+      if (curInst) mark(curInst.url, false);
+      await tryNext(t);
+    } finally { recovering = false; }
+  }
+
+  async function tryNext(startAt) {
     try {
       const { inst, res } = await withFallback(i => apiFor(i).video(i.url, id), { skip: tried });
       tried.push(inst.url);
-      current = { inst, data: res };
       if (!layout.isConnected) { view.replaceChildren(layout); }
-      fillInfo(res);
-      if (await playSources(inst, res.sources)) return;
-      health[inst.url] = 'bad';
-      note(`البث من ${host(inst.url)} ما اشتغل، عم جرّب غيرو…`);
-      return tryNext();
+      if (!current) fillInfo(res);
+      current = { inst, data: res };
+      if (await playSources(inst, res.sources, startAt)) return;
+      mark(inst.url, false);
+      return tryNext(startAt);
     } catch (e) {
       if (!layout.isConnected) view.replaceChildren(layout);
       if (!current) info.replaceChildren(el('h1', 'v-title', 'ما قدرت جيب معلومات الفيديو'));
-      if ($('#autoEmbed').checked) { note('ما في سيرفر قدر يبث، استعملت المشغّل المضمّن'); embed(); }
-      else { box.replaceChildren(); msg('ما في سيرفر قدر يبث هالفيديو.'); }
+      embed();
     }
   }
 
@@ -530,13 +588,9 @@ async function renderWatch(id) {
     info.append(row);
 
     const actions = el('div', 'v-actions');
-    const other = el('button', 'btn', 'جرّب سيرفر تاني');
-    other.onclick = () => { msg('عم جرّب سيرفر تاني…'); tryNext(); };
-    const emb = el('button', 'btn', 'المشغّل المضمّن');
-    emb.onclick = embed;
     const share = el('button', 'btn', 'انسخ الرابط الأصلي');
     share.onclick = () => navigator.clipboard?.writeText(`https://youtu.be/${id}`).then(() => note('انسخ ✓'), () => note(`https://youtu.be/${id}`));
-    actions.append(other, emb, share, chip);
+    actions.append(share, chip);
     info.append(actions);
 
     if (d.description) {
@@ -550,6 +604,7 @@ async function renderWatch(id) {
   }
 
   setChip('…');
+  box.append(el('div', 'player-msg', 'عم يجهّز الفيديو…'));
   await tryNext();
 }
 
@@ -574,50 +629,7 @@ $('#searchForm').addEventListener('submit', e => {
   if (q) { $('#q').blur(); location.hash = `#/search?q=${encodeURIComponent(q)}`; }
 });
 
-/* ---------------- الإعدادات ---------------- */
-function fillSelect() {
-  const sel = $('#instanceSel');
-  sel.replaceChildren();
-  for (const i of instances) {
-    const o = el('option', null, `${host(i.url)} (${i.type})`);
-    o.value = i.url; o.selected = i.url === selected; sel.append(o);
-  }
-}
-$('#instanceSel').addEventListener('change', e => { selected = e.target.value; store.set('selected', selected); note('تم: ' + host(selected)); route(); });
-$('#settingsBtn').addEventListener('click', () => { const s = $('#settings'); s.hidden = !s.hidden; });
-$('#autoEmbed').checked = store.get('autoEmbed', true);
-$('#autoEmbed').addEventListener('change', e => store.set('autoEmbed', e.target.checked));
-
-$('#addBtn').addEventListener('click', () => {
-  let u = $('#customUrl').value.trim().replace(/\/+$/, '');
-  if (!/^https?:\/\//.test(u)) return note('حط رابط كامل بيبلّش بـ https://');
-  const custom = store.get('custom', []);
-  if (!instances.some(i => i.url === u)) { custom.push({ url: u, type: $('#customType').value }); store.set('custom', custom); }
-  instances = mergeInstances(custom);
-  selected = u; store.set('selected', u);
-  $('#customUrl').value = ''; fillSelect(); note('انضاف ✓');
-});
-
-$('#testBtn').addEventListener('click', async () => {
-  const list = $('#instanceStatus');
-  list.replaceChildren();
-  await Promise.all(instances.map(async inst => {
-    const li = el('li'); const dot = el('span', 'dot'); const txt = el('span', null, `${host(inst.url)} — عم يفحص…`);
-    li.append(txt, dot); list.append(li);
-    const t0 = performance.now();
-    try {
-      const r = await apiFor(inst).search(inst.url, 'test', 1);
-      if (!r.items.length) throw new Error('بحث فاضي');
-      health[inst.url] = 'ok'; dot.classList.add('ok');
-      txt.textContent = `${host(inst.url)} — OK ${Math.round(performance.now() - t0)}ms`;
-    } catch (e) {
-      health[inst.url] = 'bad'; dot.classList.add('bad');
-      txt.textContent = `${host(inst.url)} — ${e.name === 'AbortError' ? 'timeout' : e.message}`;
-    }
-  }));
-});
-
 /* ---------------- البداية ---------------- */
 if (window.shaka) shaka.polyfill.installAll();
-fillSelect();
+probeAll();
 route();
