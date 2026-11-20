@@ -161,6 +161,19 @@ const getChannel = id => cached('c:' + id, 10 * 60e3, () => withFallback(i => ap
 const abs = (base, u) => (!u ? '' : u.startsWith('//') ? 'https:' + u : u.startsWith('/') ? base + u : u);
 const ytThumb = (id, q = 'mqdefault') => `https://i.ytimg.com/vi/${id}/${q}.jpg`;
 
+/* بعض السيرفرات بتبعت الوصف كـ HTML بس: منحوّلو لنص، والروابط بتضل روابط كاملة */
+function htmlText(html) {
+  if (!html) return '';
+  const doc = new DOMParser().parseFromString(String(html).replace(/<br\s*\/?>/gi, '\n'), 'text/html');
+  doc.querySelectorAll('a').forEach(a => {
+    const href = a.getAttribute('href') || '', txt = a.textContent || '';
+    let full = /^https?:/i.test(txt) ? txt : href;
+    if (full.startsWith('/watch')) full = 'https://www.youtube.com' + full;
+    if (/^https?:/i.test(full) && !/^(#|\d{1,2}:\d{2})/.test(txt)) a.replaceWith(full); // الأوقات (1:23) منخلّيها نص
+  });
+  return doc.body.textContent.trim();
+}
+
 const Invidious = {
   pickThumb(base, arr, id) {
     const t = (arr || []).find(x => x.quality === 'medium') || (arr || []).find(x => x.quality === 'high') || (arr || [])[0];
@@ -235,7 +248,7 @@ const Invidious = {
       audio,
       id, title: d.title, author: d.author, authorId: d.authorId, subs: d.subCountText || '',
       avatar: Invidious.pickAvatar(base, d.authorThumbnails), views: d.viewCount, published: d.publishedText,
-      likes: d.likeCount, description: d.description || '',
+      likes: d.likeCount, description: d.description || htmlText(d.descriptionHtml),
       related: (d.recommendedVideos || []).map(v => Invidious.item(base, v)),
       sources,
     };
@@ -520,7 +533,7 @@ function makeHomeFeed(seen) {
 }
 
 /* ================= الصفحات ================= */
-async function renderHome() {
+async function renderHome(force) {
   document.title = 'Nuvio — فيديو بلا إعلانات';
   view.replaceChildren();
   // آخر البحوث
@@ -551,15 +564,26 @@ async function renderHome() {
   view.append(g);
   const seen = new Set();
   const feed = makeHomeFeed(seen);
+  // القائمة بتنحفظ على الجهاز: لمّا تفتح الموقع بتلاقي آخر قائمة فوراً، وبتتجدّد بس بالسحب للتحديث
+  const kept = [];
+  const keep = items => { kept.push(...items.map(slim)); if (kept.length <= 120) store.set('homeFeed', { at: Date.now(), items: kept }); };
+  const saved = !force && store.get('homeFeed', null);
   try {
-    // أول دفعة كبيرة لحتى تتعبّى الشاشة فوراً
     let first = [];
-    for (let i = 0; i < 3 && first.length < 24; i++) first = first.concat(await feed());
+    if (saved && saved.items && saved.items.length && Date.now() - saved.at < 12 * 3600e3) {
+      first = saved.items.filter(v => v && v.id);
+      first.forEach(v => seen.add(v.id));
+      kept.push(...first);
+    } else {
+      // أول دفعة كبيرة لحتى تتعبّى الشاشة فوراً
+      for (let i = 0; i < 3 && first.length < 24; i++) first = first.concat(await feed());
+      keep(first);
+    }
     if (!g.isConnected) return;
     g.replaceChildren();
     if (!first.length) throw new Error('فاضي');
     first.forEach(v => g.append(card(v)));
-    infinite(g, async () => { const more = await feed(); more.forEach(v => g.append(card(v))); return more.length > 0; });
+    infinite(g, async () => { const more = await feed(); more.forEach(v => g.append(card(v))); keep(more); return more.length > 0; });
   } catch {
     if (!g.isConnected) return;
     const d = el('div', 'empty');
@@ -684,7 +708,7 @@ async function handleSync(b64) {
       const li = el('li'); li.append(el('span', null, k), el('b', null, nf.format(n))); ul.append(li);
     });
     const go = el('a', 'btn primary', 'يلا عالرئيسية'); go.href = '#/';
-    go.onclick = e => { e.preventDefault(); pageCache.delete('/'); shownKey = '/'; window.scrollTo(0, 0); renderHome(); };
+    go.onclick = e => { e.preventDefault(); pageCache.delete('/'); shownKey = '/'; window.scrollTo(0, 0); renderHome(true); };
     const subs = el('a', 'btn', '📺 اشتراكاتي'); subs.href = '#/subs';
     const row = el('div', 'v-actions'); row.style.justifyContent = 'center'; row.append(go, subs);
     box.append(ul, row);
@@ -981,7 +1005,12 @@ async function renderWatch(id, startTime) {
     metaRow.append(au, el('span', null, fmtViews(pv.views, pv.viewsText)), el('span', null, pv.published || ''));
   } else metaRow.append(el('span', 'sk sk-line short'));
   const descSk = el('div', 'desc sk-desc'); descSk.append(el('div', 'sk sk-line'), el('div', 'sk sk-line'), el('div', 'sk sk-line short'));
-  info.append(h1, metaRow, descSk);
+  // العنوان + سهم بيفتح الوصف (بيبيّن بس إذا في وصف)
+  const titleRow = el('div', 'title-row');
+  const chev = el('button', 'desc-chev'); chev.hidden = true; chev.setAttribute('aria-label', 'الوصف');
+  chev.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>';
+  titleRow.append(h1, chev);
+  info.append(titleRow, metaRow, descSk);
   const sideList = el('div', 'related-list'); sideList.append(skCards(8, true));
   side.append(el('h2', 'section-title', 'فيديوهات مشابهة'), sideList);
   view.replaceChildren(layout);
@@ -1144,10 +1173,36 @@ async function renderWatch(id, startTime) {
     const body = el('div', 'desc-body'); body.dir = 'auto';
     renderRich(body, d.description || '', s => { if (np) { np.video.currentTime = s; np.video.play().catch(() => {}); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
     desc.append(body);
+    // الروابط اللي بالوصف، مجمّعة تحت لمّا يفتح
+    const urls = [...new Set((d.description || '').match(/https?:\/\/[^\s]+/g) || [])].slice(0, 12);
+    if (urls.length) {
+      const lk = el('div', 'desc-links');
+      lk.append(el('div', 'desc-links-t', `🔗 الروابط (${urls.length})`));
+      urls.forEach(u => {
+        const yt = parseYT(u);
+        const a = el('a', 'desc-link');
+        a.textContent = u.replace(/^https?:\/\/(www\.)?/, '').slice(0, 60);
+        if (yt && yt.type === 'video') a.href = `#/watch?v=${yt.id}${yt.t ? `&t=${yt.t}` : ''}`;
+        else if (yt && yt.type === 'channel') a.href = chHref(yt.id);
+        else { a.href = u; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+        lk.append(a);
+      });
+      desc.append(lk);
+    }
     const moreBtn = el('button', 'desc-more', 'المزيد');
-    moreBtn.onclick = e => { e.stopPropagation(); desc.classList.toggle('open'); moreBtn.textContent = desc.classList.contains('open') ? 'عرض أقل' : 'المزيد'; };
-    desc.onclick = e => { if (!desc.classList.contains('open') && !e.target.closest('a')) moreBtn.click(); };
-    if (d.description) desc.append(moreBtn);
+    const setOpen = open => {
+      desc.classList.toggle('open', open);
+      chev.classList.toggle('open', open);
+      moreBtn.textContent = open ? 'عرض أقل' : 'المزيد';
+    };
+    moreBtn.onclick = e => { e.stopPropagation(); setOpen(!desc.classList.contains('open')); };
+    desc.onclick = e => { if (!desc.classList.contains('open') && !e.target.closest('a')) setOpen(true); };
+    chev.onclick = () => {
+      const open = !desc.classList.contains('open');
+      setOpen(open);
+      if (open) desc.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+    if (d.description) { desc.append(moreBtn); chev.hidden = false; }
     descSk.replaceWith(desc);
 
     // المشابهة + تحميل لا نهائي
@@ -1589,17 +1644,24 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120050846';
+const APP_VERSION = '20261120051330';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
     if (!r.ok) return;
     const v = (await r.text()).trim();
-    if (v && v !== APP_VERSION && store.get('reloadedFor', '') !== v) {
-      store.set('reloadedFor', v);
-      if (active && active.np() && !active.np().video.paused) return; // ما منقطع فيديو شغّال
-      location.replace(`${location.pathname}?v=${encodeURIComponent(v)}${location.hash}`);
-    }
+    if (!v || v === APP_VERSION || store.get('reloadedFor', '') === v) return;
+    if (active && active.np() && !active.np().video.paused) return; // ما منقطع فيديو شغّال
+    store.set('reloadedFor', v);
+    const reload = () => location.replace(`${location.pathname}?v=${encodeURIComponent(v)}${location.hash}`);
+    // مع التخزين المؤقت: منطلب النسخة الجديدة، ومنستنّاها تتركّب، وبعدين منعيد التحميل
+    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    if (!reg) { reload(); return; }
+    let done = false;
+    const go = () => { if (!done) { done = true; reload(); } };
+    navigator.serviceWorker.addEventListener('controllerchange', go, { once: true });
+    await reg.update().catch(() => {});
+    setTimeout(go, 8000); // احتياط إذا ما تغيّر شي
   } catch { /* بلا نت */ }
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
@@ -1652,7 +1714,7 @@ function restorePage(key) {
     if (!go) { reset(); return; }
     ind.classList.remove('ready'); ind.classList.add('spin');
     pageCache.delete('/');
-    renderHome().finally(() => { ind.classList.remove('spin'); reset(); });
+    renderHome(true).finally(() => { ind.classList.remove('spin'); reset(); });
   });
 })();
 
@@ -1694,6 +1756,8 @@ window.addEventListener('hashchange', route);
 
 /* ================= البداية ================= */
 if (window.shaka) shaka.polyfill.installAll();
+/* تخزين هيكل الموقع على الجهاز (بيفتح فوراً حتى بلا ما ينزّل شي) */
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 probeAll();
 discover();
 checkUpdate();

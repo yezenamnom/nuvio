@@ -546,3 +546,16 @@ html { overscroll-behavior-y: contain; }
   .card { transition: none; }
   .fab-menu, .mini, .np-menu, .np-big { backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
+
+/* ---------- سهم الوصف جنب العنوان + الروابط ---------- */
+.title-row { display: flex; align-items: flex-start; gap: 8px; }
+.title-row .v-title { flex: 1; min-width: 0; }
+.desc-chev { flex-shrink: 0; width: 36px; height: 36px; margin-top: 10px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg2); color: var(--text); display: grid; place-items: center; cursor: pointer; }
+.desc-chev svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; transition: transform .25s; }
+.desc-chev.open svg { transform: rotate(180deg); }
+.desc-chev:hover { border-color: var(--accent); }
+.desc-links { display: none; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.desc.yt.open .desc-links { display: grid; gap: 6px; }
+.desc-links-t { font-weight: 700; font-size: .85rem; color: var(--muted); }
+.desc-link { direction: ltr; text-align: left; color: #93c5fd; font-size: .85rem; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desc-link:hover { border-color: #93c5fd; }
