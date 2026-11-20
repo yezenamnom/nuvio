@@ -457,39 +457,61 @@ function addSearch(q) {
 
 /* ---- خلاصة الرئيسية: أول شي حسب ذوقك (آخر تشغيلات، آخر بحوث، إعجابات، مفضلة)،
         وإذا خلصو منكمّل باقتراحات عامة ومشابهاتها — تقريباً بلا نهاية ---- */
+const shuffle = arr => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const GENERAL_TOPICS = ['وثائقي', 'أغاني عربية', 'كوميديا', 'طبخ', 'رياضة', 'تقنية', 'ألعاب فيديو', 'سفر', 'مسلسلات', 'علوم', 'music', 'nature 4k', 'funny', 'cars'];
+
+/* خلاصة منوّعة: كل مصدر (فيديو شفتو، بحث عملتو، إعجاب، مواضيع عامة عشوائية) بياخد دور صغير بكل دفعة،
+   وما في قناة وحدة بتاخد أكتر من فيديوين بالدفعة. لهيك ما بيغلب «مستر بيست» أو غيرو. */
 function makeHomeFeed(seen) {
   const watched = new Set(lib.list('hist').map(v => v.id));
-  const hist = lib.list('hist').slice(0, 12), likes = lib.list('likes').slice(0, 6), favs = lib.list('favs').slice(0, 6);
+  const hist = lib.list('hist').slice(0, 10), likes = lib.list('likes').slice(0, 5), favs = lib.list('favs').slice(0, 5);
   const searches = store.get('searches', []).slice(0, 6);
   const seeds = [];
-  const pushSeed = v => { if (v && !seeds.some(s => s.id === v.id)) seeds.push(v); };
-  for (let i = 0; i < 12; i++) { pushSeed(hist[i]); pushSeed(likes[i]); pushSeed(favs[i]); }
-  // مهام بالتناوب: مشابهات فيديو شفتو، بعدين نتائج بحث عملتو، وهيك
-  const tasks = [];
-  for (let i = 0; i < Math.max(seeds.length, searches.length); i++) {
-    if (seeds[i]) tasks.push(() => getVideo(seeds[i].id).then(r => r.res.related));
-    if (searches[i]) tasks.push(() => cached('s:' + searches[i], 10 * 60e3, () => withFallback(x => apiFor(x).search(x.url, searches[i], 1))).then(r => r.res.items));
-  }
-  tasks.push(() => withFallback(x => apiFor(x).trending(x.url)).then(r => r.res));
-  const expand = []; // فيديوهات منفتح مشابهاتها لاحقاً (لا نهائي)
-  const fresh = list => {
-    const out = [];
-    for (const v of list || []) {
-      if (!v.id || seen.has(v.id)) continue;
-      seen.add(v.id); expand.push(v.id);
-      if (!watched.has(v.id)) out.push(v);
-    }
-    // خلط خفيف لحتى ما تطلع كلها من نفس المصدر ورا بعض
-    for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
-    return out;
+  for (let i = 0; i < 10; i++) for (const v of [hist[i], likes[i], favs[i]]) if (v && !seeds.some(s => s.id === v.id)) seeds.push(v);
+  const searchSrc = q => () => cached('s:' + q, 10 * 60e3, () => withFallback(x => apiFor(x).search(x.url, q, 1))).then(r => r.res.items);
+  const relSrc = id => () => getVideo(id).then(r => r.res.related);
+  const sources = [
+    ...seeds.map(v => relSrc(v.id)),
+    ...searches.map(searchSrc),
+    () => withFallback(x => apiFor(x).trending(x.url)).then(r => r.res),
+    ...shuffle(GENERAL_TOPICS).slice(0, 4).map(searchSrc),
+  ].map(load => ({ load, pool: null, dead: false }));
+  const expandIds = [];
+  const ensure = async s => {
+    if (s.pool || s.dead) return;
+    try { s.pool = shuffle((await s.load()).filter(v => v && v.id)); } catch { s.dead = true; }
   };
   return async () => {
-    while (tasks.length) {
-      try { const got = fresh(await tasks.shift()()); if (got.length) return got; } catch { /* اللي بعدو */ }
-    }
-    while (expand.length) {
-      const id = expand.splice(Math.floor(Math.random() * Math.min(expand.length, 30)), 1)[0];
-      try { const { res } = await getVideo(id); const got = fresh(res.related); if (got.length) return got; } catch { /* اللي بعدو */ }
+    for (let attempt = 0; attempt < 4; attempt++) {
+      // منحمّل لحد 5 مصادر جديدة سوا بكل دفعة
+      await Promise.all(sources.filter(s => !s.pool && !s.dead).slice(0, 5).map(ensure));
+      const live = shuffle(sources.filter(s => s.pool && s.pool.length));
+      const out = [], perAuthor = {};
+      for (let round = 0; round < 3 && out.length < 18; round++) {
+        for (const s of live) {
+          let tries = 0;
+          while (s.pool.length && tries++ < 6) {
+            const v = s.pool.shift();
+            if (seen.has(v.id)) continue;
+            if (watched.has(v.id)) { seen.add(v.id); continue; }
+            const a = v.authorId || v.author || '';
+            if ((perAuthor[a] || 0) >= 2) { s.pool.push(v); continue; }
+            perAuthor[a] = (perAuthor[a] || 0) + 1;
+            seen.add(v.id); expandIds.push(v.id); out.push(v);
+            break;
+          }
+        }
+      }
+      // لحتى يضل لا نهائي: كل ما قلّت المصادر منضيف مشابهات فيديوهات عشوائية من اللي طلعو
+      if (sources.filter(s => !s.dead && (!s.pool || s.pool.length)).length < 6) {
+        for (let k = 0; k < 3 && expandIds.length; k++) {
+          const id = expandIds.splice(Math.floor(Math.random() * expandIds.length), 1)[0];
+          sources.push({ load: relSrc(id), pool: null, dead: false });
+        }
+        if (Math.random() < 0.5) sources.push({ load: searchSrc(GENERAL_TOPICS[Math.floor(Math.random() * GENERAL_TOPICS.length)]), pool: null, dead: false });
+      }
+      if (out.length) return out;
+      if (!sources.some(s => !s.dead && (!s.pool || s.pool.length))) return [];
     }
     return [];
   };
@@ -1172,6 +1194,8 @@ function updateSug() {
 }
 $('#q').addEventListener('input', updateSug);
 $('#q').addEventListener('focus', updateSug);
+$('#q').addEventListener('focus', () => document.body.classList.add('search-focus'));
+$('#q').addEventListener('blur', () => setTimeout(() => document.body.classList.remove('search-focus'), 160));
 $('#q').addEventListener('keydown', e => {
   if (sug.hidden || !sugItems.length) return;
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -1278,7 +1302,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120041420';
+const APP_VERSION = '20261120041649';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

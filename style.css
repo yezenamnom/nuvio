@@ -454,3 +454,19 @@ html, body { overflow-x: clip; }
 body.has-mini main { padding-bottom: 90px; }
 body.has-mini .fab-wrap { bottom: calc(86px + env(safe-area-inset-bottom)); }
 @media (min-width: 601px) { .mini { left: auto; right: 16px; width: 420px; bottom: 16px; } }
+
+/* ---------- البحث بيتوسّع وقت الكتابة ---------- */
+body.search-focus .top-nav { display: none; }
+body.search-focus .search { max-width: none; }
+@media (max-width: 600px) {
+  body.search-focus .brand { display: none; }
+  .suggest { position: fixed; left: 0; right: 0; top: 54px; border-radius: 0 0 14px 14px; border-inline: 0; max-height: calc(100vh - 54px); }
+  .sug-row { padding: 10px 16px; }
+}
+
+/* ---------- «آخر اللي شفتو» أصغر ---------- */
+.shelf { grid-auto-columns: minmax(150px, 170px); gap: 10px; }
+.shelf .title { font-size: .85rem; }
+.shelf .sub { font-size: .75rem; }
+.shelf .thumb { border-radius: 10px; }
+@media (max-width: 600px) { .shelf { grid-auto-columns: 40%; } }
