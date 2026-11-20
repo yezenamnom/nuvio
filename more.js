@@ -8,7 +8,7 @@
 ['gesturestart', 'gesturechange'].forEach(n => document.addEventListener(n, e => e.preventDefault(), { passive: false }));
 
 /* ================= الإعدادات ================= */
-const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto', theme: 'nuvio', holdSpeed: true, holdRate: 2, shortsAuto: false, shortsRate: 1, player: 'nuvio', homeSecs: null };
+const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto', theme: 'nuvio', holdSpeed: true, holdRate: 2, shortsAuto: false, shortsRate: 1, player: 'nuvio', homeSecs: null, preload: 'auto' };
 /* أقسام راس الرئيسية (فوق «مقترح لك»): الترتيب والتشغيل من الإعدادات */
 const HOME_SECS = [['searches', 'سجل البحث', 'search'], ['subs', 'القنوات', 'subs'], ['hist', 'آخر اللي شفتو', 'clock']];
 function homeSecs() {
@@ -402,6 +402,16 @@ function saverOn() {
   return !!(c && (c.saveData || c.type === 'cellular' || /(^|-)(2g|3g)$/.test(c.effectiveType || '')));
 }
 window.nuvioSaver = saverOn;
+/* تحميل مسبق قوي (واي فاي / باقة مفتوحة): مخزون أطول قدّام + نسخة خفيفة (144p) من كل الفيديو للقفز الفوري.
+   تلقائي = شغّال إلا إذا المتصفح قال إنك على بيانات الموبايل (الآيفون ما بيقول، فمنعتبرو واي فاي) */
+function strongPreload() {
+  const m = prefs.get('preload');
+  if (m === 'off' || saverOn()) return false;
+  if (m === 'on') return true;
+  const c = navigator.connection;
+  return !(c && (c.type === 'cellular' || c.saveData));
+}
+window.nuvioStrong = strongPreload;
 const saverCfg = () => (saverOn()
   ? { abr: { restrictions: { maxHeight: 480 }, defaultBandwidthEstimate: 6e5 } }
   : { abr: { restrictions: { maxHeight: Infinity } } });
@@ -499,6 +509,13 @@ function drawerSettings(d, sep, closeDrawerFn) {
     prefs.set('saver', nx); sval.textContent = SAVER[nx];
     if (typeof player !== 'undefined' && player) try { player.configure(saverCfg()); } catch { /* */ }
   };
+  const PRE = { auto: 'واي فاي', on: 'دايماً', off: 'أبداً' };
+  const preBtn = el('button', 'drawer-item');
+  const pic = el('span', 'drawer-ico'); pic.innerHTML = window.ico ? window.ico('download') : '';
+  const pval = el('span', 'drawer-count', PRE[prefs.get('preload')] || PRE.auto);
+  const ptx = el('span', 'drawer-tx'); ptx.append(el('span', null, 'تحميل مسبق قوي'), el('small', 'muted', 'بيحمّل قدّام أكتر + نسخة خفيفة من كل الفيديو للقفز الفوري'));
+  preBtn.append(pic, ptx, pval);
+  preBtn.onclick = () => { const order = ['auto', 'on', 'off']; const nx = order[(order.indexOf(prefs.get('preload') || 'auto') + 1) % 3]; prefs.set('preload', nx); pval.textContent = PRE[nx]; };
   const TVM = { auto: 'تلقائي', on: 'دايماً', off: 'أبداً' };
   const tvBtn = el('button', 'drawer-item');
   const tvic = el('span', 'drawer-ico'); tvic.innerHTML = window.ico ? window.ico('subs') : '';
@@ -544,6 +561,7 @@ function drawerSettings(d, sep, closeDrawerFn) {
     sw('skip', 'تخطّي الدعايات جوّا الفيديو', () => prefs.get('sb'), v => prefs.set('sb', v), 'بخدمة SponsorBlock المجانية'),
     sw('eye', 'خبّي اللي شفتو من المقترحات', () => prefs.get('hideWatched'), v => prefs.set('hideWatched', v)),
     saverBtn,
+    preBtn,
     tvBtn,
     hidden ? act('ban', `رجّع اللي خبّيتو (${nf.format(hidden)})`, () => { store.set('nope', []); store.set('nopeCh', []); note('رجعوا كلهن للمقترحات'); }) : null,
     sep('بياناتك'),

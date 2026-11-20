@@ -1427,3 +1427,7 @@ html.np-fakefs .bnav, html.np-fakefs .topbar, html.np-fakefs .fab-wrap { display
 .ver-badge { border: 1px solid var(--line); background: var(--bg2); color: var(--muted); font: inherit; font-size: .72rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; cursor: pointer; white-space: nowrap; direction: rtl; }
 .ver-badge.new { background: var(--accent); border-color: transparent; color: #fff; }
 .ver-badge:disabled { opacity: .7; cursor: default; }
+
+/* الخط التالت بشريط التقدّم: لوين وصلت النسخة الخفيفة (144p) من كل الفيديو */
+.np-low { position: absolute; left: 0; height: 4px; border-radius: 4px; background: rgba(167, 139, 250, .38); pointer-events: none; transition: height .15s, width .4s; width: 0; }
+.np-bar:hover .np-low, .np.drag .np-low { height: 6px; }

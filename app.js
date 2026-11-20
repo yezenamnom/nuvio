@@ -1537,6 +1537,82 @@ async function resolveUrl(u, tries = 8) {
   throw last || new Error('ما وصل');
 }
 
+
+/* ================= الطبقة الخفيفة: الفيديو كلّو بأخفض جودة (144p) بالخلفية =================
+   مع «تحميل مسبق قوي»: بعد ما يبلّش الفيديو، منحمّل بهدوء نسخة 144p + الصوت لكل الفيديو (بالذاكرة).
+   لمّا تقفز لمحل مش محمّل، المشغّل بيبلّش فوراً من هالنسخة (بلا شبكة)، وبعدين بيرجّع الجودة لحالو.
+   بتوقف إذا الفيديو الأساسي محتاج الشبكة (المخزون قدّام أقل من 20 ثانية). */
+const lowLayer = {
+  id: null, track: null, files: new Map(), gen: 0, reqs: new Map(), reqN: 0,
+  MAX: 120e6, CHUNK: 2e6,
+  stop() { this.gen++; this.id = null; this.track = null; this.files.clear(); this.reqs.clear(); },
+  covers(url, range) {
+    const f = this.files.get(url); const m = /bytes=(\d+)-(\d+)/.exec(range || '');
+    return !!(f && m && +m[2] < f.got);
+  },
+  read(url, range) {
+    const f = this.files.get(url); const m = /bytes=(\d+)-(\d+)/.exec(range);
+    return f.buf.slice(+m[1], +m[2] + 1).buffer;
+  },
+  // لوين مغطّاية (بالثواني): الأقل بين الصورة والصوت
+  coveredTime(dur) {
+    if (!dur || !isFinite(dur) || !this.files.size) return 0;
+    let t = Infinity;
+    for (const f of this.files.values()) t = Math.min(t, f.total ? (f.got / f.total) * dur : 0);
+    return t === Infinity ? 0 : t;
+  },
+  pickTrack(player) {
+    const vs = player.getVariantTracks().filter(t => t.height && t.originalVideoId);
+    return vs.sort((a, b) => a.height - b.height || a.bandwidth - b.bandwidth)[0] || null;
+  },
+  async start(player, vid, np) {
+    if (this.id === vid && this.files.size) { this.track = this.pickTrack(player) || this.track; return; } // نفس الفيديو (إعادة تحميل): منكمّل
+    this.stop();
+    const my = this.gen; this.id = vid;
+    const low = this.track = this.pickTrack(player);
+    if (!low) return;
+    const url = key => `${SV}/vp/${vid}/${encodeURIComponent(key)}`;
+    const list = [low.originalVideoId, low.originalAudioId].filter(Boolean).map(k => ({ url: url(k), got: 0, total: 0, limit: 0, buf: null }));
+    list.forEach(f => this.files.set(f.url, f));
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const ahead = () => { const v = np.video; for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= v.currentTime + 0.5 && v.buffered.end(i) > v.currentTime) return v.buffered.end(i) - v.currentTime; return 0; };
+    await wait(4000); // الفيديو الأساسي أول
+    while (my === this.gen) {
+      if (!np.video.isConnected || np.dead) { if (my === this.gen) this.stop(); break; }
+      if (document.hidden || (!np.video.paused && ahead() < 20)) { await wait(1500); continue; } // الأساسي أهم
+      const todo = list.filter(f => !f.total || f.got < f.limit);
+      if (!todo.length) break;
+      // اللي مغطّي وقت أقل هو اللي منكمّلو (لحتى الصورة والصوت يمشو سوا)
+      const f = todo.sort((x, y) => (x.total ? x.got / x.total : -1) - (y.total ? y.got / y.total : -1))[0];
+      const end = (f.total ? Math.min(f.limit, f.got + this.CHUNK) : f.got + this.CHUNK) - 1;
+      try {
+        const r = await fetch(f.url, { headers: { Range: `bytes=${f.got}-${end}` } });
+        if (r.status !== 206 && r.status !== 200) { await wait(3000); continue; }
+        if (!f.total) {
+          const tot = +(((r.headers.get('content-range') || '').split('/')[1]) || 0) || +(r.headers.get('content-length') || 0);
+          if (!tot) { await wait(3000); continue; }
+          f.total = tot; f.limit = Math.min(tot, Math.floor(this.MAX / list.length)); f.buf = new Uint8Array(f.limit);
+        }
+        const data = new Uint8Array(await r.arrayBuffer());
+        if (my !== this.gen) break;
+        const n = Math.min(data.length, f.limit - f.got);
+        f.buf.set(data.subarray(0, n), f.got); f.got += n;
+        const d = np.video.duration;
+        if (np.setLowLayer && d) np.setLowLayer(this.coveredTime(d) / d);
+      } catch { await wait(3000); }
+    }
+  },
+};
+function regLowScheme() {
+  if (!window.shaka || window.__nuvioLowScheme) return;
+  window.__nuvioLowScheme = true;
+  shaka.net.NetworkingEngine.registerScheme('nuviocache', uri => {
+    const k = +String(uri).split('//')[1];
+    const q = lowLayer.reqs.get(k); lowLayer.reqs.delete(k);
+    return shaka.util.AbortableOperation.completed({ uri: q.url, originalUri: q.url, data: q.data, headers: { 'content-type': 'video/mp4' }, status: 206, timeMs: 1, fromCache: true });
+  });
+}
+
 /* ملف DASH بينجاب مرة وحدة وبينحفظ دقايق: المشغّل والصوت بالخلفية والتحميل المسبق كلهن بيستعملوه */
 function manifestText(url) {
   return cached('mf:' + url, 4 * 60e3, async () => {
@@ -1618,6 +1694,29 @@ async function renderWatch(id, startTime) {
     },
   });
   np.video.poster = ytThumb(id, 'hqdefault');
+  if (np.setLowLayer) np.setLowLayer(lowLayer.id === id ? lowLayer.coveredTime(1) : 0);
+  let lowBack = 0;
+  np.video.addEventListener('seeking', () => {
+    const v = np.video, t = v.currentTime, sp = player;
+    if (!sp || !lowLayer.track || lowLayer.id !== id || !(window.YtMedia && !(v instanceof YtMedia))) return;
+    for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= t && v.buffered.end(i) > t + 1) return; // محمّل أصلاً بالجودة العالية
+    if (t > lowLayer.coveredTime(v.duration) - 5) return; // الطبقة الخفيفة ما وصلت لهون
+    try {
+      const prev = sp.getVariantTracks().find(x => x.active);
+      const wasAbr = sp.getConfiguration().abr.enabled;
+      const low = sp.getVariantTracks().find(x => x.id === lowLayer.track.id) || lowLayer.track;
+      if (!prev || prev.id === low.id) return;
+      sp.configure({ abr: { enabled: false } });
+      sp.selectVariantTrack(low, false);
+      clearTimeout(lowBack);
+      v.addEventListener('playing', () => {
+        lowBack = setTimeout(() => { // بعد ثانية ونص: منرجع للجودة اللي كانت (ومنشيل الخفيف من المخزون قدّام)
+          if (player !== sp) return;
+          try { sp.selectVariantTrack(prev, true, 3); if (wasAbr) sp.configure({ abr: { enabled: true } }); } catch { /* */ }
+        }, 1500);
+      }, { once: true });
+    } catch { /* */ }
+  });
   if (svUsable()) np.setBgAudio(`${SV}/vp/${encodeURIComponent(id)}/140`);
   window.__nuvioNp = np;
   box.classList.add('loading');
@@ -1859,14 +1958,23 @@ async function renderWatch(id, startTime) {
       await destroyPlayer();
       player = new shaka.Player();
       await player.attach(np.video);
+      regLowScheme();
       player.getNetworkingEngine().registerRequestFilter(async (type, req) => {
         req.uris = await Promise.all(req.uris.map(fixUrl));
+        // محمّل من قبل بالطبقة الخفيفة؟ من الذاكرة فوراً بلا شبكة
+        const rg = req.headers && (req.headers.Range || req.headers.range);
+        if (rg && lowLayer.covers(req.uris[0], rg)) {
+          const k = ++lowLayer.reqN;
+          lowLayer.reqs.set(k, { url: req.uris[0], data: lowLayer.read(req.uris[0], rg) });
+          req.uris = ['nuviocache://' + k];
+        }
       });
+      const strong = !!(window.nuvioStrong && nuvioStrong());
       player.configure({
         preferredVideoCodecs: ['avc1', 'vp9'],
         streaming: {
-          // مخزون أكبر + طلب القطع الجاية سلفاً: أي بطء قصير عالشبكة ما بيبيّن
-          bufferingGoal: 90, rebufferingGoal: 2, bufferBehind: 30, segmentPrefetchLimit: 2,
+          // مخزون أكبر + طلب القطع الجاية سلفاً: أي بطء قصير عالشبكة ما بيبيّن (عالواي فاي: 4 دقايق قدّام)
+          bufferingGoal: strong ? 240 : 90, rebufferingGoal: 2, bufferBehind: strong ? 60 : 30, segmentPrefetchLimit: 2,
           retryParameters: { maxAttempts: 5, baseDelay: 300, backoffFactor: 1.5, timeout: 15000, stallTimeout: 6000, connectionTimeout: 8000 },
           stallEnabled: true, stallThreshold: 1, stallSkip: 0.1,
           ignoreTextStreamFailures: true,
@@ -1892,6 +2000,8 @@ async function renderWatch(id, startTime) {
       else await player.load(await resolveUrl(s.url), startAt || null);
       np.setShaka(player);
       np.applySavedQuality();
+      // الطبقة الخفيفة (144p لكل الفيديو) — بس من مصدرنا ومع «تحميل مسبق قوي»
+      if (strong && s.kind === 'dash' && s.url.startsWith(SV)) lowLayer.start(player, id, np);
     }
   }
 
@@ -2573,7 +2683,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120201801';
+const APP_VERSION = '20261120202459';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

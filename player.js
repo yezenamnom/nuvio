@@ -74,7 +74,8 @@
       const bottom = mk('div', 'np-bottom');
       this.bar = mk('div', 'np-bar');
       this.buf = mk('div', 'np-buf'); this.fill = mk('div', 'np-fill'); this.knob = mk('div', 'np-knob'); this.tip = mk('div', 'np-tip');
-      this.bar.append(this.buf, this.fill, this.knob, this.tip);
+      this.low = mk('div', 'np-low'); // الطبقة الخفيفة (144p) — لوين وصل تحميل كل الفيديو
+      this.bar.append(this.low, this.buf, this.fill, this.knob, this.tip);
 
       const row = mk('div', 'np-row');
       this.bPlay = mk('button', 'np-btn', ICON.play); this.bPlay.setAttribute('aria-label', 'تشغيل/إيقاف');
@@ -147,6 +148,7 @@
       }
       for (const c of this.chapters.slice(1)) { const g = mk('i', 'np-gap'); g.style.left = `${(c.t / d) * 100}%`; this.marks.append(g); }
     }
+    setLowLayer(f) { this.low.style.width = `${Math.max(0, Math.min(1, f || 0)) * 100}%`; }
     message(t) { this.msgEl.textContent = t || ''; this.msgEl.classList.toggle('on', !!t); }
     destroy() {
       this.dead = true; clearInterval(this._wd); clearTimeout(this._hideT); clearTimeout(this._apT);
