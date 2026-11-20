@@ -8,7 +8,15 @@
 ['gesturestart', 'gesturechange'].forEach(n => document.addEventListener(n, e => e.preventDefault(), { passive: false }));
 
 /* ================= الإعدادات ================= */
-const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto', theme: 'nuvio', holdSpeed: true, holdRate: 2, shortsAuto: false, shortsRate: 1 };
+const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto', theme: 'nuvio', holdSpeed: true, holdRate: 2, shortsAuto: false, shortsRate: 1, player: 'nuvio', homeSecs: null };
+/* أقسام راس الرئيسية (فوق «مقترح لك»): الترتيب والتشغيل من الإعدادات */
+const HOME_SECS = [['searches', 'سجل البحث', 'search'], ['subs', 'القنوات', 'subs'], ['hist', 'آخر اللي شفتو', 'clock']];
+function homeSecs() {
+  const saved = Array.isArray(prefs.get('homeSecs')) ? prefs.get('homeSecs') : [];
+  const out = saved.filter(s => s && HOME_SECS.some(([k]) => k === s.k)).map(s => ({ k: s.k, on: s.on !== false }));
+  for (const [k] of HOME_SECS) if (!out.some(s => s.k === k)) out.push({ k, on: true });
+  return out;
+}
 const prefs = {
   get: k => { const p = store.get('prefs', {}); return k in p ? p[k] : PREF_DEFAULTS[k]; },
   set: (k, v) => { const p = store.get('prefs', {}); p[k] = v; store.set('prefs', p); },
@@ -498,6 +506,14 @@ function drawerSettings(d, sep, closeDrawerFn) {
   const tvtx = el('span', 'drawer-tx'); tvtx.append(el('span', null, 'وضع التلفزيون'), el('small', 'muted', 'واجهة كبيرة وتنقّل بالريموت'));
   tvBtn.append(tvic, tvtx, tvval);
   tvBtn.onclick = () => { const order = ['auto', 'on', 'off']; const nx = order[(order.indexOf(prefs.get('tvMode') || 'auto') + 1) % 3]; tvval.textContent = TVM[nx]; setTVMode(nx); };
+  // المشغّل الأساسي: مشغّلنا (بلا إعلانات) أو يوتيوب بواجهتنا (التشغيل من جهازك)
+  const PLY = { nuvio: 'مشغّلنا', yt: 'يوتيوب' };
+  const plBtn = el('button', 'drawer-item');
+  const plic = el('span', 'drawer-ico'); plic.innerHTML = window.ico ? window.ico('play') : '';
+  const plval = el('span', 'drawer-count', PLY[prefs.get('player')] || PLY.nuvio);
+  const pltx = el('span', 'drawer-tx'); pltx.append(el('span', null, 'المشغّل الأساسي'), el('small', 'muted', 'يوتيوب: التشغيل من جهازك بواجهتنا — ممكن يطلع إعلان'));
+  plBtn.append(plic, pltx, plval);
+  plBtn.onclick = () => { const nx = prefs.get('player') === 'yt' ? 'nuvio' : 'yt'; prefs.set('player', nx); plval.textContent = PLY[nx]; note(nx === 'yt' ? 'الفيديوهات الجاية من يوتيوب (بواجهتنا)' : 'الفيديوهات الجاية من مشغّلنا'); };
   const hidden = store.get('nope', []).length + store.get('nopeCh', []).length;
   // المظهر: 3 ثيمات
   const themeRow = el('div', 'drawer-item theme-row');
@@ -521,6 +537,7 @@ function drawerSettings(d, sep, closeDrawerFn) {
   const rows = [
     themeRow,
     sep('الإعدادات'),
+    plBtn,
     sw('bolt', 'ضغطة مطوّلة = تسريع', () => prefs.get('holdSpeed'), v => prefs.set('holdSpeed', v), 'اضغط على الفيديو وضلّك ضاغط'),
     rateBtn,
     sw('play', 'تشغيل تلقائي', () => prefs.get('autoplay'), v => prefs.set('autoplay', v), 'لمّا يخلص الفيديو بيبلّش اللي بعدو'),
@@ -1219,9 +1236,35 @@ function renderSettings() {
   rateBtn.append(ric, el('span', 'drawer-tx', 'سرعة الشورتس'), rval);
   rateBtn.onclick = () => { const i = SPEEDS_S.indexOf(+prefs.get('shortsRate') || 1); const nx = SPEEDS_S[(i + 1) % SPEEDS_S.length]; prefs.set('shortsRate', nx); rval.textContent = nx === 1 ? 'عادي' : `${nx}×`; };
   SH.append(sep('الشورتس'), sw('shorts', 'تشغيل تلقائي للشورتس', () => prefs.get('shortsAuto'), x => prefs.set('shortsAuto', x), 'لمّا يخلص الشورت بينقل للّي بعدو'), rateBtn);
-  // نقل الشورتس قبل «بياناتك»
+  // الصفحة الرئيسية: الأقسام اللي فوق «مقترح لك» — بتطفيها أو بترتّبها
+  const HS = el('div');
+  const drawHS = () => {
+    const list = homeSecs();
+    const save = l => { prefs.set('homeSecs', l); drawHS(); };
+    HS.replaceChildren(sep('الصفحة الرئيسية'));
+    list.forEach((s, i) => {
+      const [, label, icon] = HOME_SECS.find(([k]) => k === s.k);
+      const row = el('div', 'drawer-item drawer-tg home-sec' + (s.on ? '' : ' off'));
+      row.setAttribute('role', 'button'); row.tabIndex = 0;
+      const ic = el('span', 'drawer-ico'); ic.innerHTML = window.ico ? window.ico(icon) : '';
+      const tx = el('span', 'drawer-tx'); tx.append(el('span', null, label), el('small', 'muted', s.on ? 'ظاهر بالرئيسية' : 'مخفي'));
+      const up = el('button', 'hs-move'); up.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>'; up.setAttribute('aria-label', 'لفوق'); up.disabled = i === 0;
+      const dn = el('button', 'hs-move'); dn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>'; dn.setAttribute('aria-label', 'لتحت'); dn.disabled = i === list.length - 1;
+      up.onclick = e => { e.stopPropagation(); const l = homeSecs(); [l[i - 1], l[i]] = [l[i], l[i - 1]]; save(l); };
+      dn.onclick = e => { e.stopPropagation(); const l = homeSecs(); [l[i + 1], l[i]] = [l[i], l[i + 1]]; save(l); };
+      const swEl = el('span', 'np-sw' + (s.on ? ' on' : '')); swEl.append(el('span'));
+      const toggle = () => { const l = homeSecs(); l[i].on = !l[i].on; save(l); };
+      row.onclick = toggle;
+      row.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
+      row.append(ic, tx, up, dn, swEl);
+      HS.append(row);
+    });
+    if (list.every(s => !s.on)) HS.append(el('div', 'set-note muted', 'كلهن مطفيين: الرئيسية رح يطلع فيها «مقترح لك» بس.'));
+  };
+  drawHS();
+  // نقل «الصفحة الرئيسية» والشورتس قبل «بياناتك»
   const dataSep = [...box.querySelectorAll('.drawer-sep')].find(s => s.textContent === 'بياناتك');
-  if (dataSep) box.insertBefore(SH, dataSep); else box.append(SH);
+  if (dataSep) { box.insertBefore(HS, dataSep); box.insertBefore(SH, dataSep); } else box.append(HS, SH);
   const about = el('div', 'set-about');
   about.append(el('div', null, `Nuvio · النسخة ${typeof APP_VERSION !== 'undefined' ? APP_VERSION : ''}`), el('div', 'muted', 'بلا إعلانات · كل بياناتك على جهازك'));
   box.append(sep('حول'), about);

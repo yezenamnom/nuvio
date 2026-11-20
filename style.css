@@ -1406,3 +1406,13 @@ html.tv .tv-sinput.tv-f { border-color: #fff; }
 .player-box .yt-frame iframe { position: absolute; left: 0; top: calc(-1 * var(--crop)); width: 100%; height: calc(100% + 2 * var(--crop)); border: 0; pointer-events: none; }
 .player-box.fs .yt-frame, :fullscreen .yt-frame { --crop: 110px; }
 .yt-frame .emb-cover { z-index: 1; }
+
+/* الإعدادات: ترتيب أقسام الرئيسية */
+.home-sec { cursor: pointer; }
+.home-sec.off .drawer-tx > span:first-child { opacity: .55; }
+.hs-move { flex-shrink: 0; width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 10px; background: var(--card, rgba(255,255,255,.06)); color: var(--text); cursor: pointer; margin-inline-start: 4px; }
+.hs-move svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.hs-move:disabled { opacity: .25; cursor: default; }
+.home-sec .np-sw { margin-inline-start: 8px; }
+.set-note { padding: 6px 16px 10px; font-size: .85rem; }
+.home-sec .drawer-tx { flex: 1; min-width: 0; }

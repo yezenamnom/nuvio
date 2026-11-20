@@ -1048,32 +1048,39 @@ function sectionHead(title, href, icon) {
 /* راس الرئيسية: سجل البحث، القنوات، آخر اللي شفتو (قسم حي) */
 function homeTop() {
   const out = [];
-  // ١) سجل البحث
-  const searches = store.get('searches', []).slice(0, 14);
-  if (searches.length) {
-    const row = el('div', 'chips');
-    searches.forEach(s => { const a = el('a', 'chip-q', s); a.href = `#/search?q=${encodeURIComponent(s)}`; a.dir = 'auto'; row.append(a); });
-    out.push(sectionHead('سجل البحث', '#/searches'), row);
-  }
-  // ٢) القنوات المشترك فيها
-  const mySubs = subs.list().slice(0, 30).sort((x, y) => chNew.has(y.id) - chNew.has(x.id)).slice(0, 20); // الجديد أول
-  if (mySubs.length) {
-    const row = el('div', 'sub-strip');
-    mySubs.forEach(c => row.append(channelBubble(c)));
-    out.push(sectionHead('القنوات', '#/subs'), row);
-  }
-  // ٣) آخر اللي شفتو
-  const hist = lib.list('hist').slice(0, 16);
-  if (hist.length) {
-    const shelf = el('div', 'shelf');
-    hist.forEach(v => shelf.append(card(v)));
-    out.push(sectionHead('آخر اللي شفتو', '#/history'), shelf);
-  }
+  const build = {
+    // سجل البحث
+    searches() {
+      const searches = store.get('searches', []).slice(0, 14);
+      if (!searches.length) return;
+      const row = el('div', 'chips');
+      searches.forEach(s => { const a = el('a', 'chip-q', s); a.href = `#/search?q=${encodeURIComponent(s)}`; a.dir = 'auto'; row.append(a); });
+      out.push(sectionHead('سجل البحث', '#/searches'), row);
+    },
+    // القنوات المشترك فيها
+    subs() {
+      const mySubs = subs.list().slice(0, 30).sort((x, y) => chNew.has(y.id) - chNew.has(x.id)).slice(0, 20); // الجديد أول
+      if (!mySubs.length) return;
+      const row = el('div', 'sub-strip');
+      mySubs.forEach(c => row.append(channelBubble(c)));
+      out.push(sectionHead('القنوات', '#/subs'), row);
+    },
+    // آخر اللي شفتو
+    hist() {
+      const hist = lib.list('hist').slice(0, 16);
+      if (!hist.length) return;
+      const shelf = el('div', 'shelf');
+      hist.forEach(v => shelf.append(card(v)));
+      out.push(sectionHead('آخر اللي شفتو', '#/history'), shelf);
+    },
+  };
+  // الترتيب والتشغيل من الإعدادات («الصفحة الرئيسية»)
+  for (const s of homeSecs()) if (s.on && build[s.k]) build[s.k]();
   return out;
 }
 async function renderHome(force) {
   document.title = 'Nuvio — فيديو بلا إعلانات';
-  view.replaceChildren(liveSection(['searches', 'subs', 'hist', 'chTop', 'chSeen'], homeTop));
+  view.replaceChildren(liveSection(['searches', 'subs', 'hist', 'chTop', 'chSeen', 'prefs'], homeTop));
   setTimeout(() => refreshChannelTops(), 2500);
   const personal = store.get('searches', []).length || subs.list().length || lib.list('hist').length;
   // ٤) مقترح لك (بيتحمّل شوي شوي مع التمرير)
@@ -1572,6 +1579,7 @@ async function destroyPlayer() {
   if (player) { try { await player.destroy(); } catch { /* ignore */ } player = null; }
 }
 
+let ytOnceOff = ''; // «شغّل بمشغّلنا» لمرة وحدة لمّا يوتيوب ما يشتغل
 async function renderWatch(id, startTime) {
   const seq = routeSeq;
   // كمّل من وين وقفت (إذا ما في وقت محدّد بالرابط)
@@ -1703,7 +1711,7 @@ async function renderWatch(id, startTime) {
   view.replaceChildren(layout);
   if (openInMini) { openInMini = false; requestAnimationFrame(() => minimize()); } // الجاي بيكمّل بالمشغّل الصغير
   if (resumed) setTimeout(() => note(`كمّلنا من ${fmtT(resumed)} — وين وقفت`), 900);
-  const extras = watchExtras({ id, getNp: () => np, box, music, related: () => (shown && shown.related) || (current && current.data.related) || [] });
+  let extras = watchExtras({ id, getNp: () => np, box, music, related: () => (shown && shown.related) || (current && current.data.related) || [] });
   layout.append(buildFab(() => np, id, () => (current && current.data.title) || (pv && pv.title) || '', async () => {
     if (!np) return;
     const t = np.video.currentTime;
@@ -1750,7 +1758,7 @@ async function renderWatch(id, startTime) {
     np.video.poster = ytThumb(id, 'hqdefault');
     setChip('مشغّل احتياطي', 'warn');
     // كل شي مربوط بالمشغّل (حفظ المكان، تخطّي الدعايات جوّا الفيديو، الجاي…)
-    const ex = watchExtras({ id, getNp: () => np, box, music, related: () => (shown && shown.related) || (current && current.data.related) || [] });
+    const ex = extras = watchExtras({ id, getNp: () => np, box, music, related: () => (shown && shown.related) || (current && current.data.related) || [] });
     if (shown) {
       np.opts.onNext = () => goNext(pickNext(id, shown.related, music, true));
       np.setMeta({ title: shown.title, artist: shown.author, art: ytThumb(id, 'hqdefault') });
@@ -1772,7 +1780,9 @@ async function renderWatch(id, startTime) {
       msg.textContent = 'هالفيديو ما عم يشتغل هلّق 😕';
       cover.querySelector('.emb-spin')?.remove();
       const b = el('button', 'btn btn-main', 'جرّب كمان مرة'); b.onclick = e => { e.stopPropagation(); renderWatch(id, goodCt || at || 0); };
-      cover.append(b); cover.hidden = false;
+      cover.append(b);
+      if (prefs.get('player') === 'yt') { const o = el('button', 'btn', 'شغّل بمشغّلنا'); o.onclick = e => { e.stopPropagation(); ytOnceOff = id; renderWatch(id, goodCt || at || 0); }; cover.append(o); }
+      cover.hidden = false;
     };
     media.addEventListener('yterror', () => { if (tries < 2) { tries++; media.load(goodCt || at); } else fail(); });
     // الفيديو الحقيقي عم يمشي؟ (مش إعلان)
@@ -2053,6 +2063,13 @@ async function renderWatch(id, startTime) {
   }
 
   setChip('…');
+  // المشغّل الأساسي من الإعدادات: يوتيوب بواجهتنا (للتجربة) — مصادرنا ما بتشتغل أبداً
+  if (prefs.get('player') === 'yt' && window.YtMedia && ytOnceOff !== id) {
+    embed(startTime);
+    if (ytInfo) ytInfo.then(d => { if (!box.isConnected) return; if (d) fillInfo(d); else infoFromPublic(); }); else infoFromPublic();
+    return;
+  }
+  if (ytOnceOff === id) ytOnceOff = '';
   // تشغيل مبكر: رابط ملف DASH معروف مسبقاً، فمنبلّش الفيديو فوراً بنفس الوقت اللي عم تنجاب فيه معلوماتو
   // (معلومات الفيديو أحياناً بتاخد ٢-٤ ثواني عند السيرفر العام)
   let early = null;
@@ -2522,7 +2539,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120193338';
+const APP_VERSION = '20261120193801';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
