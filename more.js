@@ -367,6 +367,7 @@ async function refreshChannelTops(force) {
   if (!force && Date.now() - store.get('chTopAt', 0) < 30 * 60e3) return;
   chRefreshing = true;
   store.set('chTopAt', Date.now());
+  ytiBypass++; // الجديد من يوتيوب، مش المحفوظ
   try {
     const list = subs.list().slice(0, 40);
     const tops = chNew.tops(), seen = chNew.seen();
@@ -380,7 +381,7 @@ async function refreshChannelTops(force) {
       }).catch(() => {})));
     }
     if (changed) { store.set('chSeen', seen); store.set('chTop', tops); }
-  } finally { chRefreshing = false; }
+  } finally { chRefreshing = false; ytiBypass--; }
 }
 
 /* ================= توفير الإنترنت =================

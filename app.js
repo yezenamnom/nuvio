@@ -376,7 +376,58 @@ const YTI_INST = { url: YTI, type: 'yti' };
 const YTI_CLIENT = { clientName: 'WEB', clientVersion: '2.20251118.01.00', hl: 'ar', gl: 'DE' };
 let ytiDown = 0;
 const ytiUsable = () => Date.now() - ytiDown > 120e3; // إذا فشل، منرتاح منو دقيقتين
+/* ---- ردود يوتيوب بتنحفظ على الجهاز (مضغوطة) ----
+   لمّا تسكّر الموقع وترجع: البحث والقنوات وصفحات الفيديو بتبيّن فوراً من التخزين،
+   وإذا صارت قديمة منحدّثها بالخلفية (للمرة الجاية). بلا نت؟ منعرض آخر شي محفوظ. */
+const YC = 'nuvio-yti-v1', YC_FRESH = 20 * 60e3, YC_MAX = 3 * 86400e3, YC_LIMIT = 300;
+const YC_GZ = typeof CompressionStream === 'function' && typeof DecompressionStream === 'function';
+let ytiBypass = 0; // فحص الفيديوهات الجديدة بالقنوات: بدو الجديد بس
+let ycStore = null;
+const ycOpen = () => (ycStore = ycStore || (self.caches ? caches.open(YC) : Promise.reject(new Error('no caches'))));
+function ycHash(s) { // cyrb53
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+const ycKey = (ep, body) => `https://nuvio.cache/yti/${ep}?k=${ycHash(JSON.stringify(body))}`;
+async function ycGet(key) {
+  try {
+    const r = await (await ycOpen()).match(key);
+    if (!r) return null;
+    const at = +r.headers.get('x-at') || 0;
+    const s = r.headers.get('x-gz') === '1' ? r.body.pipeThrough(new DecompressionStream('gzip')) : r.body;
+    return { at, data: await new Response(s).json() };
+  } catch { return null; }
+}
+let ycTrimT = 0;
+async function ycPut(key, data) {
+  try {
+    const c = await ycOpen();
+    let blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    if (YC_GZ) blob = await new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob();
+    await c.put(key, new Response(blob, { headers: { 'x-at': String(Date.now()), 'x-gz': YC_GZ ? '1' : '0' } }));
+    clearTimeout(ycTrimT);
+    ycTrimT = setTimeout(async () => { try { const ks = await c.keys(); for (let i = 0; i < ks.length - YC_LIMIT; i++) await c.delete(ks[i]); } catch { /* */ } }, 4000);
+  } catch { /* التخزين مليان أو مش مدعوم: عادي */ }
+}
 async function yti(ep, body, ms = 6000) {
+  const key = ycKey(ep, body);
+  const hit = await ycGet(key);
+  const age = hit ? Date.now() - hit.at : Infinity;
+  if (hit && !ytiBypass && age < YC_FRESH) return hit.data;
+  if (hit && !ytiBypass && age < YC_MAX) { // قديم شوي: منعرضو هلّق ومنحدّثو بالخلفية
+    ytiNet(ep, body, ms).then(d => ycPut(key, d)).catch(() => {});
+    return hit.data;
+  }
+  try {
+    const d = await ytiNet(ep, body, ms);
+    ycPut(key, d);
+    return d;
+  } catch (e) { if (hit) return hit.data; throw e; } // بلا نت: آخر شي محفوظ
+}
+async function ytiNet(ep, body, ms = 6000) {
   if (!ytiUsable()) throw new Error('الوسيط مرتاح');
   const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), ms);
   try {
@@ -1037,10 +1088,12 @@ async function renderHome(force) {
   const saved = !force && store.get('homeFeed', null);
   try {
     let first = [];
-    if (saved && saved.items && saved.items.length && Date.now() - saved.at < 12 * 3600e3) {
+    if (saved && saved.items && saved.items.length && Date.now() - saved.at < 3 * 86400e3) {
       first = saved.items.filter(v => v && v.id);
       first.forEach(v => seen.add(v.id));
       kept.push(...first);
+      // صارت قديمة (أكتر من 12 ساعة)؟ منجهّز وحدة جديدة بالخلفية، وبتبيّن بالفتحة الجاية (بلا ما تنط الصفحة هلّق)
+      if (Date.now() - saved.at > 12 * 3600e3) makeHomeFeed(new Set())().then(m => { if (m && m.length) store.set('homeFeed', { at: Date.now(), items: m.map(slim) }); }).catch(() => {});
     } else {
       first = await feed();
       keep(first);
@@ -2385,7 +2438,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120185917';
+const APP_VERSION = '20261120190934';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -2397,6 +2450,11 @@ async function checkUpdate() {
     const t = prev && typeof prev === 'object' ? prev : { v: prev, n: 1, at: 0 };
     if (t.v === v && (t.n >= 3 || Date.now() - t.at < 60e3)) return;
     if (active && active.np() && !active.np().video.paused) return; // ما منقطع فيديو شغّال
+    // النسخة الجديدة بتنحمّل بالخلفية وبتشتغل بالفتحة الجاية — ما منعيد تحميل صفحة إنت عم تستعملها.
+    // بس إذا كانت الصفحة متروكة أكتر من ساعة (يعني فتحة جديدة عملياً) منحدّث هلّق.
+    const regNow = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    if (regNow) regNow.update().catch(() => {});
+    if (!(hiddenAt && Date.now() - hiddenAt > 3600e3) && regNow) return;
     store.set('reloadedFor', { v, n: t.v === v ? t.n + 1 : 1, at: Date.now() });
     const reload = () => location.replace(`${location.pathname}?v=${encodeURIComponent(v)}${location.hash}`);
     // مع التخزين المؤقت: منطلب النسخة الجديدة، ومنستنّاها تتركّب، وبعدين منعيد التحميل
@@ -2409,7 +2467,8 @@ async function checkUpdate() {
     setTimeout(go, 8000); // احتياط إذا ما تغيّر شي
   } catch { /* بلا نت */ }
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => { if (document.hidden) { hiddenAt = Date.now(); return; } checkUpdate().finally(() => { hiddenAt = 0; }); });
 
 /* ================= ذاكرة الصفحات =================
    لمّا ترجع لصفحة (الرئيسية، البحث، القناة…) بتلاقيها متل ما تركتها: نفس القائمة ونفس مكان التمرير.
