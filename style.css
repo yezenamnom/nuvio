@@ -972,3 +972,65 @@ body.shorts-mode .topbar, body.shorts-mode .fab, body.shorts-mode .mini, body.sh
 .grid > * { min-width: 0; }
 .grid > .shorts-row { min-width: 0; max-width: 100%; overflow: hidden; }
 .grid > .shorts-row .short-strip { max-width: 100%; }
+
+/* ===== بلا زوم بإصبعين (التمرير بيضل شغّال) ===== */
+html { touch-action: pan-x pan-y; }
+.shorts { touch-action: pan-y; }
+
+/* ===== أزرار الشورتس بطابع Nuvio ===== */
+.short-side { left: 12px; gap: 18px; }
+.short-btn { gap: 6px; font-size: .74rem; font-weight: 700; letter-spacing: .1px; }
+.short-ico {
+  width: 50px; height: 50px; background: rgba(255,255,255,.14);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4); backdrop-filter: blur(12px) saturate(1.4);
+  border: 1px solid rgba(255,255,255,.2); box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  transition: transform .15s ease, background .2s, border-color .2s;
+}
+.short-btn:active .short-ico { transform: scale(.88); }
+.short-ico svg, .short-ico .ic { width: 25px; height: 25px; stroke: #fff; stroke-width: 2; }
+.short-btn.on .short-ico { background: linear-gradient(135deg, #8b5cf6, #ec4899); border-color: transparent; box-shadow: 0 6px 20px rgba(236,72,153,.45); }
+.short-btn.on .short-ico svg, .short-btn.on .short-ico .ic { stroke: #fff; }
+.short-btn.on:first-child .short-ico svg, .short-btn.on:first-child .short-ico .ic { fill: rgba(255,255,255,.95); }
+.short-btn.on span:last-child { color: #f9a8d4; }
+
+/* فوق: ظل خفيف + «شورتس» بالنص + رجوع (يمين) وصوت (شمال) */
+.shorts-top {
+  position: fixed; top: 0; left: 0; right: 0; height: calc(86px + env(safe-area-inset-top)); z-index: 60; pointer-events: none;
+  background: linear-gradient(rgba(0,0,0,.5), transparent); display: flex; justify-content: center; align-items: flex-start;
+  padding-top: max(20px, calc(env(safe-area-inset-top) + 8px));
+}
+.shorts-ttl { display: flex; align-items: center; gap: 6px; color: #fff; font-weight: 800; font-size: 1rem; text-shadow: 0 1px 6px rgba(0,0,0,.6); }
+.shorts-ttl svg, .shorts-ttl .ic { width: 20px; height: 20px; fill: none; stroke: #fff; stroke-width: 2; }
+.shorts-back, .shorts-mute {
+  width: 44px; height: 44px; background: rgba(255,255,255,.14);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,.2);
+  transition: transform .15s;
+}
+.shorts-back:active, .shorts-mute:active { transform: scale(.9); }
+
+/* أسهم فوق/تحت (كمبيوتر): بالطرف التاني، بعيد عن أزرار الإعجاب */
+.shorts-nav { left: auto; right: 28px; }
+.shorts-nav button { width: 52px; height: 52px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.18); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.shorts-nav button:hover { background: linear-gradient(135deg, rgba(139,92,246,.6), rgba(236,72,153,.55)); }
+
+/* ===== «أنا»: قسم الشورتس — أزرار وتحتها 3 بكل صف ===== */
+.me-shorts { margin-bottom: 18px; }
+.me-shorts-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.me-shorts-tabs button {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 6px; border-radius: 16px;
+  border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; font-weight: 700; font-size: .85rem; cursor: pointer;
+  transition: background .2s, border-color .2s, transform .15s;
+}
+.me-shorts-tabs button:active { transform: scale(.96); }
+.me-shorts-tabs button small { color: var(--muted); font-weight: 600; font-size: .72rem; }
+.me-shorts-tabs button.on { background: linear-gradient(135deg, rgba(139,92,246,.35), rgba(236,72,153,.3)); border-color: rgba(236,72,153,.55); }
+.me-shorts-tabs button.on small { color: #fbcfe8; }
+.me-st-ico svg, .me-st-ico .ic { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.short-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.short-grid .short-card { width: auto; border-radius: 12px; }
+.short-grid .short-card-t { font-size: .74rem; bottom: 22px; left: 6px; right: 6px; }
+.short-grid .short-card-s { font-size: .66rem; left: 6px; right: 6px; bottom: 6px; }
+@media (min-width: 769px) { .short-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; } }
+.me-shorts-empty { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 22px 12px; border: 1px dashed var(--line); border-radius: 16px; color: var(--muted); text-align: center; }
+.me-more { display: block; margin: 10px auto 0; }
+@media (max-width: 768px) { .shorts-nav { right: 12px; gap: 10px; } .shorts-nav button { width: 42px; height: 42px; opacity: .85; } .shorts-nav svg { width: 20px; height: 20px; } }

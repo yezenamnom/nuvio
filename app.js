@@ -791,7 +791,7 @@ function channelCard(ch) {
 }
 
 /* ================= مكتبتك (محفوظة على جهازك بس) ================= */
-const slim = v => ({ id: v.id, title: v.title, thumb: v.thumb || ytThumb(v.id), author: v.author, authorId: v.authorId, duration: v.duration, views: v.views, published: v.published });
+const slim = v => ({ id: v.id, title: v.title, thumb: v.thumb || ytThumb(v.id), author: v.author, authorId: v.authorId, duration: v.duration, views: v.views, published: v.published, ...(v.short ? { short: true } : {}) });
 const lib = {
   list: k => store.get(k, []),
   has: (k, id) => store.get(k, []).some(v => v.id === id),
@@ -2273,7 +2273,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120154856';
+const APP_VERSION = '20261120162440';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

@@ -4,6 +4,9 @@
    (بينحمّل قبل app.js: هون بس تعريفات، وما في شي بيشتغل لحالو وقت التحميل) */
 'use strict';
 
+/* بلا زوم بإصبعين (سفاري الآيفون بيتجاهل إعداد الصفحة، فمنوقفو هون) */
+['gesturestart', 'gesturechange'].forEach(n => document.addEventListener(n, e => e.preventDefault(), { passive: false }));
+
 /* ================= الإعدادات ================= */
 const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto' };
 const prefs = {
@@ -550,7 +553,10 @@ async function renderShorts(startId, ch) {
   mute.onclick = e => { e.stopPropagation(); video.muted = !video.muted; drawMute(); if (!video.muted) video.play().catch(() => {}); };
   video.addEventListener('volumechange', drawMute); drawMute();
   const s = shortsState = { wrap, video, sp: null, cur: null, seq: 0, seen: new Set(), more: null, busy: false };
-  view.replaceChildren(wrap, back, mute, nav);
+  const shade = el('div', 'shorts-top');
+  const ttl = el('div', 'shorts-ttl'); ttl.innerHTML = (window.ico ? window.ico('shorts') : '') + '<span>شورتس</span>';
+  shade.append(ttl);
+  view.replaceChildren(wrap, shade, back, mute, nav);
 
   const sideBtn = (icon, label, on, fn) => {
     const b = el('button', 'short-btn' + (on ? ' on' : ''));
@@ -771,6 +777,49 @@ function libRow(href, title, sub, thumbId, icon) {
   a.append(st, tx);
   return a;
 }
+let meShortsTab = 'likes';
+function meShortsSection() {
+  const SK = [['likes', 'المعجب فيهم', 'like'], ['hist', 'السجل', 'clock'], ['favs', 'المحفوظ', 'saved']];
+  const shortsOf = k => lib.list(k).filter(v => v && v.short);
+  const box = el('div', 'me-shorts');
+  box.append(sectionHead('شورتس', '#/shorts', 'shorts'));
+  const chips = el('div', 'me-shorts-tabs');
+  const grid = el('div', 'short-grid');
+  const more = el('button', 'btn me-more');
+  const draw = k => {
+    meShortsTab = k;
+    chips.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.k === k));
+    const list = shortsOf(k);
+    grid.replaceChildren();
+    more.hidden = true;
+    if (!list.length) {
+      const e = el('div', 'me-shorts-empty');
+      e.append(el('span', null, k === 'likes' ? 'لسّا ما عملت إعجاب لشورت. كبستين عالشورت = إعجاب ❤' : k === 'favs' ? 'ما في شورتس محفوظة. اكبس «حفظ» جنب الشورت.' : 'لسّا ما شفت شورتس.'));
+      const go = el('a', 'btn btn-main', 'افتح الشورتس'); go.href = '#/shorts';
+      e.append(go);
+      grid.append(e);
+      return;
+    }
+    list.slice(0, 12).forEach(v => grid.append(shortCard(v, () => list)));
+    if (list.length > 12) {
+      more.hidden = false; more.textContent = `عرض الكل (${nf.format(list.length)})`;
+      more.onclick = () => { list.slice(12).forEach(v => grid.append(shortCard(v, () => list))); more.hidden = true; };
+    }
+  };
+  for (const [k, label, icon] of SK) {
+    const n = shortsOf(k).length;
+    const b = el('button'); b.dataset.k = k;
+    const ic = el('span', 'me-st-ico'); ic.innerHTML = window.ico ? window.ico(icon) : '';
+    b.append(ic, el('span', null, label));
+    if (n) b.append(el('small', null, nf.format(n)));
+    b.onclick = () => draw(k);
+    chips.append(b);
+  }
+  box.append(chips, grid, more);
+  draw(meShortsTab);
+  return box;
+}
+
 function renderMe(filter = 'all') {
   document.title = 'أنا — Nuvio';
   // الراس
@@ -796,6 +845,7 @@ function renderMe(filter = 'all') {
       hist.forEach(v => shelf.append(card(v)));
       out.push(sectionHead('السجل', '#/history', 'clock'), shelf);
     }
+    out.push(meShortsSection());
     out.push(sectionHead('مكتبتك', null, 'folder'));
     const chips = el('div', 'filter-bar');
     [['all', 'الكل'], ['lists', 'قوائم التشغيل'], ['music', 'الموسيقى']].forEach(([k, label]) => {
