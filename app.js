@@ -1777,6 +1777,7 @@ async function renderWatch(id, startTime) {
     window.__nuvioNp = np;
     np.video.poster = ytThumb(id, 'hqdefault');
     qoe.attach(np.video);
+    if (svUsable()) np.setBgAudio(`${SV}/vp/${encodeURIComponent(id)}/140`);
     setChip('مشغّل احتياطي', 'warn');
     // كل شي مربوط بالمشغّل (حفظ المكان، تخطّي الدعايات جوّا الفيديو، الجاي…)
     const ex = extras = watchExtras({ id, getNp: () => np, box, music, related: () => (shown && shown.related) || (current && current.data.related) || [] });
@@ -1829,7 +1830,9 @@ async function renderWatch(id, startTime) {
         }
         return;
       }
-      const adNow = (media.vid && media.vid !== id) || (dur && media.curDur && Math.abs(media.curDur - dur) > 3) || (media.st === 1 && now - media.ctMoveAt > 2500);
+      const sinceSeek = now - (media.lastSeekAt || 0);
+      const frozen = media.st === 1 && now - media.ctMoveAt > 4000 && sinceSeek > 10000 && media.seekingTo == null;
+      const adNow = (media.vid && media.vid !== id) || (dur && media.curDur && Math.abs(media.curDur - dur) > 3) || frozen;
       if (!adNow) { if (media.st === 1) goodCt = media.ct; return; }
       reloadAt(goodCt, 'ad'); // إعلان بالنص: منرجع لنفس الثانية
     }, 400);
@@ -2570,7 +2573,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120195751';
+const APP_VERSION = '20261120200827';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

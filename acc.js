@@ -83,7 +83,7 @@ function accPing() {
   if (document.hidden) return;
   const np = typeof active !== 'undefined' && active && active.np && active.np();
   const playing = !!(np && np.video && !np.video.paused) || !!(typeof shortsState !== 'undefined' && shortsState && shortsState.video && !shortsState.video.paused);
-  accApi('/ping', { method: 'POST', body: { did: accDid(), page: (location.hash.slice(1) || '/').split('?')[0], playing, kind: matchMedia('(pointer: coarse)').matches ? 'mobile' : 'desktop' }, keepalive: true }).catch(() => {});
+  accApi('/ping', { method: 'POST', body: { did: accDid(), page: (location.hash.slice(1) || '/').split('?')[0], playing, kind: matchMedia('(pointer: coarse)').matches ? 'mobile' : 'desktop', v: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '', yt: !!(typeof prefs !== 'undefined' && prefs.get('player') === 'yt') }, keepalive: true }).catch(() => {});
 }
 async function accInit() {
   setInterval(accPing, 30e3);
@@ -210,7 +210,7 @@ async function renderAdmin() {
       const av = el('span', 'adm-av' + (x.user ? '' : ' guest'), x.user ? x.user.charAt(0) : '؟');
       const tx = el('div', 'adm-tx');
       const nm = el('b', null, x.user || 'ضيف'); nm.dir = 'auto';
-      tx.append(nm, el('span', 'muted', `${pageAr(x.page)} · ${x.kind === 'mobile' ? 'تلفون' : 'كمبيوتر'} · من ${agoAr(x.since).replace('قبل ', '')}`));
+      tx.append(nm, el('span', 'muted', `${pageAr(x.page)} · ${x.kind === 'mobile' ? 'تلفون' : 'كمبيوتر'} · من ${agoAr(x.since).replace('قبل ', '')}${x.v ? ` · نسخة ${x.v}${typeof APP_VERSION !== 'undefined' && x.v === APP_VERSION ? ' ✓' : ' (قديمة)'}` : ' · نسخة قديمة'}${x.yt ? ' · مشغّل يوتيوب' : ''}`));
       r.append(av, tx);
       if (x.playing) r.append(el('span', 'adm-play', '▶ عم يشغّل'));
       onl.append(r);

@@ -155,6 +155,8 @@
       if (this._orient) { window.removeEventListener('orientationchange', this._orient); try { screen.orientation.removeEventListener('change', this._orient); } catch { /* */ } }
       document.removeEventListener('keydown', this._key); document.removeEventListener('fullscreenchange', this._fsc);
       document.removeEventListener('visibilitychange', this._vis);
+      if (this._unlockAny) document.removeEventListener('pointerup', this._unlockAny, true);
+      clearTimeout(this._preT);
       if (this.bg) { this.bg.pause(); this.bg.removeAttribute('src'); this.bg.load(); }
     }
 
@@ -179,7 +181,7 @@
         if (name === 'NotAllowedError' && !v.muted) {
           this._autoMuted = true; v.muted = true;
           v.play().then(() => { this.unmuteEl.hidden = false; this._showUI(); }).catch(() => {});
-          try { navigator.sendBeacon('https://tube.glanzstar.de/acc/err', JSON.stringify({ m: 'autoplay blocked → muted', s: 'player.js', l: 0, v: '', ua: navigator.userAgent.slice(0, 180), p: '/watch' })); } catch { /* */ }
+          try { navigator.sendBeacon('https://tube.glanzstar.de/acc/err', JSON.stringify({ m: 'autoplay blocked → muted', s: 'player.js', l: 0, v: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '', ua: navigator.userAgent.slice(0, 180), p: '/watch' })); } catch { /* */ }
         } else if (name === 'AbortError') setTimeout(() => { if (!this.dead && v.paused && !v.ended && !this.userPaused) v.play().catch(() => {}); }, 400);
       });
       clearTimeout(this._apT);
@@ -252,6 +254,12 @@
         this.bg.setAttribute('playsinline', '');
         this.bg.addEventListener('ended', () => { this.bgOn = false; }); this.bg.loop = !!this.loop;
         this.box.dispatchEvent(new CustomEvent('npbg', { detail: this.bg }));
+      }
+      // منجهّز أول الصوت مسبقاً (بلا تشغيل)، لحتى لمّا تسكّر الشاشة ينتقل فوراً بلا سكتة
+      if (!DESKTOP) { clearTimeout(this._preT); this._preT = setTimeout(() => { const bg = this.bg; if (!this.dead && bg && this.bgUrl && bg.src !== this.bgUrl && bg.paused) { bg.preload = 'metadata'; bg.src = this.bgUrl; } }, 4000); }
+      if (!this._unlockAny) {
+        this._unlockAny = () => { this._unlock(); if (this.unlocked || this.dead) document.removeEventListener('pointerup', this._unlockAny, true); };
+        document.addEventListener('pointerup', this._unlockAny, true);
       }
       if (!this._vis) {
         this._vis = () => {
@@ -795,7 +803,7 @@
     }
     set currentTime(t) {
       t = Math.max(0, +t || 0);
-      this.seekingTo = t; this.ct = t; this.ctAt = 0;
+      this.seekingTo = t; this.ct = t; this.ctAt = 0; this.lastSeekAt = Date.now(); this.ctMoveAt = Date.now();
       this.cmd('seekTo', [t, true]);
       this._emit('seeking'); this._emit('timeupdate');
     }
