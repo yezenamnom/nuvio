@@ -15,13 +15,16 @@ const prefs = {
 };
 window.nuvioPref = prefs;
 /* ================= الثيم: Nuvio / نهاري / يوتيوب ================= */
-const THEMES = [['nuvio', 'Nuvio', '#0b1220'], ['light', 'نهاري', '#ffffff'], ['yt', 'يوتيوب', '#0f0f0f']];
+const THEMES = [['nuvio', 'Nuvio', '#0b1220'], ['light', 'نهاري', '#ffffff'], ['yt', 'ألوان يوتيوب', '#0f0f0f'], ['ytui', 'واجهة يوتيوب', 'auto']];
+const devLight = () => window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches;
 function applyTheme(k) {
   const th = THEMES.find(x => x[0] === k) || THEMES[0];
   if (th[0] === 'nuvio') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = th[0];
-  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = th[2];
+  const m = document.querySelector('meta[name=theme-color]');
+  if (m) m.content = th[2] === 'auto' ? (devLight() ? '#ffffff' : '#0f0f0f') : th[2];
 }
+if (window.matchMedia) matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (document.documentElement.dataset.theme === 'ytui') applyTheme('ytui'); });
 const HOLD_RATES = [1.5, 2, 3];
 const SPEEDS_S = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
@@ -172,6 +175,11 @@ const queue = {
 };
 let openInMini = false; // الفيديو الجاي بيكمّل بالمشغّل الصغير إذا كان مصغّر
 function pickNext(curId, related, music, force) {
+  if (playCtx) {
+    const i = playCtx.ids.indexOf(curId);
+    if (i >= 0 && i + 1 < playCtx.ids.length) return { v: playCtx.items[i + 1], fromList: playCtx.title };
+    if (i < 0 || i + 1 >= playCtx.ids.length) playCtx = i < 0 ? null : playCtx; // خلصت القائمة
+  }
   const q = queue.list().filter(v => v.id !== curId);
   if (q.length) return { v: q[0], fromQueue: true };
   if (!force && !prefs.get('autoplay')) return null;
@@ -191,7 +199,7 @@ function goNext(nx) {
 function showUpNext(box, nx) {
   const old = box.querySelector('.np-next'); if (old) old.remove();
   const o = el('div', 'np-next'); o.dir = 'rtl';
-  const head = el('div', 'np-next-t', nx.fromQueue ? 'الجاي من «شغّل بعدين»' : 'الفيديو الجاي');
+  const head = el('div', 'np-next-t', nx.fromQueue ? 'الجاي من «شغّل بعدين»' : nx.fromList ? `الجاي من «${nx.fromList}»` : 'الفيديو الجاي');
   const row = el('div', 'np-next-row');
   const img = el('img'); img.alt = ''; img.src = ytThumb(nx.v.id);
   const tt = el('div', 'np-next-title', nx.v.title || ''); tt.dir = 'auto';
@@ -331,6 +339,7 @@ function cardMenu(v) {
   openSheet(v.title, [
     ['later', queue.has(v.id) ? 'شيل من «شغّل بعدين»' : 'شغّل بعدين', () => note(queue.toggle(v) ? 'انضاف لـ«شغّل بعدين» ✓' : 'انشال من «شغّل بعدين»')],
     ['saved', lib.has('favs', v.id) ? 'شيل من المحفوظة' : 'حفظ', () => note(lib.toggle('favs', v) ? 'انحفظ ✓' : 'انشال من المحفوظة')],
+    ['list', 'ضيف لقائمة تشغيل', () => addToPlaylist(v)],
     ['share', 'مشاركة', () => shareVideo(v)],
     ['ban', 'مش مهتم', () => { addNope('nope', v.id); hideCards(`a.card[data-vid="${CSS.escape(v.id)}"]`); note('تمام، ما رح نقترحلك ياه'); }],
     v.authorId && author ? ['userx', `ما تقترحلي «${author.slice(0, 30)}»`, () => {
@@ -389,7 +398,7 @@ const saverCfg = () => (saverOn()
   : { abr: { restrictions: { maxHeight: Infinity } } });
 
 /* ================= النسخة الاحتياطية ================= */
-const BACKUP_KEYS = ['hist', 'likes', 'favs', 'mhist', 'subs', 'artists', 'ytlists', 'searches', 'later', 'pos', 'nope', 'nopeCh', 'chSeen', 'chTop', 'prefs', 'mode'];
+const BACKUP_KEYS = ['playlists', 'hist', 'likes', 'favs', 'mhist', 'subs', 'artists', 'ytlists', 'searches', 'later', 'pos', 'nope', 'nopeCh', 'chSeen', 'chTop', 'prefs', 'mode'];
 function exportBackup() {
   const data = {};
   for (const k of BACKUP_KEYS) { const v = store.get(k, null); if (v != null) data[k] = v; }
@@ -441,7 +450,7 @@ function mergeBackup(j) {
     if (merged.some(x => x.at)) merged.sort((a, b) => (b.at || 0) - (a.at || 0));
     store.set(k, max ? merged.slice(0, max) : merged);
   };
-  arrById('hist', 500); arrById('mhist', 500); arrById('likes'); arrById('favs'); arrById('subs'); arrById('artists'); arrById('ytlists');
+  arrById('playlists'); arrById('hist', 500); arrById('mhist', 500); arrById('likes'); arrById('favs'); arrById('subs'); arrById('artists'); arrById('ytlists');
   if (Array.isArray(d.later)) { const cur = queue.list(); const have = new Set(cur.map(x => x.id)); const add = d.later.filter(x => x && x.id && !have.has(x.id)); if (add.length) { n += add.length; store.set('later', cur.concat(add).slice(-200)); } }
   if (Array.isArray(d.searches)) { const cur = store.get('searches', []); const low = new Set(cur.map(s => String(s).toLowerCase())); const add = d.searches.filter(s => typeof s === 'string' && !low.has(s.toLowerCase())); if (add.length) { n += add.length; store.set('searches', cur.concat(add).slice(0, 40)); } }
   for (const k of ['nope', 'nopeCh']) if (Array.isArray(d[k])) { const cur = store.get(k, []); const set = new Set(cur); const add = d[k].filter(x => !set.has(x)); if (add.length) store.set(k, cur.concat(add).slice(0, 2000)); }
@@ -527,6 +536,7 @@ function shortsExit() {
   document.body.classList.remove('shorts-mode');
   if (s.io) s.io.disconnect();
   try { s.video.pause(); } catch { /* */ }
+  if (s.pre) for (const m of s.pre.values()) try { m.destroy(); } catch { /* */ }
   if (s.sp) s.sp.destroy().catch(() => {});
 }
 // ملف DASH بمحاولة وحدة سريعة (بنفس ذاكرة المشغّل الكبير)
@@ -622,6 +632,7 @@ function shortsMenu(v, sl) {
     { type: 'choice', icon: 'bolt', label: 'سرعة الضغط المطوّل', options: HOLD_RATES.map(r => [r, `${r}×`]), get: () => +prefs.get('holdRate') || 2, set: x => prefs.set('holdRate', x) },
     { type: 'toggle', icon: 'music', label: 'كتم الصوت', get: () => video.muted, set: x => { video.muted = x; if (!x) video.play().catch(() => {}); } },
     { type: 'choice', icon: 'wifi', label: 'توفير الإنترنت', options: [['auto', 'تلقائي'], ['on', 'دايماً (480p)'], ['off', 'أبداً']], get: () => prefs.get('saver'), set: x => { prefs.set('saver', x); if (st.sp) try { st.sp.configure(saverCfg()); } catch { /* */ } } },
+    { type: 'action', icon: 'list', label: 'ضيف لقائمة تشغيل', fn: () => addToPlaylist(v) },
     { type: 'action', icon: 'later', label: queue.has(v.id) ? 'شيل من «شغّل بعدين»' : 'شغّل بعدين', fn: () => note(queue.toggle(v) ? 'انضاف لـ«شغّل بعدين» ✓' : 'انشال من «شغّل بعدين»') },
     { type: 'action', icon: 'ban', label: 'مش مهتم', fn: () => { addNope('nope', v.id); note('تمام، ما رح نقترحلك ياه'); st.wrap.scrollBy({ top: st.wrap.clientHeight, behavior: 'smooth' }); } },
   ]);
@@ -651,7 +662,18 @@ async function renderShorts(startId, ch) {
   const drawMute = () => { mute.innerHTML = video.muted ? '<svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4z"/><path class="s" d="M16 9.5l5 5M21 9.5l-5 5"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4z"/><path class="s" d="M15.5 8.8a4.5 4.5 0 0 1 0 6.4M18.2 6.2a8.2 8.2 0 0 1 0 11.6"/></svg>'; };
   mute.onclick = e => { e.stopPropagation(); video.muted = !video.muted; drawMute(); if (!video.muted) video.play().catch(() => {}); };
   video.addEventListener('volumechange', drawMute); drawMute();
-  const s = shortsState = { wrap, video, sp: null, cur: null, seq: 0, seen: new Set(), more: null, busy: false };
+  const s = shortsState = { wrap, video, sp: null, cur: null, seq: 0, seen: new Set(), more: null, busy: false, pre: new Map() };
+  const preloadShort = async v => {
+    if (!s.sp || !s.sp.preload || s.pre.has(v.id) || shortsState !== s) return;
+    try {
+      const mf = await shortManifest(v.id);
+      const pm = await s.sp.preload(toDataUri(mf.text, 'application/dash+xml'), 0, 'application/dash+xml');
+      if (!pm) return;
+      s.pre.set(v.id, pm);
+      // ما منخلّي أكتر من 3 جاهزين (بياكلو ذاكرة)
+      for (const [k, m] of s.pre) if (s.pre.size > 3 && k !== v.id) { s.pre.delete(k); try { m.destroy(); } catch { /* */ } }
+    } catch { /* عادي */ }
+  };
   const shade = el('div', 'shorts-top');
   const ttl = el('div', 'shorts-ttl'); ttl.innerHTML = (window.ico ? window.ico('shorts') : '') + '<span>شورتس</span>';
   shade.append(ttl);
@@ -746,11 +768,22 @@ async function renderShorts(startId, ch) {
         s.sp = new shaka.Player();
         await s.sp.attach(video);
         s.sp.getNetworkingEngine().registerRequestFilter(async (type, req) => { req.uris = await Promise.all(req.uris.map(fixUrl)); });
-        s.sp.configure({ preferredVideoCodecs: ['avc1', 'vp9'], streaming: { bufferingGoal: 12, rebufferingGoal: 0.3 }, abr: { enabled: true, defaultBandwidthEstimate: 2e6 } });
+        s.sp.configure({
+          preferredVideoCodecs: ['avc1', 'vp9'],
+          streaming: { bufferingGoal: 10, rebufferingGoal: 0.3, segmentPrefetchLimit: 2 },
+          manifest: { dash: { ignoreMinBufferTime: true } },
+          abr: { enabled: true, defaultBandwidthEstimate: 1.5e6, switchInterval: 2 },
+        });
       }
       s.sp.configure(saverCfg());
       let ok = false;
-      try {
+      const pm = s.pre.get(v.id);
+      if (pm) {
+        s.pre.delete(v.id);
+        try { await s.sp.load(pm); ok = true; } catch { /* منحمّل عادي */ }
+        if (my !== s.seq) return;
+      }
+      if (!ok) try {
         const mf = await shortManifest(v.id);
         if (my !== s.seq) return;
         await s.sp.load(toDataUri(mf.text, 'application/dash+xml'), 0, 'application/dash+xml');
@@ -782,9 +815,11 @@ async function renderShorts(startId, ch) {
     sl.insertBefore(video, sl.children[1] || null);
     video.playbackRate = 1;
     load(sl._v, sl);
-    // جهّز اللي بعدو (ملف الفيديو بيكون جاهز لمّا توصلو)
+    // جهّز اللي بعدو: ملفو + أول قطع منو، فبيبلّش فوراً لمّا تسحب
     const nx = sl.nextElementSibling;
-    if (nx && nx._v) shortManifest(nx._v.id).catch(() => {});
+    if (nx && nx._v) setTimeout(() => preloadShort(nx._v), 600);
+    const nx2 = nx && nx.nextElementSibling;
+    if (nx2 && nx2._v) shortManifest(nx2._v.id).catch(() => {});
     const kids = [...wrap.children];
     if (kids.length - kids.indexOf(sl) < 4) loadMore();
   };
@@ -872,7 +907,7 @@ window.addEventListener('nuvio:store', e => { if (['chTop', 'chSeen', 'subs'].in
 function updateBottomNav() {
   const nav = document.querySelector('.bnav'); if (!nav) return;
   const path = (location.hash.slice(1) || '/').split('?')[0];
-  const sec = path.startsWith('/music') ? '/music' : ['/history', '/likes', '/favs', '/later', '/searches', '/lists', '/list'].includes(path) ? '/me' : path;
+  const sec = path.startsWith('/music') ? '/music' : ['/history', '/likes', '/favs', '/later', '/searches', '/lists', '/list', '/lib', '/plist', '/settings'].includes(path) ? '/me' : path;
   nav.querySelectorAll('.bnav-i').forEach(a => a.classList.toggle('on', a.dataset.path === sec));
   const subsBtn = nav.querySelector('[data-path="/subs"]');
   if (subsBtn) subsBtn.classList.toggle('dot', subs.list().some(c => chNew.has(c.id)));
@@ -892,112 +927,280 @@ function libRow(href, title, sub, thumbId, icon) {
   a.append(st, tx);
   return a;
 }
-let meShortsTab = 'likes';
-function meShortsSection() {
-  const SK = [['likes', 'المعجب فيهم', 'like'], ['hist', 'السجل', 'clock'], ['favs', 'المحفوظ', 'saved']];
-  const shortsOf = k => lib.list(k).filter(v => v && v.short);
-  const box = el('div', 'me-shorts');
-  box.append(sectionHead('شورتس', '#/shorts', 'shorts'));
-  const chips = el('div', 'me-shorts-tabs');
-  const grid = el('div', 'short-grid');
-  const more = el('button', 'btn me-more');
+/* ================= مكتبتك: شورتس / فيديوهات / أغاني ================= */
+const isShortItem = v => !!(v && v.short);
+const isMusicItem = v => !!(v && v.music);
+const LIB_TYPES = {
+  shorts: { title: 'شورتس', icon: 'shorts', tabs: [['likes', 'المعجب فيهم', 'like'], ['hist', 'السجل', 'clock'], ['favs', 'المحفوظ', 'saved']],
+    pick: k => lib.list(k).filter(isShortItem) },
+  videos: { title: 'فيديوهات', icon: 'play', tabs: [['likes', 'الإعجابات', 'like'], ['hist', 'السجل', 'clock'], ['favs', 'المحفوظة', 'saved']],
+    pick: k => lib.list(k).filter(v => !isShortItem(v) && !isMusicItem(v)) },
+  music: { title: 'أغاني', icon: 'music', tabs: [['likes', 'المعجب فيهم', 'like'], ['mhist', 'السجل السماعي', 'phones'], ['favs', 'المحفوظة', 'saved']],
+    pick: k => (k === 'mhist' ? lib.list('mhist') : lib.list(k).filter(isMusicItem)) },
+};
+const meTab = { shorts: 'likes', videos: 'hist', music: 'mhist' };
+const EMPTY_MSG = {
+  shorts: { likes: 'لسّا ما عملت إعجاب لشورت. كبستين عالشورت = إعجاب ❤', hist: 'لسّا ما شفت شورتس.', favs: 'ما في شورتس محفوظة.' },
+  videos: { likes: 'لسّا ما عملت إعجاب لفيديو.', hist: 'لسّا ما شفت شي.', favs: 'ما في فيديوهات محفوظة.' },
+  music: { likes: 'لسّا ما عملت إعجاب لأغنية.', mhist: 'لسّا ما سمعت شي بـ Nuvio Music.', favs: 'ما في أغاني محفوظة.' },
+};
+function meLibSection(type) {
+  const T = LIB_TYPES[type];
+  const box = el('div', 'me-sec');
+  const head = sectionHead(T.title, `#/lib?t=${type}&k=${meTab[type]}`, T.icon);
+  const tabs = el('div', 'me-shorts-tabs');
+  const body = el('div', 'me-sec-body');
   const draw = k => {
-    meShortsTab = k;
-    chips.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.k === k));
-    const list = shortsOf(k);
-    grid.replaceChildren();
-    more.hidden = true;
+    meTab[type] = k;
+    const more = head.querySelector('.sec-more'); if (more) more.href = `#/lib?t=${type}&k=${k}`;
+    tabs.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.k === k));
+    const list = T.pick(k);
+    body.replaceChildren();
     if (!list.length) {
       const e = el('div', 'me-shorts-empty');
-      e.append(el('span', null, k === 'likes' ? 'لسّا ما عملت إعجاب لشورت. كبستين عالشورت = إعجاب ❤' : k === 'favs' ? 'ما في شورتس محفوظة. اكبس «حفظ» جنب الشورت.' : 'لسّا ما شفت شورتس.'));
-      const go = el('a', 'btn btn-main', 'افتح الشورتس'); go.href = '#/shorts';
-      e.append(go);
-      grid.append(e);
+      e.append(el('span', null, EMPTY_MSG[type][k] || 'فاضي'));
+      if (type === 'shorts') { const go = el('a', 'btn btn-main', 'افتح الشورتس'); go.href = '#/shorts'; e.append(go); }
+      body.append(e);
       return;
     }
-    list.slice(0, 12).forEach(v => grid.append(shortCard(v, () => list)));
-    if (list.length > 12) {
-      more.hidden = false; more.textContent = `عرض الكل (${nf.format(list.length)})`;
-      more.onclick = () => { list.slice(12).forEach(v => grid.append(shortCard(v, () => list))); more.hidden = true; };
+    if (type === 'shorts') {
+      const grid = el('div', 'short-grid');
+      list.slice(0, 6).forEach(v => grid.append(shortCard(v, () => list)));
+      body.append(grid);
+    } else {
+      const shelf = el('div', 'shelf');
+      list.slice(0, 16).forEach(v => shelf.append(card(v)));
+      body.append(shelf);
+    }
+    if (list.length > (type === 'shorts' ? 6 : 16)) {
+      const all = el('a', 'btn me-more', `عرض الكل (${nf.format(list.length)})`); all.href = `#/lib?t=${type}&k=${k}`;
+      body.append(all);
     }
   };
-  for (const [k, label, icon] of SK) {
-    const n = shortsOf(k).length;
+  for (const [k, label, icon] of T.tabs) {
+    const n = T.pick(k).length;
     const b = el('button'); b.dataset.k = k;
     const ic = el('span', 'me-st-ico'); ic.innerHTML = window.ico ? window.ico(icon) : '';
-    b.append(ic, el('span', null, label));
-    if (n) b.append(el('small', null, nf.format(n)));
-    b.onclick = () => draw(k);
-    chips.append(b);
+    b.append(ic, el('span', null, label), el('small', null, n ? nf.format(n) : '—'));
+    // كبسة = اختيار، وكبسة على المختار = بتفوت على القسم كامل
+    b.onclick = () => { if (b.classList.contains('on')) location.hash = `#/lib?t=${type}&k=${k}`; else draw(k); };
+    tabs.append(b);
   }
-  box.append(chips, grid, more);
-  draw(meShortsTab);
+  box.append(head, tabs, body);
+  draw(T.tabs.some(x => x[0] === meTab[type]) ? meTab[type] : T.tabs[0][0]);
+  return box;
+}
+// صفحة قسم كامل: مثلاً «شورتس — المعجب فيهم»
+function renderLibView(type, k) {
+  const T = LIB_TYPES[type] || LIB_TYPES.videos;
+  const tab = T.tabs.find(x => x[0] === k) || T.tabs[0];
+  const list = T.pick(tab[0]);
+  document.title = `${T.title} — ${tab[1]} — Nuvio`;
+  const head = sectionHead(`${T.title} · ${tab[1]} (${nf.format(list.length)})`, null, T.icon);
+  const chips = el('div', 'filter-bar');
+  T.tabs.forEach(([kk, label]) => {
+    const b = el('button', 'f-chip' + (kk === tab[0] ? ' on' : ''), label);
+    b.onclick = () => { location.hash = `#/lib?t=${type}&k=${kk}`; };
+    chips.append(b);
+  });
+  const types = el('div', 'filter-bar');
+  Object.entries(LIB_TYPES).forEach(([tt, d]) => {
+    const b = el('button', 'f-chip' + (tt === type ? ' on' : ''), d.title);
+    b.onclick = () => { location.hash = `#/lib?t=${tt}&k=${(d.tabs.find(x => x[0] === tab[0]) || d.tabs[0])[0]}`; };
+    types.append(b);
+  });
+  view.replaceChildren(head, types, chips);
+  if (!list.length) { view.append(el('div', 'empty', EMPTY_MSG[type] && EMPTY_MSG[type][tab[0]] || 'فاضي')); return; }
+  const g = el('div', type === 'shorts' ? 'short-grid' : 'grid');
+  list.forEach(v => {
+    const c = type === 'shorts' ? shortCard(v, () => list) : card(v);
+    const x = el('button', 'card-x', '✕'); x.title = 'شيل';
+    x.onclick = e => { e.preventDefault(); e.stopPropagation(); lib.remove(tab[0], v.id); c.remove(); };
+    (c.querySelector('.thumb') || c).append(x);
+    g.append(c);
+  });
+  view.append(g);
+}
+
+/* ================= قوائم التشغيل الخاصة فيك ================= */
+const plists = {
+  all: () => store.get('playlists', []),
+  get: id => plists.all().find(p => p.id === id),
+  create(title) {
+    const p = { id: 'pl' + Date.now().toString(36), title: (title || '').trim() || 'قائمة جديدة', at: Date.now(), videos: [] };
+    store.set('playlists', [p, ...plists.all()]);
+    return p;
+  },
+  save(p) { store.set('playlists', plists.all().map(x => (x.id === p.id ? p : x))); },
+  remove(id) { store.set('playlists', plists.all().filter(p => p.id !== id)); },
+  has: (id, vid) => { const p = plists.get(id); return !!(p && p.videos.some(v => v.id === vid)); },
+  toggle(id, v) {
+    const p = plists.get(id); if (!p) return false;
+    const i = p.videos.findIndex(x => x.id === v.id);
+    if (i >= 0) p.videos.splice(i, 1); else p.videos.push(slim(v));
+    plists.save(p);
+    return i < 0;
+  },
+};
+// خانة كتابة صغيرة من تحت (اسم القائمة)
+function askText(title, placeholder, initial = '') {
+  return new Promise(resolve => {
+    const ov = el('div', 'np-sheet-ov sheet-ov');
+    const sh = el('div', 'np-sheet ask-sheet'); sh.dir = 'rtl';
+    const inp = el('input', 'ask-input'); inp.type = 'text'; inp.placeholder = placeholder || ''; inp.value = initial; inp.maxLength = 80;
+    const ok = el('button', 'btn btn-main', 'حفظ');
+    const no = el('button', 'btn', 'إلغاء');
+    const row = el('div', 'ask-btns'); row.append(no, ok);
+    sh.append(el('div', 'np-grip'), el('div', 'sheet-title', title), inp, row);
+    ov.append(sh);
+    const done = v => { ov.classList.remove('open'); if (window.nuvioLockScroll) window.nuvioLockScroll(false); setTimeout(() => ov.remove(), 260); resolve(v); };
+    ok.onclick = () => done(inp.value.trim() || null);
+    no.onclick = () => done(null);
+    inp.onkeydown = e => { if (e.key === 'Enter') ok.click(); if (e.key === 'Escape') no.click(); };
+    ov.onclick = e => { if (e.target === ov) done(null); };
+    document.body.append(ov);
+    if (window.nuvioLockScroll) window.nuvioLockScroll(true);
+    requestAnimationFrame(() => { ov.classList.add('open'); setTimeout(() => inp.focus(), 200); });
+  });
+}
+async function newPlaylist(firstVideo) {
+  const name = await askText('قائمة تشغيل جديدة', 'اسم القائمة (مثلاً: أغاني الصبح)');
+  if (!name) return null;
+  const p = plists.create(name);
+  if (firstVideo) plists.toggle(p.id, firstVideo);
+  note(firstVideo ? `انضاف لـ«${p.title}» ✓` : `انعملت «${p.title}» ✓`);
+  return p;
+}
+function addToPlaylist(v) {
+  const rows = plists.all().map(p => ({
+    type: 'toggle', icon: 'list', label: `${p.title} (${nf.format(p.videos.length)})`,
+    get: () => plists.has(p.id, v.id),
+    set: () => note(plists.toggle(p.id, v) ? `انضاف لـ«${p.title}» ✓` : `انشال من «${p.title}»`),
+  }));
+  rows.push({ type: 'action', icon: 'plus', label: 'قائمة جديدة…', fn: () => newPlaylist(v) });
+  openPrefSheet('ضيف لقائمة تشغيل', rows);
+}
+// تشغيل قائمة: الفيديو الجاي من القائمة نفسها
+let playCtx = null; // { ids, title }
+function playList(videos, title, shuffleIt) {
+  const list = shuffleIt ? shuffle(videos) : videos.slice();
+  if (!list.length) return;
+  playCtx = { ids: list.map(v => v.id), items: list, title };
+  list.forEach(v => preview.set(v.id, v));
+  note(`عم نشغّل «${title}»`);
+  goNext({ v: list[0] });
+}
+function renderUserPlaylist(id) {
+  const p = plists.get(id);
+  if (!p) { view.replaceChildren(el('div', 'empty', 'هالقائمة مش موجودة.')); return; }
+  document.title = `${p.title} — Nuvio`;
+  const head = el('div', 'pl-head');
+  const cover = el('div', 'pl-cover');
+  if (p.videos[0]) { const img = el('img'); img.alt = ''; img.src = ytThumb(p.videos[0].id, 'hqdefault'); cover.append(img); }
+  else { cover.classList.add('empty-stack'); cover.innerHTML = window.ico ? window.ico('list') : ''; }
+  const info = el('div', 'pl-info');
+  const t = el('h1', 'pl-title', p.title); t.dir = 'auto';
+  info.append(t, el('div', 'muted', `قائمتك · ${nf.format(p.videos.length)} فيديو`));
+  const btns = el('div', 'pl-btns');
+  const play = el('button', 'btn btn-main', '▶ شغّل الكل'); play.disabled = !p.videos.length;
+  play.onclick = () => playList(p.videos, p.title);
+  const shf = el('button', 'btn', '🔀 عشوائي'); shf.disabled = p.videos.length < 2;
+  shf.onclick = () => playList(p.videos, p.title, true);
+  const more = el('button', 'btn', '⋮');
+  more.onclick = () => openSheet(p.title, [
+    ['folder', 'غيّر الاسم', async () => { const n = await askText('اسم جديد للقائمة', '', p.title); if (n) { p.title = n; plists.save(p); renderUserPlaylist(id); } }],
+    ['ban', 'امسح القائمة', () => { if (confirm(`تمسح «${p.title}»؟`)) { plists.remove(id); location.hash = '#/me'; } }],
+  ]);
+  btns.append(play, shf, more);
+  info.append(btns);
+  head.append(cover, info);
+  view.replaceChildren(head);
+  if (!p.videos.length) { view.append(el('div', 'empty', 'القائمة فاضية. من زر ⋮ على أي فيديو اختار «ضيف لقائمة تشغيل».')); return; }
+  const g = el('div', 'grid');
+  p.videos.forEach(v => {
+    const c = card(v);
+    const x = el('button', 'card-x', '✕'); x.title = 'شيل من القائمة';
+    x.onclick = e => { e.preventDefault(); e.stopPropagation(); plists.toggle(id, v); c.remove(); };
+    c.querySelector('.thumb').append(x);
+    g.append(c);
+  });
+  view.append(g);
+}
+// قسم «قوائم التشغيل» بصفحة «أنا»
+function mePlaylistsSection() {
+  const box = el('div', 'me-sec');
+  const head = sectionHead('قوائم التشغيل', null, 'list');
+  const add = el('button', 'sec-more sec-add', '+ قائمة جديدة');
+  add.onclick = async () => { const p = await newPlaylist(); if (p) location.hash = `#/plist?id=${p.id}`; };
+  head.append(add);
+  const rows = el('div', 'lib-rows');
+  const n = x => `${nf.format(x)} فيديو`;
+  const later = queue.list();
+  rows.append(libRow('#/later', 'شغّل بعدين', later.length ? n(later.length) : 'فاضية', later[0] && later[0].id, 'later'));
+  plists.all().forEach(p => rows.append(libRow(`#/plist?id=${p.id}`, p.title, `قائمتك · ${n(p.videos.length)}`, p.videos[0] && p.videos[0].id, 'list')));
+  store.get('ytlists', []).forEach(l => rows.append(libRow(`#/list?id=${encodeURIComponent(l.id)}`, l.title || 'قائمة تشغيل', n(l.videos.length), l.videos[0] && l.videos[0].id, 'folder')));
+  box.append(head, rows);
   return box;
 }
 
-function renderMe(filter = 'all') {
+/* ================= صفحة «أنا» ================= */
+function renderMe() {
   document.title = 'أنا — Nuvio';
-  // الراس
   const head = el('div', 'me-head');
   const av = el('div', 'me-av', 'N');
   const nm = el('div', 'me-name');
   nm.append(el('b', null, 'ضيف Nuvio'), el('span', 'muted', 'كل شي محفوظ على جهازك بس'));
-  head.append(av, nm);
+  const gear = el('a', 'me-gear'); gear.href = '#/settings'; gear.setAttribute('aria-label', 'الإعدادات');
+  gear.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.5 7.5 0 0 0 7 6.5l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 2.6-1.5l2.4 1 2-3.4z"/></svg>';
+  head.append(av, nm, gear);
   const acts = el('div', 'me-acts');
   const login = el('button', 'me-btn soon', 'تسجيل دخول · قريباً'); login.disabled = true;
-  const bak = el('button', 'me-btn', 'نسخة احتياطية');
-  bak.onclick = () => openSheet('نسخة احتياطية لبياناتك', [
-    ['download', 'صدّر نسخة احتياطية', exportBackup],
-    ['upload', 'استورد من ملف', importBackup],
-  ]);
-  acts.append(login, bak);
-  // السجل (رف) + المكتبة — بيتحدّثوا لحالهن
-  const body = liveSection(['hist', 'likes', 'favs', 'later', 'mhist', 'artists', 'subs', 'ytlists', 'searches', 'pos'], () => {
-    const out = [];
-    const hist = lib.list('hist').slice(0, 20);
-    if (hist.length) {
-      const shelf = el('div', 'shelf');
-      hist.forEach(v => shelf.append(card(v)));
-      out.push(sectionHead('السجل', '#/history', 'clock'), shelf);
-    }
-    out.push(meShortsSection());
-    out.push(sectionHead('مكتبتك', null, 'folder'));
-    const chips = el('div', 'filter-bar');
-    [['all', 'الكل'], ['lists', 'قوائم التشغيل'], ['music', 'الموسيقى']].forEach(([k, label]) => {
-      const b = el('button', 'f-chip' + (k === filter ? ' on' : ''), label);
-      b.onclick = () => renderMe(k);
-      chips.append(b);
-    });
-    out.push(chips);
+  const set = el('a', 'me-btn', 'الإعدادات'); set.href = '#/settings';
+  acts.append(login, set);
+  const body = liveSection(['hist', 'likes', 'favs', 'later', 'mhist', 'artists', 'subs', 'ytlists', 'playlists', 'searches', 'pos'], () => {
     const rows = el('div', 'lib-rows');
-    const n = x => `${nf.format(x)} ${x === 1 ? 'فيديو' : 'فيديو'}`;
-    const first = k => (lib.list(k)[0] || {}).id;
-    const later = queue.list();
-    if (filter !== 'music') {
-      rows.append(
-        libRow('#/later', 'شغّل بعدين', later.length ? n(later.length) : 'فاضية', later[0] && later[0].id, 'later'),
-        libRow('#/likes', 'الإعجابات', n(lib.list('likes').length), first('likes'), 'like'),
-        libRow('#/favs', 'المحفوظة', n(lib.list('favs').length), first('favs'), 'saved'),
-      );
-      store.get('ytlists', []).forEach(l => rows.append(libRow(`#/list?id=${encodeURIComponent(l.id)}`, l.title || 'قائمة تشغيل', n(l.videos.length), l.videos[0] && l.videos[0].id, 'list')));
-    }
-    if (filter !== 'lists') {
-      rows.append(
-        libRow('#/music/hist', 'السجل السماعي', n(lib.list('mhist').length), first('mhist'), 'phones'),
-        libRow('#/music/fav', 'المطربين المفضّلين', `${nf.format(artists.list().length)} مطرب`, null, 'star'),
-      );
-    }
-    if (filter === 'all') {
-      rows.append(
-        libRow('#/subs', 'القنوات المشترك فيها', `${nf.format(subs.list().length)} قناة`, null, 'subs'),
-        libRow('#/searches', 'سجل البحث', `${nf.format(store.get('searches', []).length)} بحث`, null, 'search'),
-      );
-    }
-    out.push(rows);
-    return out;
+    rows.append(
+      libRow('#/subs', 'القنوات المشترك فيها', `${nf.format(subs.list().length)} قناة`, null, 'subs'),
+      libRow('#/music/fav', 'المطربين المفضّلين', `${nf.format(artists.list().length)} مطرب`, null, 'star'),
+      libRow('#/searches', 'سجل البحث', `${nf.format(store.get('searches', []).length)} بحث`, null, 'search'),
+    );
+    return [meLibSection('shorts'), meLibSection('videos'), meLibSection('music'), mePlaylistsSection(), sectionHead('كمان', null, 'folder'), rows];
   });
-  // الإعدادات تحت (نفس اللي بالقائمة الجانبية)
-  const set = el('div', 'me-settings');
-  drawerSettings(set, t => el('div', 'drawer-sep', t), () => {});
-  view.replaceChildren(head, acts, body, set);
+  view.replaceChildren(head, acts, body);
+}
+
+/* ================= صفحة الإعدادات ================= */
+function renderSettings() {
+  document.title = 'الإعدادات — Nuvio';
+  const box = el('div', 'settings-page');
+  const top = el('div', 'set-top');
+  const back = el('a', 'set-back', '›'); back.href = '#/me';
+  top.append(back, el('h1', null, 'الإعدادات'));
+  box.append(top);
+  const sep = t => el('div', 'drawer-sep', t);
+  drawerSettings(box, sep, () => {});
+  // الشورتس
+  const SH = el('div');
+  const sw = (icon, label, get, set, hint) => {
+    const b = el('button', 'drawer-item drawer-tg');
+    const ic = el('span', 'drawer-ico'); ic.innerHTML = window.ico ? window.ico(icon) : '';
+    const tx = el('span', 'drawer-tx'); tx.append(el('span', null, label)); if (hint) tx.append(el('small', 'muted', hint));
+    const s = el('span', 'np-sw' + (get() ? ' on' : '')); s.append(el('span'));
+    b.append(ic, tx, s);
+    b.onclick = () => { set(!get()); s.classList.toggle('on', !!get()); };
+    return b;
+  };
+  const rateBtn = el('button', 'drawer-item');
+  const ric = el('span', 'drawer-ico'); ric.innerHTML = window.ico ? window.ico('spark') : '';
+  const rval = el('span', 'drawer-count', (+prefs.get('shortsRate') || 1) === 1 ? 'عادي' : `${prefs.get('shortsRate')}×`);
+  rateBtn.append(ric, el('span', 'drawer-tx', 'سرعة الشورتس'), rval);
+  rateBtn.onclick = () => { const i = SPEEDS_S.indexOf(+prefs.get('shortsRate') || 1); const nx = SPEEDS_S[(i + 1) % SPEEDS_S.length]; prefs.set('shortsRate', nx); rval.textContent = nx === 1 ? 'عادي' : `${nx}×`; };
+  SH.append(sep('الشورتس'), sw('shorts', 'تشغيل تلقائي للشورتس', () => prefs.get('shortsAuto'), x => prefs.set('shortsAuto', x), 'لمّا يخلص الشورت بينقل للّي بعدو'), rateBtn);
+  // نقل الشورتس قبل «بياناتك»
+  const dataSep = [...box.querySelectorAll('.drawer-sep')].find(s => s.textContent === 'بياناتك');
+  if (dataSep) box.insertBefore(SH, dataSep); else box.append(SH);
+  const about = el('div', 'set-about');
+  about.append(el('div', null, `Nuvio · النسخة ${typeof APP_VERSION !== 'undefined' ? APP_VERSION : ''}`), el('div', 'muted', 'بلا إعلانات · كل بياناتك على جهازك'));
+  box.append(sep('حول'), about);
+  view.replaceChildren(box);
 }

@@ -438,7 +438,8 @@ function fromVR(v) {
   const live = (v.badges || []).some(b => /LIVE/.test((b.metadataBadgeRenderer || {}).style || ''))
     || (v.thumbnailOverlays || []).some(o => (o.thumbnailOverlayTimeStatusRenderer || {}).style === 'LIVE');
   const vt = ytTxt(v.viewCountText), pt = ytTxt(v.publishedTimeText);
-  return { id: v.videoId, title: ytTxt(v.title), author: by.text || '', authorId: ((by.navigationEndpoint || {}).browseEndpoint || {}).browseId || '',
+  const av = httpsUrl(lastThumb((((v.channelThumbnailSupportedRenderers || {}).channelThumbnailWithLinkRenderer) || {}).thumbnail));
+  return { id: v.videoId, title: ytTxt(v.title), author: by.text || '', authorId: ((by.navigationEndpoint || {}).browseEndpoint || {}).browseId || '', avatar: av,
     duration: live ? 0 : durSec(ytTxt(v.lengthText)), views: parseCount(vt), viewsText: vt, published: pt, ts: agoTs(pt), thumb: ytThumb(v.videoId), live };
 }
 // فيديو بشكل lockupViewModel (القنوات والمشابه)
@@ -460,7 +461,8 @@ function fromLockup(l, ch) {
   const bt = badges.map(b => b.text || '').find(Boolean) || '';
   const live = badges.some(b => /LIVE/.test(b.badgeStyle || '')) || /مباشر|LIVE/i.test(bt);
   const vt = vp ? vp.a || vp.t : '', pt = tp ? tp.t : '';
-  return { id: l.contentId, title: (md.title || {}).content || '', author, authorId,
+  const avSrc = ((walk(md.image || {}, 'sources')[0]) || [])[0];
+  return { id: l.contentId, title: (md.title || {}).content || '', author, authorId, avatar: (ch && ch.avatar) || (avSrc && httpsUrl(avSrc.url)) || '',
     duration: live ? 0 : durSec(bt), views: parseCount(vt), viewsText: vt, published: pt, ts: agoTs(pt), thumb: ytThumb(l.contentId), live };
 }
 function fromShort(s, ch) {
@@ -752,6 +754,11 @@ function card(v, { row = false, noAuthorLink = false } = {}) {
   const rest = [views, v.published].filter(Boolean).join(' • ');
   if (rest) sub.append((v.author ? ' • ' : '') + rest);
   const wb = progBar(v.id); if (wb) c.querySelector('.thumb').append(wb);
+  const cav = el(v.authorId ? 'span' : 'span', 'card-av');
+  if (v.avatar) { const ai = el('img'); ai.alt = ''; ai.loading = 'lazy'; ai.referrerPolicy = 'no-referrer'; ai.src = v.avatar; cav.append(ai); }
+  else cav.textContent = (v.author || '?').trim().replace(/^@/, '').charAt(0);
+  if (v.authorId) cav.onclick = e => { e.preventDefault(); e.stopPropagation(); location.hash = chHref(v.authorId); };
+  c.querySelector('.meta').prepend(cav);
   const mb = el('button', 'card-menu'); mb.setAttribute('aria-label', 'خيارات');
   mb.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="5.5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="18.5" r="1.8"/></svg>';
   mb.onclick = e => { e.preventDefault(); e.stopPropagation(); cardMenu(v); };
@@ -791,7 +798,7 @@ function channelCard(ch) {
 }
 
 /* ================= مكتبتك (محفوظة على جهازك بس) ================= */
-const slim = v => ({ id: v.id, title: v.title, thumb: v.thumb || ytThumb(v.id), author: v.author, authorId: v.authorId, duration: v.duration, views: v.views, published: v.published, ...(v.short ? { short: true } : {}) });
+const slim = v => ({ id: v.id, title: v.title, thumb: v.thumb || ytThumb(v.id), author: v.author, authorId: v.authorId, duration: v.duration, views: v.views, published: v.published, ...(v.short ? { short: true } : {}), ...(v.music ? { music: true } : {}), ...(v.avatar ? { avatar: v.avatar } : {}) });
 const lib = {
   list: k => store.get(k, []),
   has: (k, id) => store.get(k, []).some(v => v.id === id),
@@ -1743,7 +1750,7 @@ async function renderWatch(id, startTime) {
     au.append(nameBox);
 
     // إعجاب + حفظ بالمفضلة (محفوظين على جهازك)
-    const item = { id, title: d.title, thumb: ytThumb(id), author: d.author, authorId: d.authorId, views: d.views, published: d.published, duration: pv && pv.duration };
+    const item = { id, title: d.title, thumb: ytThumb(id), author: d.author, authorId: d.authorId, views: d.views, published: d.published, duration: pv && pv.duration, ...(music ? { music: true } : {}), ...(d.avatar ? { avatar: d.avatar } : {}) };
     lib.add(music ? 'mhist' : 'hist', item);
     const actions = el('div', 'v-actions');
     const likeBtn = el('button', 'pill');
@@ -1758,7 +1765,10 @@ async function renderWatch(id, startTime) {
     likeBtn.onclick = () => { note(lib.toggle('likes', item) ? 'انضاف للإعجابات' : 'انشال من الإعجابات'); drawBtns(); };
     favBtn.onclick = () => { note(lib.toggle('favs', item) ? 'انحفظ بالقائمة المفضلة' : 'انشال من القائمة المفضلة'); drawBtns(); };
     drawBtns();
-    actions.append(likeBtn, favBtn);
+    const plBtn = el('button', 'pill');
+    plBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 6h11M4 11h11M4 16h7M17 13v8M13 17h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>قائمة</span>';
+    plBtn.onclick = () => addToPlaylist(item);
+    actions.append(likeBtn, favBtn, plBtn);
     const auWrap = el('div', 'au-wrap');
     auWrap.append(au);
     if (d.authorId) auWrap.append(subButton({ id: d.authorId, name: d.author, avatar: d.avatar }));
@@ -2274,7 +2284,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120163129';
+const APP_VERSION = '20261120164101';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -2391,6 +2401,9 @@ async function route() {
   if (path === '/pl' && p.get('id')) return renderPlaylist(p.get('id'));
   if (path === '/shorts') return renderShorts(p.get('v'), p.get('ch'));
   if (path === '/me') return renderMe();
+  if (path === '/settings') return renderSettings();
+  if (path === '/lib') return renderLibView(p.get('t') || 'videos', p.get('k') || 'hist');
+  if (path === '/plist' && p.get('id')) return renderUserPlaylist(p.get('id'));
   if (path === '/later') return renderLibrary('later');
   if (path === '/history') return renderLibrary('hist');
   if (path === '/likes') return renderLibrary('likes');

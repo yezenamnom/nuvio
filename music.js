@@ -288,7 +288,7 @@ function openDrawer() {
     item('phones', 'السجل السماعي', '#/music/hist', lib.list('mhist').length),
     item('mic', 'بودكاست', '#/music/podcast'),
   );
-  if (typeof drawerSettings === 'function') drawerSettings(d, sep, closeDrawer);
+  d.append(sep('Nuvio'), item('later', 'الإعدادات', '#/settings'));
   if (!ov.classList.contains('open') && window.nuvioLockScroll) window.nuvioLockScroll(true);
   requestAnimationFrame(() => ov.classList.add('open'));
 }
