@@ -200,7 +200,7 @@
       const sync = () => {
         const p = v.paused || v.ended;
         this.bPlay.innerHTML = v.ended ? ICON.replay : p ? ICON.play : ICON.pause;
-        this.big.innerHTML = v.ended ? ICON.replay : ICON.play;
+        this.big.innerHTML = v.ended ? ICON.replay : p ? ICON.play : ICON.pause;
         box.classList.toggle('paused', p);
         if (p) this._showUI(true); else this._showUI();
       };
@@ -219,7 +219,7 @@
       v.addEventListener('error', () => this.opts.onError && this.opts.onError(v.currentTime));
 
       this.bPlay.onclick = () => this.toggle();
-      this.big.onclick = e => { e.stopPropagation(); this.toggle(); };
+      this.big.onclick = e => { e.stopPropagation(); this.toggle(); this._showUI(); };
       this.bVol.onclick = () => { v.muted = !v.muted; if (!v.muted && v.volume === 0) v.volume = 0.5; };
       this.vol.oninput = () => { v.volume = +this.vol.value; v.muted = v.volume === 0; };
       this.bFs.onclick = () => this.fullscreen();

@@ -500,3 +500,49 @@ body.search-focus .search { max-width: none; }
 
 /* قوائم التشغيل */
 .list-count { position: absolute; inset-inline-start: 0; bottom: 0; top: 0; width: 38%; display: grid; place-items: center; background: rgba(0,0,0,.65); color: #fff; font-weight: 800; font-size: .95rem; }
+
+/* ---------- زر تشغيل/إيقاف بالنص لمّا تكبس عالفيديو (تلفون) ---------- */
+@media (hover: none) {
+  .np.ui:not(.loading) .np-big { opacity: 1; transform: none; pointer-events: auto; }
+  .np-ui { background: transparent; transition: background .2s; }
+  .np.ui .np-ui { background: rgba(0,0,0,.28); }
+}
+
+/* الزر العايم: القائمة بتضل فوق الزر على اليسار (مش بنص الشاشة)، والزر بيصير ✕ */
+.fab-wrap { direction: ltr; align-items: flex-start; }
+.fab.on svg { transform: none; }
+.fab-menu { transform-origin: bottom left; }
+
+/* المشغّل الصغير: بلا حركة CSS قديمة (صارت بالـ JS وأنعم)، والفيديو بيطلع برّا وقت الحركة */
+.mini { animation: none; touch-action: none; }
+.mini.anim { overflow: visible; }
+.mini-vid { transform-origin: top left; border-radius: 10px 0 0 10px; overflow: hidden; }
+
+/* ---------- سحب للتحديث ---------- */
+html { overscroll-behavior-y: contain; }
+.ptr {
+  position: fixed; top: calc(6px + env(safe-area-inset-top)); left: 50%; z-index: 45; width: 40px; height: 40px; margin-top: -10px;
+  border-radius: 50%; background: var(--bg2); border: 1px solid var(--line); display: grid; place-items: center;
+  opacity: 0; transform: translate(-50%, 0); pointer-events: none; box-shadow: 0 6px 18px rgba(0,0,0,.4);
+}
+.ptr svg { width: 22px; height: 22px; fill: none; stroke: var(--muted); stroke-width: 2.2; stroke-linecap: round; }
+.ptr.ready svg { stroke: var(--accent); }
+.ptr.spin { opacity: 1 !important; transform: translate(-50%, 60px) !important; animation: ptr-spin .8s linear infinite; }
+@keyframes ptr-spin { to { transform: translate(-50%, 60px) rotate(360deg); } }
+
+/* ---------- سلاسة التمرير ----------
+   - الكروت اللي برّا الشاشة ما بتنرسم (content-visibility)
+   - بلا ضبابية (blur) عالشريط فوق عالتلفون، لأنها تقيلة كتير على كرت الشاشة
+   - هياكل التحميل بنبضة شفافية بدل تحريك الخلفية (أخف)
+   - بلا حركات hover على اللمس */
+.grid > .card, .related-list > .card { content-visibility: auto; contain-intrinsic-size: auto 280px; }
+.related-list > .card { contain-intrinsic-size: auto 100px; }
+.thumb img { transform: translateZ(0); }
+.sk { background: var(--card); animation: sk-pulse 1.2s ease-in-out infinite; }
+@keyframes sk-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@media (hover: none) {
+  .topbar { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--bg); }
+  .card:hover { transform: none; }
+  .card { transition: none; }
+  .fab-menu, .mini, .np-menu, .np-big { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}

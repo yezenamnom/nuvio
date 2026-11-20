@@ -352,7 +352,8 @@ function infinite(list, loadMore, { row = false } = {}) {
     try { more = await loadMore(); } catch { more = true; await sleep(2000); }
     skNodes.forEach(n => n.remove());
     busy = false;
-    if (!more || !list.isConnected) { dead = true; io.disconnect(); sentinel.remove(); return; }
+    if (!more) { dead = true; io.disconnect(); sentinel.remove(); return; }
+    if (!list.isConnected) return;
     // إذا لسا الحارس ظاهر (الشاشة كبيرة) منكمّل تحميل
     const r = sentinel.getBoundingClientRect();
     if (r.top < innerHeight + 800) { io.unobserve(sentinel); io.observe(sentinel); }
@@ -683,6 +684,7 @@ async function handleSync(b64) {
       const li = el('li'); li.append(el('span', null, k), el('b', null, nf.format(n))); ul.append(li);
     });
     const go = el('a', 'btn primary', 'يلا عالرئيسية'); go.href = '#/';
+    go.onclick = e => { e.preventDefault(); pageCache.delete('/'); shownKey = '/'; window.scrollTo(0, 0); renderHome(); };
     const subs = el('a', 'btn', '📺 اشتراكاتي'); subs.href = '#/subs';
     const row = el('div', 'v-actions'); row.style.justifyContent = 'center'; row.append(go, subs);
     box.append(ul, row);
@@ -983,7 +985,11 @@ async function renderWatch(id, startTime) {
   const sideList = el('div', 'related-list'); sideList.append(skCards(8, true));
   side.append(el('h2', 'section-title', 'فيديوهات مشابهة'), sideList);
   view.replaceChildren(layout);
-  layout.append(buildFab(() => np, id, () => (current && current.data.title) || (pv && pv.title) || ''));
+  layout.append(buildFab(() => np, id, () => (current && current.data.title) || (pv && pv.title) || '', () => {
+    startTime = np ? np.video.currentTime : startTime;
+    embed();
+    note('اكبس زر AirPlay / البث 📺 جوّا المشغّل');
+  }));
   if (pv) document.title = `${pv.title} — Nuvio`;
 
   function embed() {
@@ -1197,7 +1203,7 @@ const FAB_ICO = {
 const SLEEP_OPTS = [[0, 'إيقاف'], [15, '15 د'], [30, '30 د'], [45, '45 د'], [60, 'ساعة'], [90, 'ساعة ونص'], [-1, 'آخر الفيديو']];
 const sleepState = { at: 0, endOfVideo: false, timer: null };
 
-function buildFab(getNp, id, getTitle) {
+function buildFab(getNp, id, getTitle, toCastMode) {
   const wrap = el('div', 'fab-wrap');
   const btn = el('button', 'fab'); btn.innerHTML = FAB_ICO.more; btn.setAttribute('aria-label', 'أدوات');
   const menu = el('div', 'fab-menu'); menu.hidden = true;
@@ -1248,9 +1254,10 @@ function buildFab(getNp, id, getTitle) {
         r.querySelector('.fab-switch').classList.toggle('on', np.loop);
         note(np.loop ? 'التكرار شغّال 🔁' : 'التكرار طافي');
       }, sw(np.loop)));
-      menu.append(row('cast', 'AirPlay / عرض على شاشة', async () => {
-        try { if (!(await np.cast())) note('العرض على شاشة مش مدعوم بهالمتصفح'); } catch { note('ما لقيت شاشة'); }
+      menu.append(row('cast', 'AirPlay / عرض على شاشة', () => {
+        // مشغّلنا (بث مقسوم صوت/صورة) بيطلع عالتلفزيون صوت بس، فمنحوّل لمشغّل بيطلع الصورة كمان
         close();
+        if (toCastMode) toCastMode();
       }));
       if (np.canPip()) menu.append(row('pip', 'صورة داخل صورة', async () => {
         try { await np.pip(); } catch { note('ما زبطت صورة داخل صورة'); }
@@ -1258,8 +1265,9 @@ function buildFab(getNp, id, getTitle) {
       }));
     }
   }
-  function open() { draw(); menu.hidden = false; btn.classList.add('on'); }
-  function close() { menu.hidden = true; btn.classList.remove('on'); }
+  const X_ICO = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" fill="none"/></svg>';
+  function open() { draw(); menu.hidden = false; btn.classList.add('on'); btn.innerHTML = X_ICO; btn.setAttribute('aria-label', 'سكّر'); }
+  function close() { menu.hidden = true; btn.classList.remove('on'); btn.innerHTML = FAB_ICO.more; btn.setAttribute('aria-label', 'أدوات'); }
   btn.onclick = e => { e.stopPropagation(); menu.hidden ? open() : close(); };
   const outside = e => { if (!wrap.isConnected) return document.removeEventListener('pointerdown', outside); if (!wrap.contains(e.target)) close(); };
   document.addEventListener('pointerdown', outside);
@@ -1377,7 +1385,19 @@ function drawSug() {
     row.onmousedown = e => { e.preventDefault(); $('#q').value = it.text; hideSug(); $('#q').blur(); openQuery(it.text); };
     sug.append(row);
   });
-  sug.hidden = !sugItems.length;
+  sug.hidden = !sugItems.length || document.activeElement !== $('#q');
+}
+const sugPool = []; // كل اقتراح شفناه، لحتى نصفّي فوراً وإنت عم تكتب بلا ما نستنّى السيرفر
+function poolAdd(list) { for (const s of list) if (!sugPool.some(x => x.toLowerCase() === s.toLowerCase())) sugPool.push(s); if (sugPool.length > 400) sugPool.splice(0, sugPool.length - 400); }
+function localMatches(q, exclude) {
+  const s = q.toLowerCase();
+  const starts = [], has = [];
+  for (const x of sugPool) {
+    const l = x.toLowerCase();
+    if (exclude.has(l) || l === s) continue;
+    if (l.startsWith(s)) starts.push(x); else if (l.includes(' ' + s)) has.push(x);
+  }
+  return starts.concat(has);
 }
 function updateSug() {
   clearTimeout(sugTimer);
@@ -1385,20 +1405,32 @@ function updateSug() {
   sugQ = q;
   if (parseYT(q)) { sugItems = []; hideSug(); return; }
   const hist = histMatches(q).map(text => ({ text, hist: true }));
-  sugItems = hist; sugIdx = -1; drawSug();
+  const seen = new Set(hist.map(h => h.text.toLowerCase()));
+  // فوراً: من الاقتراحات اللي عندنا (مثلاً «أم الطنافس ال» بيصفّي «…الجزء الثاني»، «…الفوقا»)
+  const local = q ? localMatches(q, seen).slice(0, 10 - hist.length).map(text => ({ text, hist: false })) : [];
+  sugItems = hist.concat(local); sugIdx = -1; drawSug();
   if (!q) return;
   const seq = ++sugSeq;
   sugTimer = setTimeout(async () => {
     try {
-      const { res } = await cached('sg:' + q.toLowerCase(), 30 * 60e3, () => withFallback(i => apiFor(i).suggest(i.url, q), { stagger: 1200 }));
+      const { res } = await cached('sg:' + q.toLowerCase(), 30 * 60e3, () => withFallback(i => apiFor(i).suggest(i.url, q), { stagger: 900 }));
+      poolAdd(res);
       if (seq !== sugSeq) return;
-      const seen = new Set(hist.map(h => h.text.toLowerCase()));
-      sugItems = hist.concat(res.filter(s => !seen.has(s.toLowerCase())).slice(0, 10 - hist.length).map(text => ({ text, hist: false })));
-      sugIdx = -1; drawSug();
+      // منحافظ على ترتيب اللي عم يبيّن، ومنزيد الجديد تحت (بلا قفزات)
+      const shown = new Set(sugItems.map(s => s.text.toLowerCase()));
+      const fresh = res.filter(s => !shown.has(s.toLowerCase())).map(text => ({ text, hist: false }));
+      sugItems = sugItems.concat(fresh).slice(0, 10);
+      drawSug();
     } catch { /* بلا اقتراحات */ }
-  }, 120);
+  }, 70);
 }
 $('#q').addEventListener('input', updateSug);
+// لمّا تبلّش تتحكم بالصفحة (تمرير أو لمس برّا البحث) الاقتراحات بتختفي والكيبورد بيتسكّر
+document.addEventListener('touchstart', e => {
+  if (sug.hidden || e.target.closest('.search')) return;
+  hideSug(); $('#q').blur();
+}, { passive: true });
+window.addEventListener('scroll', () => { if (!sug.hidden && !('ontouchstart' in window)) hideSug(); }, { passive: true });
 $('#q').addEventListener('focus', updateSug);
 $('#q').addEventListener('focus', () => document.body.classList.add('search-focus'));
 $('#q').addEventListener('blur', () => setTimeout(() => document.body.classList.remove('search-focus'), 160));
@@ -1418,6 +1450,7 @@ $('#q').addEventListener('blur', () => setTimeout(hideSug, 150));
 $('#searchForm').addEventListener('submit', e => {
   e.preventDefault();
   const q = $('#q').value.trim();
+  sugSeq++; clearTimeout(sugTimer); sugItems = [];
   hideSug();
   if (q) { $('#q').blur(); openQuery(q); }
 });
@@ -1433,6 +1466,8 @@ function minimize() {
   if (!active || miniOn) return;
   const { box, id } = active;
   miniOn = true;
+  box.style.transition = 'none'; box.style.transform = ''; box.style.opacity = '';
+  const from = box.getBoundingClientRect();
   const ph = el('div', 'player-ph'); ph.id = 'player-ph';
   box.replaceWith(ph);                 // منحط مكانو علامة لحتى نرجّعو
   box.classList.add('in-mini');
@@ -1455,11 +1490,26 @@ function minimize() {
   mini.append(vid, info, pp, x);
   mini.hidden = false;
   document.body.classList.add('has-mini');
+  enableSwipeUp();
+  // حركة ناعمة: الفيديو بيصغر من مكانو لحد ما يوصل للشريط تحت
+  const to = vid.getBoundingClientRect();
+  if (from.width && to.width && vid.animate) {
+    mini.classList.add('anim');
+    const a = vid.animate([
+      { transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})` },
+      { transform: 'none' },
+    ], { duration: 420, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    [info, pp, x].forEach((n, k) => n.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 260, delay: 220 + k * 40, easing: 'ease-out', fill: 'backwards' }));
+    mini.animate([{ backgroundColor: 'rgba(19,24,42,0)', borderColor: 'transparent' }, { backgroundColor: 'rgba(19,24,42,.97)' }], { duration: 300, delay: 160, fill: 'backwards' });
+    a.onfinish = () => mini.classList.remove('anim');
+  }
   // ارجع لآخر صفحة كنت فيها غير الفيديو (مثلاً البحث)
   location.hash = lastPage || '#/';
 }
 function restoreMini() {
   if (!miniOn || !active) return false;
+  const mv = mini.querySelector('.mini-vid');
+  const from = mv ? mv.getBoundingClientRect() : null;
   miniOn = false;
   mini.hidden = true; document.body.classList.remove('has-mini');
   const { box, layout } = active;
@@ -1468,6 +1518,14 @@ function restoreMini() {
   const ph = layout.querySelector('#player-ph');
   if (ph) ph.replaceWith(box); else active.main.prepend(box);
   mini.replaceChildren();
+  window.scrollTo(0, 0);
+  const to = box.getBoundingClientRect();
+  if (from && from.width && to.width && box.animate) {
+    box.animate([
+      { transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`, transformOrigin: 'top left', borderRadius: '10px' },
+      { transform: 'none', transformOrigin: 'top left' },
+    ], { duration: 420, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  }
   return true;
 }
 async function closeMini() {
@@ -1478,6 +1536,27 @@ async function closeMini() {
   active.box.remove();
   active = null; miniOn = false;
   mini.hidden = true; mini.replaceChildren(); document.body.classList.remove('has-mini');
+}
+
+/* اسحب الشريط الصغير لفوق لترجّع الفيديو كبير */
+let swipeUpBound = false;
+function enableSwipeUp() {
+  if (swipeUpBound) return;
+  swipeUpBound = true;
+  let y0 = null, dy = 0;
+  mini.addEventListener('touchstart', e => { if (e.touches.length === 1) { y0 = e.touches[0].clientY; dy = 0; } }, { passive: true });
+  mini.addEventListener('touchmove', e => {
+    if (y0 == null) return;
+    dy = e.touches[0].clientY - y0;
+    if (dy < 0) { mini.style.transition = 'none'; mini.style.transform = `translateY(${Math.max(dy, -160) * 0.6}px)`; }
+  }, { passive: true });
+  mini.addEventListener('touchend', () => {
+    if (y0 == null) return;
+    mini.style.transition = 'transform .25s ease-out'; mini.style.transform = '';
+    if (dy < -50 && active) location.hash = `#/watch?v=${encodeURIComponent(active.id)}`;
+    else if (dy > 60) closeMini(); // سحبة لتحت بتسكّرو
+    y0 = null;
+  });
 }
 
 /* سحب الفيديو لتحت بالإصبع (تلفون) */
@@ -1492,23 +1571,25 @@ function enableSwipeDown(box) {
     dy = e.touches[0].clientY - y0;
     const dx = Math.abs(e.touches[0].clientX - x0);
     if (dy > 10 && dy > dx) {
+      const d = Math.min(dy, 320);
       box.style.transition = 'none';
-      box.style.transform = `translateY(${Math.min(dy, 260) * 0.6}px) scale(${1 - Math.min(dy, 260) / 1200})`;
-      box.style.opacity = String(1 - Math.min(dy, 260) / 700);
+      box.style.transformOrigin = 'bottom center';
+      box.style.transform = `translateY(${d * 0.85}px) scale(${1 - d / 900})`;
+      box.style.opacity = String(1 - d / 900);
     }
   }, { passive: true });
   box.addEventListener('touchend', () => {
     if (y0 == null) return;
-    box.style.transition = 'transform .2s, opacity .2s';
+    if (dy > 80) { y0 = null; minimize(); return; }
+    box.style.transition = 'transform .28s cubic-bezier(.2,.8,.2,1), opacity .28s';
     box.style.transform = ''; box.style.opacity = '';
-    if (dy > 90) minimize();
     y0 = null;
   });
 }
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120045849';
+const APP_VERSION = '20261120050846';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -1523,10 +1604,63 @@ async function checkUpdate() {
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
 
+/* ================= ذاكرة الصفحات =================
+   لمّا ترجع لصفحة (الرئيسية، البحث، القناة…) بتلاقيها متل ما تركتها: نفس القائمة ونفس مكان التمرير.
+   الرئيسية ما بتتحدّث إلا إذا سحبت سحبة طويلة من فوق لتحت. */
+const pageCache = new Map();
+let shownKey = null;
+const CACHEABLE = k => /^\/($|search\?|subs$|channel\?|lists$)/.test(k);
+function savePage() {
+  if (!shownKey || !CACHEABLE(shownKey) || !view.childNodes.length) return;
+  if (view.querySelector('.grid > .sk-card:first-child')) return; // لسا عم تحمّل أول مرة
+  pageCache.set(shownKey, { nodes: [...view.childNodes], y: window.scrollY, title: document.title, at: Date.now() });
+  if (pageCache.size > 10) pageCache.delete(pageCache.keys().next().value);
+}
+function restorePage(key) {
+  const c = pageCache.get(key);
+  if (!c || Date.now() - c.at > 60 * 60e3) return false;
+  view.replaceChildren(...c.nodes);
+  document.title = c.title;
+  window.scrollTo(0, c.y);
+  requestAnimationFrame(() => window.scrollTo(0, c.y));
+  return true;
+}
+
+/* سحب للتحديث بالرئيسية (سحبة طويلة من فوق لتحت) */
+(function pullToRefresh() {
+  const ind = el('div', 'ptr');
+  ind.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>';
+  document.body.append(ind);
+  let y0 = null, d = 0;
+  const reset = () => { ind.style.opacity = '0'; ind.style.transform = ''; ind.classList.remove('ready'); };
+  addEventListener('touchstart', e => {
+    if (shownKey !== '/' || window.scrollY > 2 || e.touches.length !== 1 || e.target.closest('.mini, .fab-wrap, .search, .shelf, .chips')) { y0 = null; return; }
+    y0 = e.touches[0].clientY; d = 0;
+  }, { passive: true });
+  addEventListener('touchmove', e => {
+    if (y0 == null) return;
+    d = e.touches[0].clientY - y0;
+    if (d <= 0 || window.scrollY > 2) { reset(); return; }
+    const k = Math.min(d, 170);
+    ind.style.opacity = String(Math.min(1, k / 120));
+    ind.style.transform = `translate(-50%, ${k * 0.55}px) rotate(${k * 2.1}deg)`;
+    ind.classList.toggle('ready', d > 130);
+  }, { passive: true });
+  addEventListener('touchend', () => {
+    if (y0 == null) return;
+    const go = d > 130; y0 = null;
+    if (!go) { reset(); return; }
+    ind.classList.remove('ready'); ind.classList.add('spin');
+    pageCache.delete('/');
+    renderHome().finally(() => { ind.classList.remove('spin'); reset(); });
+  });
+})();
+
 /* ================= التنقّل ================= */
 async function route() {
   const hash = location.hash.slice(1) || '/';
-  if (hash.startsWith('/sync=')) return handleSync(hash.slice(6));
+  savePage();
+  if (hash.startsWith('/sync=')) { shownKey = null; return handleSync(hash.slice(6)); }
   const [path, qs] = hash.split('?');
   const p = new URLSearchParams(qs || '');
   hideSug();
@@ -1538,6 +1672,11 @@ async function route() {
   if (path === '/watch' && active && !miniOn && active.id !== p.get('v')) { const n = active.np(); if (n) n.destroy(); active = null; }
   // إذا طلعت من الفيديو وهو مش مصغّر، منوقّفو
   if (path !== '/watch' && !miniOn) { await destroyPlayer(); if (active) { const n = active.np(); if (n) { n.pauseAll(); n.destroy(); } active = null; } }
+  shownKey = hash;
+  if (path !== '/watch' && restorePage(hash)) {
+    $('#q').value = path === '/search' ? (p.get('q') || '') : '';
+    return;
+  }
   window.scrollTo(0, 0);
   if (path === '/search' && p.get('q')) return renderSearch(p.get('q'));
   if (path === '/watch' && p.get('v')) return renderWatch(p.get('v'), +p.get('t') || 0);
