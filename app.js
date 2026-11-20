@@ -401,7 +401,7 @@ const hostCheck = new Map();
 function hostWorks(h) {
   if (!hostCheck.has(h)) {
     hostCheck.set(h, (async () => {
-      const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 7000);
+      const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 3500);
       try { await fetch(`https://${h}/`, { mode: 'no-cors', signal: ctl.signal, cache: 'no-store' }); return true; }
       catch { return false; } finally { clearTimeout(t); }
     })());
@@ -429,10 +429,10 @@ async function fixUrl(u) {
   return u;
 }
 /* السيرفر بيحوّل لاسم فرعي عشوائي — منعيد المحاولة لحتى نوصل لواحد سليم ومنرجّع الرابط النهائي */
-async function resolveUrl(u, tries = 5) {
+async function resolveUrl(u, tries = 8) {
   let last;
   for (let i = 0; i < tries; i++) {
-    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 12000);
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 5000);
     try {
       const r = await fetch(u, { signal: ctl.signal, cache: 'no-store' });
       if (r.ok) { r.body?.cancel?.(); return r.url || u; }
@@ -479,7 +479,7 @@ async function renderWatch(id) {
     setChip('مشغّل احتياطي', 'warn');
   }
 
-  let np = null, srcList = [], srcIdx = 0, curInst = null, reloads = 0;
+  let np = null, srcList = [], srcIdx = 0, curInst = null, reloads = 0, secondRound = false;
 
   async function loadSource(s, startAt) {
     if (s.kind === 'mp4') {
@@ -567,6 +567,8 @@ async function renderWatch(id) {
       return tryNext(startAt);
     } catch (e) {
       if (!layout.isConnected) view.replaceChildren(layout);
+      // دورة تانية على كل السيرفرات قبل المشغّل الاحتياطي (الخلل عندهن غالباً مؤقت)
+      if (!secondRound && tried.length) { secondRound = true; tried.length = 0; return tryNext(startAt); }
       if (!current) info.replaceChildren(el('h1', 'v-title', 'ما قدرت جيب معلومات الفيديو'));
       embed();
     }
