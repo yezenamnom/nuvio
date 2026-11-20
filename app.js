@@ -1720,18 +1720,87 @@ async function renderWatch(id, startTime) {
   }, music ? [{ ico: 'star', label: 'ضيف المطرب للمفضّلين', fn: () => toggleArtist(artistOf()) }] : []));
   if (pv) document.title = `${pv.title} — Nuvio`;
 
-  function embed() {
+  /* ---- مشغّل يوتيوب الاحتياطي (بس إذا مصادرنا ما زبطت) ----
+     بيبلّش بلا صوت ومغطّى بالصورة، ومنتأكد إنو الفيديو نفسو هو اللي عم يمشي مش إعلان:
+     نفس رقم الفيديو + نفس المدة + الوقت عم يتقدّم من النقطة الصح. إذا لا (إعلان أو علّق)،
+     منعيد تحميلو فوراً من نفس الثانية — لحد 4 مرات بالبداية و3 بالنص. لمّا يتأكّد منكشفو ومنرجّع الصوت. */
+  let embedOn = false;
+  function embed(at) {
+    if (embedOn) return;
+    embedOn = true;
     destroyPlayer();
     if (np) { np.destroy(); np = null; }
     box.classList.remove('np', 'ui', 'paused', 'loading');
-    box.replaceChildren();
+    box.classList.add('emb');
     const f = document.createElement('iframe');
-    f.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&modestbranding=1${startTime ? `&start=${Math.floor(startTime)}` : ''}`;
     f.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
     f.allowFullscreen = true;
-    f.referrerPolicy = 'strict-origin-when-cross-origin';
-    box.append(f);
+    f.referrerPolicy = 'strict-origin-when-cross-origin'; // بلاها يوتيوب بيطلّع «خطأ 153»
+    const cover = el('div', 'emb-cover');
+    const img = el('img'); img.alt = ''; img.src = ytThumb(id, 'hqdefault');
+    const msg = el('div', 'emb-msg', 'عم جهّز الفيديو من يوتيوب…');
+    cover.append(img, el('div', 'emb-spin'), msg);
+    box.replaceChildren(f, cover);
     setChip('مشغّل احتياطي', 'warn');
+    const want = +(pv && pv.duration) || 0; // المدة الصحيحة إذا منعرفها
+    let tries = 0, mids = 0, verified = false, loadAt = 0, t0 = 0;
+    let vid = '', st = -1, dur = want, curDur = 0, ct = -1, ct0 = -1, lastMove = 0, goodCt = 0;
+    const post = o => { try { f.contentWindow.postMessage(JSON.stringify({ id: 'nuvio', channel: 'widget', ...o }), '*'); } catch { /* */ } };
+    const listen = () => post({ event: 'listening' });
+    const cmd = (func, args = []) => post({ event: 'command', func, args });
+    const load = start => {
+      tries++; verified = false; cover.hidden = false;
+      vid = ''; st = -1; curDur = 0; ct = -1; ct0 = -1; lastMove = 0;
+      t0 = Math.max(0, Math.floor(start || 0));
+      loadAt = Date.now();
+      f.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&mute=1&enablejsapi=1&playsinline=1&rel=0&modestbranding=1&start=${t0}&origin=${encodeURIComponent(location.origin)}&_=${Date.now()}`;
+    };
+    f.addEventListener('load', () => { listen(); setTimeout(listen, 400); setTimeout(listen, 1200); });
+    const fail = () => {
+      if (!box.isConnected) return;
+      stop();
+      const d = el('div', 'emb-cover emb-fail');
+      d.append(el('div', 'emb-msg', 'هالفيديو ما عم يشتغل هلّق 😕'));
+      const b = el('button', 'btn btn-main', 'جرّب كمان مرة'); b.onclick = () => renderWatch(id, goodCt || t0);
+      d.append(b);
+      cover.replaceWith(d);
+    };
+    const onMsg = e => {
+      if (e.source !== f.contentWindow) return;
+      let d = e.data; try { d = typeof d === 'string' ? JSON.parse(d) : d; } catch { return; }
+      if (!d || typeof d !== 'object') return;
+      if (d.event === 'onError') { if (tries < 2) load(t0); else fail(); return; }
+      const i = d.info; if (!i || typeof i !== 'object') return;
+      if (i.videoData && i.videoData.video_id) vid = i.videoData.video_id;
+      if (typeof i.playerState === 'number') st = i.playerState;
+      const pd = (i.progressState && i.progressState.duration) || i.duration;
+      if (pd > 0) { curDur = pd; if (!dur && st !== 1) dur = pd; } // أول مدة قبل التشغيل = مدة الفيديو نفسو
+      if (typeof i.currentTime === 'number') {
+        if (ct0 < 0) ct0 = i.currentTime;
+        if (Math.abs(i.currentTime - ct) > 0.05) { ct = i.currentTime; lastMove = Date.now(); }
+      }
+    };
+    // الفيديو الحقيقي عم يمشي؟ (مش إعلان)
+    const isContent = () => vid === id && (!dur || !curDur || Math.abs(curDur - dur) < 3) && ct >= t0 - 1.5 && ct - Math.max(ct0, t0 - 1.5) > 0.6;
+    window.addEventListener('message', onMsg);
+    const iv = setInterval(() => {
+      if (!box.isConnected) { stop(); return; }
+      const now = Date.now();
+      if (document.hidden) { loadAt = now; lastMove = now; return; } // بالخلفية الرسايل بتبطى: ما منحكم
+      if (!verified) {
+        if (isContent()) { verified = true; goodCt = ct; cover.hidden = true; cmd('unMute'); cmd('setVolume', [100]); return; }
+        if (now - loadAt > 3500) {
+          if (tries < 4) { msg.textContent = 'عم شيل الإعلان…'; load(t0); } // إعلان أو بطء: تحميل جديد من نفس الثانية
+          else { verified = true; cover.hidden = true; cmd('unMute'); } // آخر شي: منفرجيك اللي في
+        }
+        return;
+      }
+      const adNow = (vid && vid !== id) || (dur && curDur && Math.abs(curDur - dur) > 3) || (st === 1 && now - lastMove > 2500);
+      if (!adNow) { if (st === 1) goodCt = ct; return; }
+      if (mids < 3) { mids++; tries = 0; msg.textContent = 'عم شيل الإعلان…'; load(goodCt); } // إعلان بالنص: منرجع لنفس الثانية
+    }, 400);
+    function stop() { clearInterval(iv); window.removeEventListener('message', onMsg); }
+    load(at);
   }
 
   let srcList = [], srcIdx = 0, curInst = null, reloads = 0, secondRound = false, goodSince = 0;
@@ -1838,7 +1907,9 @@ async function renderWatch(id, startTime) {
     if (ytInfo) ytInfo.then(d => { if (!d) infoFromPublic(); }); else infoFromPublic();
   }
 
+  let publicUntil = 0;
   async function tryNext(startAt) {
+    if (embedOn) return;
     // التشغيل المبكر (مصدرنا أو أسرع سيرفر عام) — إذا اشتغل ما منعيد
     if (early) {
       const how = await early.catch(() => false); early = null;
@@ -1853,6 +1924,9 @@ async function renderWatch(id, startTime) {
         return;
       }
     }
+    // مصادرنا ما زبطت: السيرفرات العامة بس إذا في وحدة شغّالة ولحد 8 ثواني، وإلا مشغّل يوتيوب فوراً
+    if (!publicUntil) publicUntil = Date.now() + 8000;
+    if (!hasFreshOk() || Date.now() > publicUntil) { embed(startAt); return; }
     try {
       const { inst, res } = tried.length
         ? await withFallback(i => apiFor(i).video(i.url, id), { skip: tried })
@@ -1874,8 +1948,8 @@ async function renderWatch(id, startTime) {
       if (!box.isConnected) return;
       // دورة تانية على كل السيرفرات قبل المشغّل الاحتياطي (الخلل عندهن غالباً مؤقت)
       if (!secondRound && tried.length) { secondRound = true; tried.length = 0; memo.delete('v:' + id); return tryNext(startAt); }
-      if (!shown) { if (!h1.dataset.oe) h1.textContent = 'ما قدرت جيب معلومات الفيديو'; metaRow.replaceChildren(); descSk.remove(); }
-      embed();
+      if (!shown && !ytInfo) { if (!h1.dataset.oe) h1.textContent = 'ما قدرت جيب معلومات الفيديو'; metaRow.replaceChildren(); descSk.remove(); }
+      embed(startAt);
     }
   }
 
@@ -2438,7 +2512,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120190934';
+const APP_VERSION = '20261120191856';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

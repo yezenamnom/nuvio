@@ -1391,3 +1391,12 @@ html.tv .tv-sinput.tv-f { border-color: #fff; }
 /* القنوات بنص نتائج البحث (بعد أول 10 فيديوهات) */
 .grid > .ch-strip.in-grid { grid-column: 1 / -1; margin: 6px 0 10px; }
 .ch-strip.ch-only { margin-top: 6px; }
+
+/* مشغّل يوتيوب الاحتياطي: غطا لحد ما نتأكد إنو الفيديو نفسو (مش إعلان) عم يمشي */
+.emb-cover { position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: #000; }
+.emb-cover[hidden] { display: none; }
+.emb-cover img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: .5; }
+.emb-spin { position: relative; width: 44px; height: 44px; border-radius: 50%; border: 3px solid rgba(255,255,255,.25); border-top-color: #fff; animation: embspin .8s linear infinite; }
+.emb-msg { position: relative; color: #fff; font-size: .9rem; font-weight: 700; text-shadow: 0 1px 6px rgba(0,0,0,.7); text-align: center; padding: 0 14px; }
+.emb-fail { background: rgba(0,0,0,.85); }
+@keyframes embspin { to { transform: rotate(360deg); } }
