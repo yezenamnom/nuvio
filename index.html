@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Nuvio — فيديو بلا إعلانات</title>
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Nuvio">
+  <meta name="theme-color" content="#0b1220">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.12.6/shaka-player.compiled.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/" aria-label="Nuvio — الرئيسية">
+      <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+          <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#ec4899"/>
+          </linearGradient>
+        </defs>
+        <circle cx="32" cy="32" r="28" fill="url(#lg)"/>
+        <path d="M26 20l18 12-18 12z" fill="#fff"/>
+      </svg>
+      <span class="brand-name">Nuvio</span>
+    </a>
+
+    <form id="searchForm" class="search" role="search">
+      <input id="q" type="search" name="q" placeholder="ابحث عن فيديو…" autocomplete="off" enterkeyhint="search">
+      <button type="submit" aria-label="بحث">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      </button>
+    </form>
+
+    <button id="settingsBtn" class="icon-btn" aria-label="الإعدادات" title="السيرفرات">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+    </button>
+  </header>
+
+  <section id="settings" class="settings" hidden>
+    <div class="settings-row">
+      <label for="instanceSel">السيرفر:</label>
+      <select id="instanceSel"></select>
+      <button id="testBtn" class="btn">افحص الكل</button>
+    </div>
+    <div class="settings-row">
+      <input id="customUrl" type="url" placeholder="https://سيرفر-تاني.example" dir="ltr">
+      <select id="customType"><option value="invidious">Invidious</option><option value="piped">Piped</option></select>
+      <button id="addBtn" class="btn">ضيف</button>
+    </div>
+    <div class="settings-row">
+      <label><input id="autoEmbed" type="checkbox" checked> إذا ما اشتغل البث، استعمل المشغّل المضمّن (youtube-nocookie)</label>
+    </div>
+    <ul id="instanceStatus" class="status-list"></ul>
+  </section>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <main id="view"></main>
+
+  <template id="cardTpl">
+    <a class="card">
+      <div class="thumb"><img loading="lazy" alt=""><span class="dur"></span></div>
+      <div class="meta">
+        <h3 class="title"></h3>
+        <div class="sub"></div>
+      </div>
+    </a>
+  </template>
+</body>
+</html>
