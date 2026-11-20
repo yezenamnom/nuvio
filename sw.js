@@ -2,7 +2,7 @@
    - ملفات الموقع (الصفحة، التصميم، المشغّل…) من التخزين، ومنحدّثها بس لمّا تنزل نسخة جديدة (VERSION).
    - المكتبات الخارجية الثابتة (مشغّل Shaka والخط) بتنحفظ مرة وحدة.
    - الفيديوهات وبيانات السيرفرات ما بتنحفظ هون: بتنجاب وقتها. */
-const VERSION = '20261120211731';
+const VERSION = '20261120215033';
 const CACHE = 'nuvio-' + VERSION;
 const EXT = 'nuvio-ext-v1';
 const SHELL = ['./', 'index.html', 'style.css', 'player.js', 'app.js', 'music.js', 'more.js', 'acc.js', 'tv.js', 'manifest.json', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
@@ -18,7 +18,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k.startsWith('nuvio-') && k !== CACHE && k !== EXT && k !== API && k !== 'nuvio-yti-v1' && k !== 'nuvio-tiers-v1' && k !== 'nuvio-low-v1').map(k => caches.delete(k)))) // ردود يوتيوب المحفوظة بتضل
+      .then(keys => Promise.all(keys.filter(k => k.startsWith('nuvio-') && k !== CACHE && k !== EXT && k !== API && k !== 'nuvio-yti-v1').map(k => caches.delete(k)))) // ردود يوتيوب المحفوظة بتضل
       .then(() => self.clients.claim())
   );
 });

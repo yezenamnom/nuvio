@@ -8,7 +8,7 @@
 ['gesturestart', 'gesturechange'].forEach(n => document.addEventListener(n, e => e.preventDefault(), { passive: false }));
 
 /* ================= الإعدادات ================= */
-const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto', theme: 'nuvio', holdSpeed: true, holdRate: 2, shortsAuto: false, shortsRate: 1, player: 'nuvio', homeSecs: null, preload: 'auto' };
+const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto', theme: 'nuvio', holdSpeed: true, holdRate: 2, shortsAuto: false, shortsRate: 1, player: 'nuvio', homeSecs: null, preload: 'auto', cc: false };
 /* أقسام راس الرئيسية (فوق «مقترح لك»): الترتيب والتشغيل من الإعدادات */
 const HOME_SECS = [['searches', 'سجل البحث', 'search'], ['subs', 'القنوات', 'subs'], ['hist', 'آخر اللي شفتو', 'clock']];
 function homeSecs() {
@@ -403,7 +403,7 @@ function saverOn() {
   return !!(c && (c.saveData || c.type === 'cellular' || /(^|-)(2g|3g)$/.test(c.effectiveType || '')));
 }
 window.nuvioSaver = saverOn;
-/* تحميل مسبق قوي (واي فاي / باقة مفتوحة): مخزون أطول قدّام + نسخة خفيفة (144p) من كل الفيديو للقفز الفوري.
+/* تحميل مسبق (واي فاي / باقة مفتوحة): بس كم دقيقة لقدّام من الفيديو اللي عم تحضره (خفيف على سيرفرنا).
    تلقائي = شغّال إلا إذا المتصفح قال إنك على بيانات الموبايل (الآيفون ما بيقول، فمنعتبرو واي فاي) */
 function strongPreload() {
   const m = prefs.get('preload');
@@ -514,7 +514,7 @@ function drawerSettings(d, sep, closeDrawerFn) {
   const preBtn = el('button', 'drawer-item');
   const pic = el('span', 'drawer-ico'); pic.innerHTML = window.ico ? window.ico('download') : '';
   const pval = el('span', 'drawer-count', PRE[prefs.get('preload')] || PRE.auto);
-  const ptx = el('span', 'drawer-tx'); ptx.append(el('span', null, 'تحميل مسبق قوي'), el('small', 'muted', 'بيحمّل قدّام أكتر + نسخة خفيفة من كل الفيديو للقفز الفوري'));
+  const ptx = el('span', 'drawer-tx'); ptx.append(el('span', null, 'تحميل مسبق'), el('small', 'muted', 'بيحمّل كم دقيقة لقدّام من الفيديو اللي عم تحضره'));
   preBtn.append(pic, ptx, pval);
   preBtn.onclick = () => { const order = ['auto', 'on', 'off']; const nx = order[(order.indexOf(prefs.get('preload') || 'auto') + 1) % 3]; prefs.set('preload', nx); pval.textContent = PRE[nx]; };
   const TVM = { auto: 'تلقائي', on: 'دايماً', off: 'أبداً' };
@@ -525,13 +525,13 @@ function drawerSettings(d, sep, closeDrawerFn) {
   tvBtn.append(tvic, tvtx, tvval);
   tvBtn.onclick = () => { const order = ['auto', 'on', 'off']; const nx = order[(order.indexOf(prefs.get('tvMode') || 'auto') + 1) % 3]; tvval.textContent = TVM[nx]; setTVMode(nx); };
   // المشغّل الأساسي: مشغّلنا (بلا إعلانات) أو يوتيوب بواجهتنا (التشغيل من جهازك)
-  const PLY = { nuvio: 'مشغّلنا', yt: 'يوتيوب' };
+  const PLY = { nuvio: 'تلقائي', yt: 'يوتيوب' };
   const plBtn = el('button', 'drawer-item');
   const plic = el('span', 'drawer-ico'); plic.innerHTML = window.ico ? window.ico('play') : '';
   const plval = el('span', 'drawer-count', PLY[prefs.get('player')] || PLY.nuvio);
-  const pltx = el('span', 'drawer-tx'); pltx.append(el('span', null, 'المشغّل الأساسي'), el('small', 'muted', 'يوتيوب: التشغيل من جهازك بواجهتنا — ممكن يطلع إعلان'));
+  const pltx = el('span', 'drawer-tx'); pltx.append(el('span', null, 'المشغّل الأساسي'), el('small', 'muted', 'تلقائي: سيرفرنا، وإذا ما زبط يوتيوب على جهازك فوراً'));
   plBtn.append(plic, pltx, plval);
-  plBtn.onclick = () => { const nx = prefs.get('player') === 'yt' ? 'nuvio' : 'yt'; prefs.set('player', nx); plval.textContent = PLY[nx]; note(nx === 'yt' ? 'الفيديوهات الجاية من يوتيوب (بواجهتنا)' : 'الفيديوهات الجاية من مشغّلنا'); };
+  plBtn.onclick = () => { const nx = prefs.get('player') === 'yt' ? 'nuvio' : 'yt'; prefs.set('player', nx); plval.textContent = PLY[nx]; note(nx === 'yt' ? 'الفيديوهات الجاية من يوتيوب (بواجهتنا)' : 'تلقائي: سيرفرنا أول، وإذا ما زبط يوتيوب'); };
   const hidden = store.get('nope', []).length + store.get('nopeCh', []).length;
   // المظهر: 3 ثيمات
   const themeRow = el('div', 'drawer-item theme-row');
@@ -560,6 +560,7 @@ function drawerSettings(d, sep, closeDrawerFn) {
     rateBtn,
     sw('play', 'تشغيل تلقائي', () => prefs.get('autoplay'), v => prefs.set('autoplay', v), 'لمّا يخلص الفيديو بيبلّش اللي بعدو'),
     sw('skip', 'تخطّي الدعايات جوّا الفيديو', () => prefs.get('sb'), v => prefs.set('sb', v), 'بخدمة SponsorBlock المجانية'),
+    sw('subs', 'الترجمة (CC)', () => !!prefs.get('cc'), v => prefs.set('cc', v), 'مطفية بالأساس — بتقدر تشغّلها من إعدادات الفيديو كمان'),
     sw('eye', 'خبّي اللي شفتو من المقترحات', () => prefs.get('hideWatched'), v => prefs.set('hideWatched', v)),
     saverBtn,
     preBtn,
@@ -572,6 +573,41 @@ function drawerSettings(d, sep, closeDrawerFn) {
   d.append(...rows.filter(Boolean));
 }
 
+
+/* الشورتس: الفيديو إمّا من مصدرنا (<video>) أو من مشغّل يوتيوب على جهازك (لمّا سيرفرنا محظور) — نفس الأزرار والحركات */
+const SHORT_EVTS = ['timeupdate', 'ended', 'playing', 'waiting', 'pause', 'play', 'volumechange'];
+class ShortMedia extends EventTarget {
+  constructor(v) {
+    super(); this.v = v; this.t = v; this.ym = null;
+    SHORT_EVTS.forEach(n => v.addEventListener(n, () => { if (this.t === v) this.dispatchEvent(new Event(n)); }));
+  }
+  useYt(ym) {
+    this.dropYt();
+    this.ym = ym; this.t = ym;
+    ym.loop = this.v.loop; ym.muted = this.v.muted; ym.playbackRate = this.v.playbackRate || 1;
+    SHORT_EVTS.forEach(n => ym.addEventListener(n, () => { if (this.t === ym) this.dispatchEvent(new Event(n)); }));
+  }
+  dropYt() {
+    const ym = this.ym; this.ym = null; this.t = this.v;
+    if (ym) { if (ym._iv) clearInterval(ym._iv); try { ym.destroy(); } catch { /* */ } ym.el.remove(); }
+  }
+  get paused() { return this.t.paused; }
+  get ended() { return this.t.ended; }
+  get duration() { return this.t.duration; }
+  get currentTime() { return this.t.currentTime; }
+  set currentTime(x) { this.t.currentTime = x; }
+  get muted() { return this.t.muted; }
+  set muted(m) { this.v.muted = m; if (this.ym) { this.ym.muted = m; this.dispatchEvent(new Event('volumechange')); } }
+  get volume() { return this.t.volume; }
+  set volume(x) { this.v.volume = x; if (this.ym) this.ym.volume = x; }
+  get loop() { return this.v.loop; }
+  set loop(x) { this.v.loop = x; if (this.ym) this.ym.loop = x; }
+  get playbackRate() { return this.t.playbackRate; }
+  set playbackRate(r) { this.v.playbackRate = r; if (this.ym) this.ym.playbackRate = r; }
+  play() { return this.t.play(); }
+  pause() { return this.t.pause(); }
+}
+
 /* ================= الشورتس: مشغّل بالطول، بتنقل بسحبة ================= */
 let shortsState = null;
 let shortsCtx = null; // { ch, items } — من صفحة القناة
@@ -581,6 +617,7 @@ function shortsExit() {
   document.body.classList.remove('shorts-mode', 'shorts-clean');
   if (s.io) s.io.disconnect();
   try { s.video.pause(); } catch { /* */ }
+  try { if (s.video.dropYt) s.video.dropYt(); } catch { /* */ }
   if (s.pre) for (const m of s.pre.values()) try { m.destroy(); } catch { /* */ }
   if (s.sp) s.sp.destroy().catch(() => {});
 }
@@ -595,12 +632,11 @@ const mfOnce = (url, ms = 8000) => cached('mf:' + url, 4 * 60e3, async () => {
   } finally { clearTimeout(tm); }
 });
 async function shortManifest(id) {
-  // أول شي مصدرنا الخاص (سريع)، وبعدين السيرفرات العامة
+  // مصدرنا الخاص (سريع). إذا ما زبط ومشغّل يوتيوب متوفر، منروح عليه فوراً (بلا ما نلفّ عالسيرفرات العامة)
   if (svUsable()) {
-    // الشورت صغير (أقل من حد يوتيوب لمصدرنا السريع)، فمنبلّش فيه — ملفو بيجي بعشرات الميلي ثانية
-    try { return await mfOnce(ownMpd(id), 5000); } catch { /* الـ companion */ }
-    try { return await mfOnce(compMpd(id), 5000); } catch { /* العامة */ }
+    try { return await mfOnce(ownMpd(id), 4000); } catch (e) { if (window.YtMedia) throw e; }
   }
+  if (window.YtMedia) throw new Error('يوتيوب');
   const healthy = () => orderedInstances().filter(i => i.type === 'invidious' && health[i.url] && health[i.url].ok);
   if (!healthy().length) await Promise.race([ready, sleep(5000)]); // أول فتحة: منستنّى نعرف مين شغّال
   const ok = healthy();
@@ -705,9 +741,10 @@ async function renderShorts(startId, ch) {
   up.onclick = () => wrap.scrollBy({ top: -wrap.clientHeight, behavior: 'smooth' });
   dn.onclick = () => wrap.scrollBy({ top: wrap.clientHeight, behavior: 'smooth' });
   nav.append(up, dn);
-  const video = document.createElement('video');
-  video.playsInline = true; video.setAttribute('playsinline', ''); video.loop = true; video.preload = 'auto';
-  video.className = 'short-video';
+  const vEl = document.createElement('video');
+  vEl.playsInline = true; vEl.setAttribute('playsinline', ''); vEl.loop = true; vEl.preload = 'auto';
+  vEl.className = 'short-video';
+  const video = new ShortMedia(vEl); // <video> تبعنا، أو مشغّل يوتيوب لمّا سيرفرنا ما زبط — نفس الأزرار
   try { video.volume = JSON.parse(localStorage.getItem('nuvio:p:vol') || '1'); } catch { /* */ }
   const drawMute = () => { mute.innerHTML = video.muted ? '<svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4z"/><path class="s" d="M16 9.5l5 5M21 9.5l-5 5"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4z"/><path class="s" d="M15.5 8.8a4.5 4.5 0 0 1 0 6.4M18.2 6.2a8.2 8.2 0 0 1 0 11.6"/></svg>'; };
   mute.onclick = e => { e.stopPropagation(); video.muted = !video.muted; drawMute(); if (!video.muted) video.play().catch(() => {}); };
@@ -823,14 +860,48 @@ async function renderShorts(startId, ch) {
     wrap.append(sl);
     s.io.observe(sl);
   };
+  // سيرفرنا ما زبط لهالشورت: من يوتيوب على جهازك، بنفس الواجهة. منكشفو بس لمّا نتأكد إنو الشورت نفسو (مش إعلان)
+  const shortYt = (v, sl, my) => {
+    const ym = new YtMedia(v.id);
+    ym.el.classList.add('short-yt');
+    try { vEl.pause(); } catch { /* */ }
+    if (s.sp) s.sp.unload().catch(() => {});
+    sl.classList.add('yt');
+    sl.insertBefore(ym.el, vEl.nextSibling);
+    video.useYt(ym);
+    ym.load(0);
+    let tries = 1, adAt = 0;
+    const stopIv = () => { clearInterval(ym._iv); ym._iv = 0; };
+    ym._iv = setInterval(() => {
+      if (my !== s.seq || shortsState !== s || !ym.el.isConnected) { stopIv(); return; }
+      if (ym.revealed) { stopIv(); return; }
+      const now = Date.now();
+      if (document.hidden) { ym.loadAt = now; return; }
+      const dur = +v.duration || ym.dur;
+      const ad = !!((ym.vid && ym.vid !== v.id) || (dur && ym.curDur && Math.abs(ym.curDur - dur) > 3));
+      if (!ad && ym.ct0 >= 0 && ym.st === 1 && ym.ct - Math.max(ym.ct0, 0) > 0.4) { ym.reveal(); lib.add('hist', v); return; }
+      if (!ym.wantPlay || now - ym.loadAt < 3500) return;
+      const started = ym.st === 1 || ym.st === 3 || ym.ct > 0.3;
+      if (!started) { ym.wantPlay = false; sl.classList.remove('loading'); sl.classList.add('paused'); return; } // بدّو كبسة منك
+      if (ad) {
+        if (tries < 2) { tries++; ym.load(0); return; }
+        if (!adAt) { adAt = now; ym.cmd('mute'); }
+        if (now - adAt > 120e3) ym.reveal();
+        return;
+      }
+      if (now - Math.max(ym.loadAt, ym.ctMoveAt || 0) > 10000) { if (tries < 3) { tries++; ym.load(0); } else ym.reveal(); }
+    }, 400);
+  };
   const load = async (v, sl) => {
     const my = ++s.seq;
     video.pause();
-    sl.classList.add('loading'); sl.classList.remove('ready', 'fail');
+    video.dropYt();
+    wrap.querySelectorAll('.short.yt').forEach(x => x.classList.remove('yt'));
+    sl.classList.add('loading'); sl.classList.remove('ready', 'fail', 'paused');
     try {
       if (!s.sp) {
         s.sp = new shaka.Player();
-        await s.sp.attach(video);
+        await s.sp.attach(vEl);
         s.sp.getNetworkingEngine().registerRequestFilter(async (type, req) => { req.uris = await Promise.all(req.uris.map(fixUrl)); });
         s.sp.configure({
           preferredVideoCodecs: ['avc1', 'vp9'],
@@ -852,7 +923,8 @@ async function renderShorts(startId, ch) {
         if (my !== s.seq) return;
         await s.sp.load(toDataUri(mf.text, 'application/dash+xml'), 0, 'application/dash+xml');
         ok = true;
-      } catch { /* جرّب mp4 */ }
+      } catch { /* يوتيوب، أو mp4 */ }
+      if (!ok && window.YtMedia) { if (my === s.seq) shortYt(v, sl, my); return; }
       if (!ok) {
         const { res } = await getVideo(v.id);
         if (my !== s.seq) return;
@@ -876,7 +948,7 @@ async function renderShorts(startId, ch) {
     if (s.cur === sl) return;
     if (s.cur) s.cur.classList.remove('active', 'ready', 'paused', 'fast');
     s.cur = sl; sl.classList.add('active');
-    sl.insertBefore(video, sl.children[1] || null);
+    sl.insertBefore(vEl, sl.children[1] || null);
     video.playbackRate = 1;
     load(sl._v, sl);
     // جهّز اللي بعدو: ملفو + أول قطع منو، فبيبلّش فوراً لمّا تسحب

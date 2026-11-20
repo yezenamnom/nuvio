@@ -619,3 +619,194 @@ function sendToDevice(d) {
   if (!items.length) { note('ما في فيديوهات بسجلك — افتح فيديو وابعتو من ⋮'); return; }
   openSheet(`ابعت لـ«${d.name}»:`, items);
 }
+
+/* ================= التعليقات تحت الفيديو =================
+   ١) تعليقات Nuvio: بيكتبها اللي مسجّلين دخول عنا، وبتبيّن بس بموقعنا (عليها إشارة Nuvio).
+   ٢) تعليقات يوتيوب: للقراءة بس. بتنجاب لمّا توصل لعندها (طلب صغير، وبتنحفظ عالجهاز)، والصور من جوجل مباشرة. */
+function ytCmtParse(d) {
+  const pay = new Map(walk(d, 'commentEntityPayload').map(p => [p.key, p]));
+  const fromVm = vm => {
+    const p = vm && pay.get(vm.commentKey); if (!p) return null;
+    const pr = p.properties || {}, au = p.author || {}, tb = p.toolbar || {};
+    return { text: (pr.content && pr.content.content) || '', time: pr.publishedTime || '', name: au.displayName || '', avatar: au.avatarThumbnailUrl || '', ch: au.channelId || '', verified: !!au.isVerified, creator: !!au.isCreator, likes: tb.likeCountNotliked || '', replies: String(tb.replyCount || '').trim() };
+  };
+  const items = []; let next = null, count = '';
+  const hdr = walk(d, 'commentsHeaderRenderer')[0];
+  if (hdr && hdr.countText) count = ((hdr.countText.runs || []).map(r => r.text).join('') || hdr.countText.simpleText || '').trim();
+  const acts = walk(d, 'reloadContinuationItemsCommand').concat(walk(d, 'appendContinuationItemsAction'));
+  for (const a of acts) for (const it of a.continuationItems || []) {
+    if (it.commentThreadRenderer) {
+      const t = it.commentThreadRenderer;
+      const c = fromVm(t.commentViewModel && t.commentViewModel.commentViewModel);
+      if (c) { const rc = walk(t.replies || {}, 'continuationCommand')[0]; c.repTok = rc ? rc.token : ''; items.push(c); }
+    } else if (it.commentViewModel) {
+      const c = fromVm(it.commentViewModel); if (c) items.push(c);
+    } else if (it.continuationItemRenderer) {
+      const cc = walk(it.continuationItemRenderer, 'continuationCommand')[0]; if (cc) next = cc.token;
+    }
+  }
+  return { items, next, count };
+}
+
+function commentsSection(id) {
+  const wrap = el('section', 'cmts');
+  const head = el('button', 'cmts-h'); head.type = 'button';
+  const hn = el('span', 'cmts-n', '');
+  head.append(el('span', 'cmts-t', 'التعليقات'), hn, el('span', 'cmts-chev', '‹'));
+  const body = el('div', 'cmts-body');
+  const form = el('div', 'cmts-form');
+  const ours = el('div', 'cmts-ours');
+  const yt = el('div', 'cmts-yt');
+  const st = el('div', 'cmts-st muted', '');
+  const more = el('button', 'btn cmts-more', 'تعليقات أكتر'); more.hidden = true;
+  const sent = el('div', 'cmts-sent');
+  body.append(form, ours, yt, st, more, sent);
+  wrap.append(head, body);
+  // عالتلفون: مسكّرة (متل يوتيوب)، بتنفتح بكبسة. عالكمبيوتر: مفتوحة وبتنجاب لمّا تقرّب عليها
+  const narrow = matchMedia('(max-width: 899px)').matches;
+  if (narrow) wrap.classList.add('closed');
+  let started = false, next = null, busy = false;
+  head.onclick = () => { if (!narrow) return; const closed = wrap.classList.toggle('closed'); if (!closed) start(); };
+
+  const seek = s => { const n = window.__nuvioNp; if (n && n.video) { n.video.currentTime = s; n.video.play().catch(() => {}); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
+  const rich = (node, text) => { if (typeof renderRich === 'function') renderRich(node, text, seek); else node.textContent = text; };
+  const letter = s => (String(s || '?').replace(/^@/, '').trim().charAt(0) || '?').toUpperCase();
+
+  const ourCmt = c => {
+    const d = el('div', 'cmt nuvio');
+    const av = el('span', 'cmts-av nv', letter(c.name));
+    const b = el('div', 'cmt-b');
+    const h = el('div', 'cmt-h');
+    const nm = el('span', 'cmt-name', c.name); nm.dir = 'auto';
+    h.append(nm, el('span', 'cmt-badge', 'Nuvio'), el('span', 'cmt-time', agoAr(c.at)));
+    const tx = el('div', 'cmt-text'); tx.dir = 'auto'; rich(tx, c.text);
+    b.append(h, tx);
+    if (c.canDel) {
+      const ft = el('div', 'cmt-f');
+      const del = el('button', 'cmt-del', 'احذف');
+      del.onclick = () => openPrefSheet('تحذف هالتعليق؟', [{ type: 'action', icon: 'ban', label: 'إيه، احذفو', fn: async () => {
+        try { await accApi('/comments?id=' + c.id, { method: 'DELETE' }); d.remove(); note('انحذف التعليق'); } catch (e) { note(e.message || 'ما قدرت احذفو'); }
+      } }]);
+      ft.append(del); b.append(ft);
+    }
+    d.append(av, b);
+    return d;
+  };
+
+  const ytCmt = (c, reply) => {
+    const d = el('div', 'cmt' + (reply ? ' reply' : ''));
+    let av;
+    if (c.avatar) {
+      av = el('img', 'cmts-av'); av.alt = ''; av.loading = 'lazy'; av.decoding = 'async'; av.referrerPolicy = 'no-referrer'; av.src = c.avatar;
+      av.onerror = () => av.replaceWith(el('span', 'cmts-av', letter(c.name)));
+    } else av = el('span', 'cmts-av', letter(c.name));
+    const b = el('div', 'cmt-b');
+    const h = el('div', 'cmt-h');
+    const nm = el(c.ch ? 'a' : 'span', 'cmt-name' + (c.creator ? ' creator' : ''), c.name); nm.dir = 'auto';
+    if (c.ch) nm.href = chHref(c.ch);
+    h.append(nm);
+    if (c.verified) h.append(el('span', 'cmt-ok', '✓'));
+    h.append(el('span', 'cmt-time', c.time));
+    const tx = el('div', 'cmt-text'); tx.dir = 'auto'; rich(tx, c.text);
+    const ft = el('div', 'cmt-f');
+    if (c.likes && c.likes !== '0') ft.append(el('span', 'cmt-likes', '👍 ' + c.likes));
+    b.append(h, tx, ft);
+    if (!reply && c.repTok && c.replies && c.replies !== '0') {
+      const rl = el('div', 'cmt-replies');
+      const rb = el('button', 'cmt-rep', `${c.replies} ردّ ▾`);
+      let repNext = c.repTok, loaded = false, rbusy = false;
+      rb.onclick = async () => {
+        if (loaded && !repNext) { rl.hidden = !rl.hidden; rb.textContent = rl.hidden ? `${c.replies} ردّ ▾` : 'خبّي الردود ▴'; return; }
+        if (rbusy) return; rbusy = true; rb.textContent = 'عم جيب الردود…';
+        try {
+          const r = ytCmtParse(await yti('next', { continuation: repNext }, 8000));
+          rl.append(...r.items.map(x => ytCmt(x, true)));
+          repNext = r.next; loaded = true; rl.hidden = false;
+          rb.textContent = repNext ? 'ردود أكتر ▾' : 'خبّي الردود ▴';
+        } catch { rb.textContent = 'ما زبط — جرّب كمان مرة'; } finally { rbusy = false; }
+      };
+      ft.append(rb); b.append(rl);
+    }
+    d.append(av, b);
+    return d;
+  };
+
+  const drawForm = () => {
+    form.replaceChildren();
+    const u = accUser();
+    if (!u) {
+      const a = el('a', 'cmts-login', 'سجّل دخول لتكتب تعليق بـ Nuvio');
+      a.href = '#/login';
+      form.append(a);
+      return;
+    }
+    const row = el('div', 'cmts-frow');
+    const ta = el('textarea', 'cmts-in'); ta.rows = 1; ta.maxLength = 1000; ta.placeholder = 'اكتب تعليق… (بيبيّن بـ Nuvio بس)'; ta.dir = 'auto';
+    row.append(el('span', 'cmts-av nv', letter(u.name)), ta);
+    const acts = el('div', 'cmts-facts');
+    const cancel = el('button', 'btn cmts-cancel', 'إلغاء');
+    const sendB = el('button', 'btn btn-main cmts-send', 'علّق'); sendB.disabled = true;
+    acts.append(cancel, sendB); acts.hidden = true;
+    const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(180, ta.scrollHeight) + 'px'; sendB.disabled = !ta.value.trim(); };
+    ta.oninput = grow;
+    ta.onfocus = () => { acts.hidden = false; };
+    ta.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendB.click(); } };
+    cancel.onclick = () => { ta.value = ''; grow(); acts.hidden = true; ta.blur(); };
+    sendB.onclick = async () => {
+      const text = ta.value.trim(); if (!text) return;
+      sendB.disabled = true;
+      try {
+        const r = await accApi('/comments', { method: 'POST', body: { v: id, text } });
+        ta.value = ''; grow(); acts.hidden = true; ta.blur();
+        ours.prepend(ourCmt(r.comment));
+        note('انضاف تعليقك ✓');
+      } catch (e) { note(e.message || 'ما قدرت ضيف التعليق'); sendB.disabled = false; }
+    };
+    form.append(row, acts);
+  };
+
+  const loadOurs = async () => {
+    try {
+      const r = await accApi('/comments?v=' + encodeURIComponent(id));
+      ours.replaceChildren(...(r.comments || []).map(ourCmt));
+    } catch { /* سيرفر الحسابات مش متاح: تعليقات يوتيوب بتكفّي */ }
+  };
+  const loadYt = async () => {
+    if (busy) return;
+    busy = true; more.hidden = true;
+    if (!yt.children.length) st.textContent = 'عم جيب التعليقات…';
+    try {
+      let tok = next;
+      if (!tok) {
+        const d = await ytNext(id);
+        const sec = walk(d, 'itemSectionRenderer').filter(s => /comment/.test(s.sectionIdentifier || ''));
+        const cc = walk(sec, 'continuationCommand')[0];
+        if (!cc) { st.textContent = ours.children.length ? '' : 'التعليقات مسكّرة بهالفيديو'; return; }
+        tok = cc.token;
+      }
+      const r = ytCmtParse(await yti('next', { continuation: tok }, 8000));
+      if (r.count) { const n = parseInt(r.count.replace(/[^\d]/g, ''), 10); hn.textContent = n > 0 ? nf.format(n) : r.count; }
+      yt.append(...r.items.map(c => ytCmt(c)));
+      next = r.next;
+      more.textContent = 'تعليقات أكتر'; more.hidden = !next;
+      st.textContent = yt.children.length || ours.children.length ? '' : 'ما في تعليقات لهلّق';
+    } catch {
+      st.textContent = 'ما قدرت جيب تعليقات يوتيوب هلّق';
+      more.textContent = 'جرّب كمان مرة'; more.hidden = false;
+    } finally { busy = false; }
+  };
+  more.onclick = () => loadYt();
+  const start = () => {
+    if (started) return;
+    started = true;
+    drawForm(); loadOurs(); loadYt();
+    // لمّا توصل لآخر التعليقات، بيجيب اللي بعدها لحالو
+    const io2 = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting) && next && !busy && !wrap.classList.contains('closed') && wrap.isConnected) loadYt(); }, { rootMargin: '500px 0px' });
+    io2.observe(sent);
+  };
+  if (!narrow) {
+    const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { io.disconnect(); start(); } }, { rootMargin: '700px 0px' });
+    io.observe(wrap);
+  }
+  return wrap;
+}

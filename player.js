@@ -543,11 +543,19 @@
       this.qBadge.textContent = act && act.height >= 720 ? 'HD' : '';
     }
     /* ---------- الترجمة (بيعطيها app.js من السيرفر) ---------- */
-    setCaptions(list) { this.captions = (list || []).filter(c => c && c.url); }
-    async _pickCaption(c) {
+    setCaptions(list) {
+      this.captions = (list || []).filter(c => c && c.url);
+      const P = window.nuvioPref;
+      if (P && P.get('cc') && this.captions.length && !this.capSel && this.shaka) {
+        const want = ls.get('cap', '') || 'ar';
+        const c = this.captions.find(x => x.lang === want && !x.auto) || this.captions.find(x => x.lang === want) || this.captions.find(x => !x.auto) || this.captions[0];
+        if (c) this._pickCaption(c, true);
+      }
+    }
+    async _pickCaption(c, auto) {
       const v = this.video;
       this.capSel = c ? c.label : '';
-      ls.set('cap', c ? c.lang : '');
+      if (!auto) { ls.set('cap', c ? c.lang : ''); if (window.nuvioPref) window.nuvioPref.set('cc', !!c); }
       if (this.shaka) {
         if (!c) { this.shaka.setTextTrackVisibility(false); return; }
         try {
@@ -639,6 +647,11 @@
             ['إيقاف', !this.capSel, () => this._pickCaption(null)],
             ...this.captions.map(c => [c.label, this.capSel === c.label, () => this._pickCaption(c)]),
           ])));
+        }
+        // مشغّل يوتيوب: الترجمة (CC) تشغيل/إيقاف — بتنحفظ لكل الفيديوهات
+        if (this.opts.media && this.video.applyCc && window.nuvioPref) {
+          const PP = window.nuvioPref;
+          sh.append(row('cc', 'الترجمة (CC)', '', r => { PP.set('cc', !PP.get('cc')); this.video.applyCc(); r.querySelector('.np-sw').classList.toggle('on', !!PP.get('cc')); }, !!PP.get('cc')));
         }
         // المقطع الصوتي (إذا في أكتر من لغة)
         if (this.shaka && this.shaka.getAudioLanguagesAndRoles) {
@@ -759,7 +772,9 @@
       this.st = -1; this.vid = ''; this.curDur = 0; this.ct0 = -1; this.ctMoveAt = 0; this.seekingTo = null;
       this.t0 = Math.max(0, Math.floor(start || 0)); this.ct = this.t0; this.ctAt = 0;
       this.loadAt = Date.now(); this._kicking = false;
-      this.f.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(this.id)}?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&iv_load_policy=3&rel=0&playsinline=1&enablejsapi=1&start=${this.t0}&origin=${encodeURIComponent(location.origin)}&_=${Date.now()}`;
+      this._ccN = 0;
+      const cc = YtMedia.ccOn() ? '&cc_load_policy=1&cc_lang_pref=ar' : '';
+      this.f.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(this.id)}?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&iv_load_policy=3&rel=0&playsinline=1&enablejsapi=1${cc}&start=${this.t0}&origin=${encodeURIComponent(location.origin)}&_=${Date.now()}`;
       this._emit('loadstart'); this._emit('waiting');
     }
     _post(o) { try { this.f.contentWindow.postMessage(JSON.stringify({ id: 'nuvio', channel: 'widget', ...o }), '*'); } catch { /* */ } }
@@ -771,7 +786,7 @@
       let d = e.data; try { d = typeof d === 'string' ? JSON.parse(d) : d; } catch { return; }
       if (!d || typeof d !== 'object') return;
       if (d.event === 'onError') { this.errorCode = d.info; this._emit('yterror'); return; }
-      if (d.event === 'onReady' || d.event === 'initialDelivery') this._kick();
+      if (d.event === 'onReady' || d.event === 'initialDelivery') { this._kick(); this.applyCc(); }
       const i = d.info; if (!i || typeof i !== 'object') return;
       if (i.videoData && i.videoData.video_id) this.vid = i.videoData.video_id;
       const pd = (i.progressState && i.progressState.duration) || i.duration;
@@ -793,6 +808,7 @@
       }
       if (typeof i.playerState === 'number' && i.playerState !== this.st) {
         const prev = this.st; this.st = i.playerState;
+        if (this.st === 1 && this._ccN < 3) { this._ccN++; this.applyCc(); } // يوتيوب بيشغّل الترجمة لحالو أحياناً لمّا يبلّش
         if (this.revealed) this._stateEvents(prev);
       }
     }
@@ -818,7 +834,13 @@
       this._emit('durationchange'); this._emit('loadedmetadata'); this._emit('canplay'); this._emit('volumechange');
       if (this.st === 1 && this.wantPlay) { this._emit('play'); this._emit('playing'); }
     }
-    hide() { this.revealed = false; this._emit('waiting'); }
+    hide() { this.revealed = false; this.cmd('mute'); this._emit('waiting'); }
+    /* الترجمة (CC): حسب الإعداد «الترجمة» — مطفية بالأساس */
+    static ccOn() { return !!(window.nuvioPref && window.nuvioPref.get('cc')); }
+    applyCc() {
+      if (YtMedia.ccOn()) { this.cmd('loadModule', ['captions']); this.cmd('setOption', ['captions', 'track', { languageCode: 'ar' }]); }
+      else { this.cmd('unloadModule', ['captions']); this.cmd('unloadModule', ['cc']); }
+    }
     get currentTime() {
       if (this.seekingTo != null) return this.seekingTo;
       if (this.st === 1 && this.ctAt) return this.ct + Math.min(1, (performance.now() - this.ctAt) / 1000) * (this._wantRate || 1);
@@ -844,7 +866,7 @@
     set volume(x) { this._wantVol = +x; if (this.revealed) { this.cmd('setVolume', [Math.round(Math.max(0, Math.min(1, +x)) * 100)]); this._emit('volumechange'); } }
     get playbackRate() { return this._wantRate || 1; }
     set playbackRate(r) { this._wantRate = +r || 1; this.cmd('setPlaybackRate', [this._wantRate]); }
-    play() { this.wantPlay = true; this.cmd('playVideo'); this._kick(); return Promise.resolve(); }
+    play() { if (!this.revealed && !this.wantPlay) this.loadAt = Date.now(); this.wantPlay = true; this.cmd('playVideo'); this._kick(); return Promise.resolve(); }
     pause() { this.wantPlay = false; this.cmd('pauseVideo'); if (this.revealed && this.st !== 2 && this.st !== 0) { this.st = 2; this._emit('pause'); } }
     destroy() { window.removeEventListener('message', this._onMsg); try { this.f.src = 'about:blank'; } catch { /* */ } }
   }

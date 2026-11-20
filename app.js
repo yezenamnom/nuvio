@@ -681,6 +681,7 @@ const compMpd = id => `${COMP}/api/manifest/dash/id/${id}?local=true`;
 // روابط الملف بتبلّش بـ «/companion/…»؛ منكمّلها لرابط كامل (الملف بيتحمّل كـ data: بلا عنوان)
 const absMpd = (text, url) => { try { return text.replace(/<BaseURL>\//g, `<BaseURL>${new URL(url).origin}/`); } catch { return text; } };
 const OWN_INST = { url: SV, type: 'own' };
+if (self.caches) { caches.delete('nuvio-low-v1').catch(() => {}); caches.delete('nuvio-tiers-v1').catch(() => {}); } // التحميل المسبق الكبير انلغى: منفضّي محلّو عالجهاز
 const ownMpd = id => `${SV}/dash/${id}.mpd`;
 let svDown = 0;
 const svUsable = () => Date.now() - svDown > 3 * 60e3;
@@ -822,9 +823,9 @@ function card(v, { row = false, noAuthorLink = false } = {}) {
   mb.onclick = e => { e.preventDefault(); e.stopPropagation(); cardMenu(v); };
   c.querySelector('.meta').append(mb);
   let pre;
-  const warm = () => { clearTimeout(pre); pre = setTimeout(() => { prefetchVideo(v.id, true); if (ytiUsable()) ytNext(v.id).catch(() => {}); }, 150); };
+  const warm = () => { clearTimeout(pre); pre = setTimeout(() => { if (ytiUsable()) ytNext(v.id).catch(() => {}); }, 400); };
   c.addEventListener('pointerenter', warm);
-  c.addEventListener('touchstart', () => prefetchVideo(v.id, false), { passive: true });
+  c.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') prefetchVideo(v.id, true); }); // كبسة الماوس: منبلّش قبل ما تفلت
   c.addEventListener('pointerleave', () => clearTimeout(pre));
   return c;
 }
@@ -1775,9 +1776,9 @@ function manifestText(url) {
   return cached('mf:' + url, 4 * 60e3, async () => {
     let last;
     const isComp = url.startsWith(COMP), isOwn = url.startsWith(SV);
-    const tries = isComp ? 1 : isOwn ? 3 : 6; // مصادرنا: إذا ما زبطت، منروح للاحتياط فوراً بدل ما نستنّى
+    const tries = isComp ? 1 : isOwn ? 2 : 6; // مصادرنا: إذا ما زبطت، منروح ليوتيوب فوراً بدل ما نستنّى
     for (let i = 0; i < tries; i++) {
-      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), isComp ? 6000 : 7000);
+      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), isComp ? 6000 : isOwn ? 5000 : 7000);
       try {
         const r = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
         if (r.ok) { const text = await r.text(); if (text.includes('<MPD')) return { text: absMpd(text, r.url || url), final: r.url || url }; last = new Error('مش DASH'); }
@@ -1833,6 +1834,8 @@ async function renderWatch(id, startTime) {
   const info = el('div', 'info');
   const side = el('aside', 'related');
   main.append(box, info); layout.append(main, side);
+  if (typeof commentsSection === 'function' && !tvOn()) main.append(commentsSection(id));
+  floatOnScroll(box);
   const ytInfo = ytiUsable() ? YtApi.watch(id).catch(() => null) : null;
   let shown = null; // المعلومات اللي انعرضت (من يوتيوب المباشر أو من السيرفر العام، اللي بيوصل أول)
   active = { id, box, layout, main, title: () => (current && current.data.title) || (shown && shown.title) || (pv && pv.title) || '', author: () => (current && current.data.author) || (shown && shown.author) || (pv && pv.author) || '', np: () => np };
@@ -2060,15 +2063,17 @@ async function renderWatch(id, startTime) {
       if (ex.chapters) ex.chapters(shown.description || '');
     }
     const want = +(pv && pv.duration) || 0;
-    let tries = 0, mids = 0, goodCt = 0, dur = want, failed = false, waitUser = false;
+    let tries = 0, mids = 0, goodCt = 0, dur = want, failed = false, waitUser = false, adSince = 0;
     const reloadAt = (t, why) => {
       if (failed || !box.isConnected) return;
       if (why && mids >= 3) return;
       if (why) mids++;
-      tries = why ? 0 : tries;
+      tries = 0; adSince = 0;
       cover.hidden = false; msg.textContent = why === 'ad' ? 'عم شيل الإعلان…' : '';
       media.hide(); tries++; media.load(t);
     };
+    // انتقل المشغّل لمحل تاني بالصفحة (المشغّل الصغير) وإطار يوتيوب انعاد تحميلو: منكمّل من نفس الثانية
+    box._ytResume = () => { if (!failed && np && np.video === media) reloadAt(media.currentTime || goodCt); };
     const fail = () => {
       if (failed || !box.isConnected) return;
       failed = true; stop();
@@ -2080,34 +2085,56 @@ async function renderWatch(id, startTime) {
       cover.hidden = false;
     };
     media.addEventListener('yterror', () => { if (tries < 2) { tries++; media.load(goodCt || at); } else fail(); });
-    // الفيديو الحقيقي عم يمشي؟ (مش إعلان)
+    // إعلان؟ (فيديو تاني، أو مدّتو غير مدّة الفيديو). على الآيفون أحياناً ما بيوصل رقم الفيديو، فالمدّة بتكفّي
+    const adLike = () => !!((media.vid && media.vid !== id) || (dur && media.curDur && Math.abs(media.curDur - dur) > 3));
+    // الفيديو الحقيقي عم يمشي؟
     const isContent = () => {
       if (!dur && media.dur) dur = media.dur;
-      return media.vid === id && (!dur || !media.curDur || Math.abs(media.curDur - dur) < 3)
-        && media.ct >= media.t0 - 1.5 && media.ct - Math.max(media.ct0, media.t0 - 1.5) > 0.6;
+      // لازم يكون وصلنا وقت من يوتيوب نفسو (ct0) والفيديو عم يمشي فعلاً — مش بس الثانية اللي طلبناها
+      return !adLike() && media.ct0 >= 0 && media.st === 1 && media.ct >= media.t0 - 1.5 && media.ct - Math.max(media.ct0, media.t0 - 1.5) > 0.6;
+    };
+    const showAd = now => {
+      if (!adSince) { adSince = now; media.cmd('mute'); }
+      const left = media.curDur > 0 ? Math.max(0, Math.ceil(media.curDur - media.ct)) : 0;
+      msg.textContent = left ? `إعلان من يوتيوب ما قدرنا نشيلو — بيخلص بعد ${left} ث` : 'إعلان من يوتيوب — ثواني وبيخلص…';
     };
     const iv = setInterval(() => {
       if (!box.isConnected || np === null || np.dead) { stop(); return; }
       const now = Date.now();
       if (document.hidden) { media.loadAt = now; media.ctMoveAt = now; return; } // بالخلفية الرسايل بتبطى: ما منحكم
       if (!media.revealed) {
-        if (isContent()) { waitUser = false; msg.textContent = ''; goodCt = media.ct; cover.hidden = true; media.reveal(); return; }
+        if (isContent()) { waitUser = false; adSince = 0; msg.textContent = ''; goodCt = media.ct; cover.hidden = true; media.reveal(); return; }
         if (waitUser || !media.wantPlay) return; // ناطرين كبسة «تشغيل» منك
         if (now - media.loadAt > 3500) {
           const started = media.st === 1 || media.st === 3 || media.ct > media.t0 + 0.3;
           if (!started) { // ما بلّش أبداً (الموبايل منع التشغيل): صورتنا بتضل فوق وزر التشغيل تبعنا بيبيّن
             waitUser = true; msg.textContent = ''; media.wantPlay = false; media._emit('pause'); return;
           }
-          if (tries < 4) { msg.textContent = 'عم شيل الإعلان…'; tries++; media.load(media.t0); } // إعلان: من نفس الثانية
-          else { goodCt = media.ct; cover.hidden = true; media.reveal(); } // آخر شي: منفرجيك اللي في
+          if (adLike()) {
+            // إعلان: مرة وحدة منعيد (أحياناً بيروح). إذا رجع، منستنّاه يخلص تحت الصورة بلا صوت ومع عدّاد — بلا لفّ
+            if (tries < 2) { msg.textContent = 'عم شيل الإعلان…'; tries++; media.load(media.t0); return; }
+            showAd(now);
+            if (now - adSince > 150e3) { goodCt = media.ct; cover.hidden = true; media.reveal(); } // ما منعلق للأبد
+            return;
+          }
+          // مش إعلان، بس لسّا عم يحمّل (نت بطيء): منستنّى بلا ما نعيد. إذا وقف كتير، منعيد مرة
+          if (now - Math.max(media.loadAt, media.ctMoveAt || 0) > 12000) {
+            if (tries < 3) { tries++; media.load(media.ct > media.t0 ? media.ct : media.t0); }
+            else { goodCt = media.ct; cover.hidden = true; media.reveal(); }
+          }
         }
         return;
       }
       const sinceSeek = now - (media.lastSeekAt || 0);
-      const frozen = media.st === 1 && now - media.ctMoveAt > 4000 && sinceSeek > 10000 && media.seekingTo == null;
-      const adNow = (media.vid && media.vid !== id) || (dur && media.curDur && Math.abs(media.curDur - dur) > 3) || frozen;
-      if (!adNow) { if (media.st === 1) goodCt = media.ct; return; }
-      reloadAt(goodCt, 'ad'); // إعلان بالنص: منرجع لنفس الثانية
+      const frozen = media.st === 1 && now - media.ctMoveAt > 6000 && sinceSeek > 10000 && media.seekingTo == null;
+      if (adLike()) {
+        // إعلان بالنص: مرة منرجع لنفس الثانية (غالباً بيتخطّاه)، وإذا رجع منستنّاه مخبّى
+        if (mids < 1) { reloadAt(goodCt, 'ad'); return; }
+        media.hide(); cover.hidden = false; tries = 9; showAd(now); // tries=9: ما في إعادة تحميل، بس انتظار
+        return;
+      }
+      if (frozen) { reloadAt(goodCt, 'stall'); return; }
+      if (media.st === 1) goodCt = media.ct;
     }, 400);
     function stop() { clearInterval(iv); }
     tries = 1;
@@ -2193,7 +2220,7 @@ async function renderWatch(id, startTime) {
       player.addEventListener('adaptation', tuneBuf);
       player.addEventListener('variantchanged', tuneBuf);
       // الطبقة الخفيفة (144p لكل الفيديو) — بس من مصدرنا ومع «تحميل مسبق قوي»
-      if (strong && s.kind === 'dash' && s.url.startsWith(SV)) { lowLayer.start(player, id, np); tiers.start(player, id, np); }
+      // (النسخة الخفيفة لكل الفيديو + الجودات بالخلفية انلغو: كانو يضغطو سيرفرنا ويخلّو يوتيوب يحظرو)
     }
   }
 
@@ -2263,50 +2290,27 @@ async function renderWatch(id, startTime) {
       embed(np && np.video && np.video.currentTime > 1 ? np.video.currentTime : at);
     }, 7000);
   };
+  // لو مصدرنا فتح بس الفيديو ما بلّش خلال 12 ثانية: يوتيوب بواجهتنا
+  let startT = 0;
+  const armStart = at => {
+    clearTimeout(startT);
+    startT = setTimeout(() => {
+      if (!box.isConnected || embedOn || !np || !np.video) return;
+      const v = np.video;
+      if (v.currentTime > (at || 0) + 0.3 || np.userPaused) return;
+      embed(at);
+    }, 12000);
+  };
   async function tryNext(startAt) {
     if (embedOn) return;
-    // التشغيل المبكر (مصدرنا أو أسرع سيرفر عام) — إذا اشتغل ما منعيد
+    // «تلقائي»: مصدرنا إذا زبط، وإلا (يوتيوب حاظر السيرفر أو واقف) مشغّل يوتيوب بواجهتنا فوراً — بلا لفّة عالسيرفرات العامة
     if (early) {
       const how = await early.catch(() => false); early = null;
-      if (how === 'own') { ownExtras(); return; }
-      if (how) {
-        getVideo(id).then(({ inst, res }) => {
-          if (!box.isConnected) return;
-          if (shown || !ytInfo) fillInfo(res); else Promise.race([ytInfo, sleep(700)]).then(() => { if (box.isConnected) fillInfo(res); });
-          current = { inst, data: res };
-          if (np) { np.setCaptions(res.captions || []); bgAudioUrl(res).then(u => { if (u && np) np.setBgAudio(u); }).catch(() => {}); }
-        }).catch(() => {});
-        return;
-      }
+      if (how === 'own') { ownExtras(); armStart(startAt); return; }
     }
-    // مصادرنا ما زبطت: السيرفرات العامة بس إذا في وحدة شغّالة ولحد 8 ثواني، وإلا مشغّل يوتيوب فوراً
-    armEmbed(startAt);
-    if (!publicUntil) publicUntil = Date.now() + 8000;
-    if (!hasFreshOk() || Date.now() > publicUntil) { embed(startAt); return; }
-    try {
-      const { inst, res } = tried.length
-        ? await withFallback(i => apiFor(i).video(i.url, id), { skip: tried })
-        : await getVideo(id);
-      if (!box.isConnected) return;
-      tried.push(inst.url);
-      // منفضّل معلومات يوتيوب المباشر (عربي وكاملة): منستنّاها لحد 0.7 ثانية، بلا ما نأخّر الفيديو
-      if (shown || !ytInfo) fillInfo(res);
-      else Promise.race([ytInfo, sleep(700)]).then(() => { if (box.isConnected) fillInfo(res); });
-      current = { inst, data: res };
-      if (await playSources(inst, res.sources, startAt)) {
-        if (np) np.setCaptions(res.captions || []);
-        bgAudioUrl(res).then(u => { if (u && np) np.setBgAudio(u); }).catch(() => {});
-        return;
-      }
-      mark(inst.url, false);
-      return tryNext(startAt);
-    } catch (e) {
-      if (!box.isConnected) return;
-      // دورة تانية على كل السيرفرات قبل المشغّل الاحتياطي (الخلل عندهن غالباً مؤقت)
-      if (!secondRound && tried.length) { secondRound = true; tried.length = 0; memo.delete('v:' + id); return tryNext(startAt); }
-      if (!shown && !ytInfo) { if (!h1.dataset.oe) h1.textContent = 'ما قدرت جيب معلومات الفيديو'; metaRow.replaceChildren(); descSk.remove(); }
-      embed(startAt);
-    }
+    if (!box.isConnected || embedOn) return;
+    if (!shown) { if (ytInfo) ytInfo.then(d => { if (!d && box.isConnected) infoFromPublic(); }); else infoFromPublic(); }
+    embed(startAt);
   }
 
   function fillInfo(d) {
@@ -2409,15 +2413,13 @@ async function renderWatch(id, startTime) {
   // تشغيل مبكر: رابط ملف DASH معروف مسبقاً، فمنبلّش الفيديو فوراً بنفس الوقت اللي عم تنجاب فيه معلوماتو
   // (معلومات الفيديو أحياناً بتاخد ٢-٤ ثواني عند السيرفر العام)
   let early = null;
-  const bestInv = orderedInstances().find(i => i.type === 'invidious' && health[i.url] && health[i.url].ok);
-  const invEarly = () => (bestInv ? playSources(bestInv, [{ kind: 'dash', url: `${bestInv.url}/api/manifest/dash/id/${id}?local=true` }], startTime).then(ok => ok && 'inv') : Promise.resolve(false));
   if (svUsable()) {
-    early = playSources(OWN_INST, [{ kind: 'dash', url: ownMpd(id) }, { kind: 'dash', url: compMpd(id) }, { kind: 'mp4', url: ownMp4(id) }], startTime).then(ok => {
+    early = playSources(OWN_INST, [{ kind: 'dash', url: ownMpd(id) }], startTime).then(ok => {
       if (ok) return 'own';
-      svCheck(); armEmbed(startTime);
-      return invEarly();
+      svCheck();
+      return false;
     });
-  } else { armEmbed(startTime); early = invEarly(); }
+  }
   // المعلومات من يوتيوب مباشرة (~نص ثانية) بنفس الوقت؛ السيرفر العام بيضل للفيديو نفسو
   if (ytInfo) ytInfo.then(d => { if (d && box.isConnected) fillInfo(d); });
   await tryNext(startTime);
@@ -2735,6 +2737,55 @@ $('#searchForm').addEventListener('submit', e => {
   if (q) { $('#q').blur(); openQuery(q); }
 });
 
+/* نقل المشغّل بالصفحة بلا ما ينعاد تحميلو: كروم الجديد بيعرف (moveBefore). غير هيك (سفاري): منكمّل من نفس الثانية */
+function moveKeep(parent, node, before = null) {
+  if (parent.moveBefore && node.isConnected && parent.isConnected) { try { parent.moveBefore(node, before); return; } catch { /* منكمّل عادي */ } }
+  parent.insertBefore(node, before);
+  if (node._ytResume) node._ytResume();
+}
+
+/* ================= كمبيوتر: لمّا تنزل بالصفحة والفيديو شغّال، بيصغر وبيطلع عاليمين تحت — ولمّا تطلع بيرجع ================= */
+const canFloat = () => matchMedia('(min-width: 900px) and (hover: hover) and (pointer: fine)').matches;
+function floatOnScroll(box) {
+  const ph = el('div', 'float-ph');
+  box.before(ph);
+  let on = false, off = false, raf = 0, h = 0;
+  const bar = el('div', 'float-bar');
+  const up = el('button', 'float-btn'); up.title = 'رجّع الفيديو لفوق'; up.setAttribute('aria-label', up.title);
+  up.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>';
+  const x = el('button', 'float-btn'); x.title = 'سكّر'; x.setAttribute('aria-label', x.title);
+  x.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  bar.append(up, x);
+  up.onclick = e => { e.stopPropagation(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  x.onclick = e => { e.stopPropagation(); off = true; set(false); const n = window.__nuvioNp; if (n && n.video && !n.video.paused) n.video.pause(); };
+  bar.addEventListener('pointerdown', e => e.stopPropagation());
+  const set = v => {
+    if (v === on) return;
+    const n = window.__nuvioNp; if (n && n.markTransition) n.markTransition();
+    if (v) { h = box.getBoundingClientRect().height; ph.style.height = h + 'px'; }
+    on = v;
+    box.classList.toggle('floating', v);
+    if (v) box.append(bar); else { bar.remove(); ph.style.height = ''; }
+  };
+  const check = () => {
+    raf = 0;
+    if (!box.isConnected) { stop(); return; }
+    if (!ph.isConnected || box.classList.contains('in-mini') || document.fullscreenElement || box.classList.contains('fakefs') || !canFloat()) { set(false); return; }
+    const top = ph.getBoundingClientRect().top;
+    const bottom = top + (on ? h : box.getBoundingClientRect().height);
+    if (bottom > 140) off = false;
+    if (!on && bottom < 70) {
+      const n = window.__nuvioNp;
+      if (off || !n || !n.video || n.video.paused) return; // بس إذا عم يشتغل
+      set(true);
+    } else if (on && bottom > 140) set(false);
+  };
+  const onScroll = () => { if (!raf) raf = requestAnimationFrame(check); };
+  addEventListener('scroll', onScroll, { passive: true });
+  addEventListener('resize', onScroll);
+  function stop() { removeEventListener('scroll', onScroll); removeEventListener('resize', onScroll); }
+}
+
 /* ================= المشغّل الصغير (اسحب الفيديو لتحت) ================= */
 let active = null;          // الفيديو اللي عم يشتغل هلّق
 let miniOn = false;
@@ -2750,9 +2801,10 @@ function minimize(nav = true) {
   if (mnp && mnp.markTransition) mnp.markTransition();
   if (wasPlaying) setTimeout(() => { if (mv0.paused && !mnp.userPaused && mv0.isConnected) mv0.play().catch(() => {}); }, 120);
   box.style.transition = 'none'; box.style.transform = ''; box.style.opacity = '';
+  box.classList.remove('floating');
   const from = box.getBoundingClientRect();
   const ph = el('div', 'player-ph'); ph.id = 'player-ph';
-  box.replaceWith(ph);                 // منحط مكانو علامة لحتى نرجّعو
+  box.before(ph);                      // منحط مكانو علامة لحتى نرجّعو
   box.classList.add('in-mini');
   mini.replaceChildren();
   const info = el('button', 'mini-info');
@@ -2768,9 +2820,10 @@ function minimize(nav = true) {
   const x = el('button', 'mini-btn'); x.setAttribute('aria-label', 'سكّر');
   x.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
   x.onclick = e => { e.stopPropagation(); closeMini(); };
-  const vid = el('div', 'mini-vid'); vid.append(box);
+  const vid = el('div', 'mini-vid');
   vid.onclick = () => info.click();
   mini.append(vid, info, pp, x);
+  moveKeep(vid, box);
   mini.hidden = false;
   document.body.classList.add('has-mini');
   enableSwipeUp();
@@ -2802,7 +2855,7 @@ function restoreMini() {
   box.classList.remove('in-mini');
   view.replaceChildren(layout);
   const ph = layout.querySelector('#player-ph');
-  if (ph) ph.replaceWith(box); else active.main.prepend(box);
+  if (ph) { moveKeep(ph.parentNode, box, ph); ph.remove(); } else moveKeep(active.main, box, active.main.firstChild);
   mini.replaceChildren();
   window.scrollTo(0, 0);
   const to = box.getBoundingClientRect();
@@ -2876,7 +2929,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120211731';
+const APP_VERSION = '20261120215033';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
