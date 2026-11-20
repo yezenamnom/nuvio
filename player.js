@@ -19,7 +19,11 @@
     plus: svg('<path class="s" d="M12 5v14M5 12h14"/>'),
     back: svg('<path d="M11 6.5v11L3 12zM20 6.5v11L12 12z"/>'),
     fwd: svg('<path d="M13 6.5v11l8-5.5zM4 6.5v11l8-5.5z"/>'),
+    pip: svg('<rect class="s" x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="11.5" width="7" height="5.5" rx="1"/>'),
   };
+  // كمبيوتر (مش تلفون ولا آيباد): الفيديو بيضل شغّال بالخلفية، وفينا نطلّع شاشة عايمة
+  const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const DESKTOP = !IOS && !/Android/i.test(navigator.userAgent) && matchMedia('(pointer: fine)').matches;
   const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
   const fmt = s => {
     if (!isFinite(s) || s < 0) s = 0;
@@ -65,6 +69,7 @@
       this.seekL = mk('div', 'np-ripple l', ICON.back + '<span>10</span>');
       this.seekR = mk('div', 'np-ripple r', ICON.fwd + '<span>10</span>');
       this.msgEl = mk('div', 'np-msg');
+      this.speedEl = mk('div', 'np-speed', '<b>2×</b>' + ICON.fwd);
 
       const bottom = mk('div', 'np-bottom');
       this.bar = mk('div', 'np-bar');
@@ -86,12 +91,15 @@
       const volWrap = mk('div', 'np-volwrap'); volWrap.append(this.bVol, this.vol);
       this.bCast = mk('button', 'np-btn', ICON.tv); this.bCast.title = 'عرض على شاشة'; this.bCast.setAttribute('aria-label', 'عرض على شاشة'); this.bCast.hidden = true;
       this.bCast.onclick = e => { e.stopPropagation(); this.cast(); };
-      row.append(this.bPlay, volWrap, this.time, mk('div', 'np-space'), this.bCast, this.bCopy, this.qBadge, this.bGear, this.bFs);
+      this.bPip = mk('button', 'np-btn', ICON.pip); this.bPip.title = 'شاشة عايمة'; this.bPip.setAttribute('aria-label', 'شاشة عايمة');
+      this.bPip.hidden = !(DESKTOP && this.canPip());
+      this.bPip.onclick = e => { e.stopPropagation(); this.pip().catch(() => {}); };
+      row.append(this.bPlay, volWrap, this.time, mk('div', 'np-space'), this.bCast, this.bCopy, this.qBadge, this.bPip, this.bGear, this.bFs);
       bottom.append(this.bar, row);
 
       this.menu = mk('div', 'np-menu'); this.menu.dir = 'rtl'; this.menu.hidden = true;
 
-      this.ui.append(this.spinner, this.big, this.seekL, this.seekR, this.msgEl, bottom, this.menu);
+      this.ui.append(this.spinner, this.big, this.seekL, this.seekR, this.msgEl, this.speedEl, bottom, this.menu);
       box.replaceChildren(v, this.ui);
       this._bind();
       this._showUI();
@@ -166,6 +174,10 @@
       set('seekforward', d => { const x = cur(); x.currentTime = x.currentTime + (d.seekOffset || 10); });
       set('seekto', d => { cur().currentTime = d.seekTime; });
       set('nexttrack', this.opts.onNext || null);
+      if (DESKTOP) set('enterpictureinpicture', async () => {
+        if (this.dead || document.pictureInPictureElement || this.video.paused) return;
+        try { await this.video.requestPictureInPicture(); } catch { /* المتصفح ما سمح */ }
+      });
     }
 
     /* ---------- تشغيل بالخلفية ----------
@@ -181,11 +193,12 @@
       }
       if (!this._vis) {
         this._vis = () => {
+          if (DESKTOP || document.pictureInPictureElement) return;
           if (document.hidden) { if (!this.video.paused && !this.video.ended) this._toBg(); }
           else this._fromBg();
         };
         document.addEventListener('visibilitychange', this._vis);
-        this.video.addEventListener('pause', () => { if (document.hidden && !this.userPaused && !this.bgOn) this._toBg(); });
+        this.video.addEventListener('pause', () => { if (!DESKTOP && !document.pictureInPictureElement && document.hidden && !this.userPaused && !this.bgOn) this._toBg(); });
       }
     }
     /* لازم نشغّل الصوت مرة وحدة جوّا كبسة منك، لحتى الآيفون يسمحلنا نشغّلو لاحقاً بالخلفية */
@@ -261,10 +274,42 @@
       const end = () => { drag = false; box.classList.remove('drag'); };
       this.bar.addEventListener('pointerup', end); this.bar.addEventListener('pointercancel', end);
 
+      // ضغطة مطوّلة على الفيديو = سرعة 2× (متل يوتيوب)، ولمّا تشيل إصبعك بترجع متل ما كانت
+      let holdT = 0, hx = 0, hy = 0, heldAt = 0;
+      this.held = false;
+      const startHold = e => {
+        if (e.button > 0 || e.target.closest('.np-bottom, .np-menu, .np-big')) return;
+        hx = e.clientX; hy = e.clientY;
+        clearTimeout(holdT);
+        holdT = setTimeout(() => {
+          if (this.dead || v.ended || !this.menu.hidden) return;
+          this.held = true;
+          this._holdRate = v.playbackRate; this._holdPaused = v.paused;
+          v.playbackRate = 2;
+          if (v.paused) v.play().catch(() => {});
+          box.classList.add('fast'); this._hideUI();
+          try { if (navigator.vibrate) navigator.vibrate(10); } catch { /* */ }
+        }, 450);
+      };
+      const moveHold = e => { if (!this.held && (Math.abs(e.clientX - hx) > 12 || Math.abs(e.clientY - hy) > 12)) clearTimeout(holdT); };
+      const endHold = () => {
+        clearTimeout(holdT);
+        if (!this.held) return;
+        this.held = false; heldAt = Date.now();
+        v.playbackRate = this._holdRate || this.rate || 1;
+        if (this._holdPaused) v.pause();
+        box.classList.remove('fast');
+      };
+      this.ui.addEventListener('pointerdown', startHold);
+      this.ui.addEventListener('pointermove', moveHold);
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach(n => this.ui.addEventListener(n, endHold));
+      box.addEventListener('contextmenu', e => { if (e.target.closest('.np-ui')) e.preventDefault(); }); // بلا قائمة الضغطة المطوّلة
+
       // الضغط على الفيديو: كمبيوتر = تشغيل/إيقاف، موبايل = إظهار الأزرار، ضغطتين = تقديم/ترجيع 10 ثواني
       let lastTap = 0, tapT;
       this.ui.addEventListener('pointerup', e => {
         this._unlock();
+        if (Date.now() - heldAt < 80) return; // كانت ضغطة مطوّلة (تسريع)، مش كبسة
         if (e.target.closest('.np-bottom, .np-menu, .np-big')) return;
         if (!this.menu.hidden) { this.menu.hidden = true; return; }
         const touch = e.pointerType === 'touch';

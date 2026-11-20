@@ -159,6 +159,37 @@ async function withFallback(op, { skip = [], stagger = 2000, prefer = null } = {
 
 /* ذاكرة مؤقتة للطلبات: نفس الفيديو أو القناة ما منجيبهن مرتين */
 const memo = new Map();
+/* ---- مباشرة من غوغل/يوتيوب (بلا سيرفر وسيط): اقتراحات البحث وعنوان الفيديو ---- */
+let jsonpN = 0;
+function jsonp(url, ms = 2500) {
+  return new Promise((ok, bad) => {
+    const cb = '__nv' + (++jsonpN) + Date.now().toString(36);
+    const sc = document.createElement('script');
+    let t = 0;
+    const done = () => { clearTimeout(t); sc.remove(); };
+    window[cb] = d => { done(); delete window[cb]; ok(d); };
+    t = setTimeout(() => { done(); window[cb] = () => { delete window[cb]; }; bad(new Error('بطيء')); }, ms);
+    sc.onerror = () => { done(); delete window[cb]; bad(new Error('ما وصل')); };
+    sc.referrerPolicy = 'no-referrer';
+    sc.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cb;
+    document.head.append(sc);
+  });
+}
+function googleSuggest(q) {
+  const hl = /[\u0600-\u06FF]/.test(q) ? 'ar' : (navigator.language || 'en').slice(0, 2);
+  return jsonp(`https://suggestqueries-clients6.youtube.com/complete/search?client=youtube&ds=yt&hl=${hl}&q=${encodeURIComponent(q)}`)
+    .then(d => {
+      const l = ((d && d[1]) || []).map(x => (Array.isArray(x) ? x[0] : x)).filter(s => typeof s === 'string' && s.trim());
+      if (!l.length) throw new Error('فاضي');
+      return l;
+    });
+}
+function ytOembed(id) {
+  return cached('oe:' + id, 24 * 3600e3, () => fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent('https://www.youtube.com/watch?v=' + id)}`, { referrerPolicy: 'no-referrer' })
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(d => ({ title: d.title || '', author: d.author_name || '' })));
+}
+
 function cached(key, ttl, fn) {
   const e = memo.get(key);
   if (e && Date.now() - e.at < ttl) return e.p;
@@ -1134,7 +1165,11 @@ async function destroyPlayer() {
 }
 
 async function renderWatch(id, startTime) {
+  const seq = routeSeq;
   await destroyPlayer();
+  // إذا تركت الصفحة قبل ما تجهز (رجعت للرئيسية أو صغّرت)، ما منرسم الفيديو فوقها
+  const [hp, hq] = (location.hash.slice(1) || '/').split('?');
+  if (seq !== routeSeq || hp !== '/watch' || new URLSearchParams(hq || '').get('v') !== id) return;
   const pv = preview.get(id);
   const tried = [];
   let current = null; // { inst, data }
@@ -1180,6 +1215,13 @@ async function renderWatch(id, startTime) {
   chev.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>';
   titleRow.append(h1, chev);
   info.append(titleRow, metaRow, descSk);
+  // فتحت رابط مباشر وما منعرف العنوان؟ منجيبو من يوتيوب نفسو (~0.1 ثانية) لحد ما توصل باقي المعلومات
+  if (!pv || !pv.title) ytOembed(id).then(o => {
+    if (!o || current || !h1.isConnected) return;
+    h1.textContent = o.title; h1.dataset.oe = '1';
+    document.title = `${o.title} — Nuvio`;
+    if (o.author && !(pv && pv.author)) metaRow.replaceChildren(el('span', 'author', o.author), el('span', 'sk sk-line short'));
+  }).catch(() => {});
   const sideList = el('div', 'related-list'); sideList.append(skCards(8, true));
   side.append(el('h2', 'section-title', 'فيديوهات مشابهة'), sideList);
   view.replaceChildren(layout);
@@ -1317,7 +1359,7 @@ async function renderWatch(id, startTime) {
       if (!box.isConnected) return;
       // دورة تانية على كل السيرفرات قبل المشغّل الاحتياطي (الخلل عندهن غالباً مؤقت)
       if (!secondRound && tried.length) { secondRound = true; tried.length = 0; memo.delete('v:' + id); return tryNext(startAt); }
-      if (!current) { h1.textContent = 'ما قدرت جيب معلومات الفيديو'; metaRow.replaceChildren(); descSk.remove(); }
+      if (!current) { if (!h1.dataset.oe) h1.textContent = 'ما قدرت جيب معلومات الفيديو'; metaRow.replaceChildren(); descSk.remove(); }
       embed();
     }
   }
@@ -1686,7 +1728,8 @@ function updateSug() {
   const seq = ++sugSeq;
   sugTimer = setTimeout(async () => {
     try {
-      const { res } = await cached('sg:' + q.toLowerCase(), 30 * 60e3, () => withFallback(i => apiFor(i).suggest(i.url, q), { stagger: 900 }));
+      const { res } = await cached('sg:' + q.toLowerCase(), 30 * 60e3, () => googleSuggest(q).then(res => ({ res }))
+        .catch(() => withFallback(i => apiFor(i).suggest(i.url, q), { stagger: 900 })));
       poolAdd(res);
       if (seq !== sugSeq) return;
       // منحافظ على ترتيب اللي عم يبيّن، ومنزيد الجديد تحت (بلا قفزات)
@@ -1862,7 +1905,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120060143';
+const APP_VERSION = '20261120060909';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -1940,7 +1983,9 @@ function restorePage(key) {
 })();
 
 /* ================= التنقّل ================= */
+let routeSeq = 0;
 async function route() {
+  const seq = ++routeSeq;
   const hash = location.hash.slice(1) || '/';
   savePage();
   const [path, qs] = hash.split('?');
@@ -1954,6 +1999,7 @@ async function route() {
   if (path === '/watch' && active && !miniOn && active.id !== p.get('v')) { const n = active.np(); if (n) n.destroy(); active = null; }
   // إذا طلعت من الفيديو وهو مش مصغّر، منوقّفو
   if (path !== '/watch' && !miniOn) { await destroyPlayer(); if (active) { const n = active.np(); if (n) { n.pauseAll(); n.destroy(); } active = null; } }
+  if (seq !== routeSeq) return; // صار في تنقّل أحدث وإحنا ناطرين
   shownKey = hash;
   if (path === '/') setMode('video'); else if (path.startsWith('/music')) setMode('music');
   if (path !== '/watch' && restorePage(hash)) {

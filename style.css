@@ -743,3 +743,16 @@ img.author-avatar.ok:not(.now), img.ch-banner.ok:not(.now) { animation: img-in .
   .thumb img { transition: none; }
 }
 .thumb.sk::before { display: none; }
+
+/* ===== ضغطة مطوّلة = 2× ===== */
+.np, .np video { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.np-speed {
+  position: absolute; top: 14px; left: 50%; transform: translate(-50%, -6px);
+  display: flex; align-items: center; gap: 4px; padding: 5px 12px 5px 14px; border-radius: 999px;
+  background: rgba(0, 0, 0, .62); color: #fff; font-size: 14px; direction: ltr;
+  opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 3;
+}
+.np-speed svg { width: 18px; height: 18px; fill: currentColor; animation: np-fast .8s linear infinite; }
+.np.fast .np-speed { opacity: 1; transform: translate(-50%, 0); }
+.np.fast .np-big { opacity: 0 !important; }
+@keyframes np-fast { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
