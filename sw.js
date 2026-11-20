@@ -2,7 +2,7 @@
    - ملفات الموقع (الصفحة، التصميم، المشغّل…) من التخزين، ومنحدّثها بس لمّا تنزل نسخة جديدة (VERSION).
    - المكتبات الخارجية الثابتة (مشغّل Shaka والخط) بتنحفظ مرة وحدة.
    - الفيديوهات وبيانات السيرفرات ما بتنحفظ هون: بتنجاب وقتها. */
-const VERSION = '20261120054013';
+const VERSION = '20261120055149';
 const CACHE = 'nuvio-' + VERSION;
 const EXT = 'nuvio-ext-v1';
 const SHELL = ['./', 'index.html', 'style.css', 'player.js', 'app.js', 'music.js', 'manifest.json', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
@@ -18,7 +18,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k.startsWith('nuvio-') && k !== CACHE && k !== EXT).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k.startsWith('nuvio-') && k !== CACHE && k !== EXT && k !== API).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -43,6 +43,10 @@ self.addEventListener('fetch', e => {
     return;
   }
 
+  // بيانات السيرفرات (بحث، قنوات، معلومات فيديو، اقتراحات): تخزين ذكي
+  const rule = req.cache !== 'no-store' && apiRule(url);
+  if (rule) { e.respondWith(swr(req, rule)); return; }
+
   // مكتبات ثابتة: مشغّل Shaka (رقم نسخة بالرابط) والخط
   if (/(^|\.)cdnjs\.cloudflare\.com$|^fonts\.googleapis\.com$|^fonts\.gstatic\.com$/.test(url.hostname)) {
     e.respondWith(caches.open(EXT).then(async c => {
@@ -54,3 +58,44 @@ self.addEventListener('fetch', e => {
     }));
   }
 });
+
+/* ================= تخزين ذكي لبيانات السيرفرات =================
+   «stale-while-revalidate»: إذا الجواب محفوظ منرجّعو فوراً (الصفحة بتفتح بلحظة)، ومنحدّثو بالخلفية إذا صار قديم.
+   هيك ما منرجع نطلب نفس الشي من السيرفر كل مرة، وكمان بيشتغل لو السيرفر بطيء أو واقف.
+   ما منحفظ الفيديو نفسو ولا ملفات DASH (روابطها بتنتهي). */
+const API = 'nuvio-api-v1';
+const MAX_API = 400;
+function apiRule(url) {
+  const p = url.pathname;
+  if (/\/(manifest|videoplayback|latest_version|companion|captions)\b/.test(p)) return null;
+  if (/\/api\/v1\/search\/suggestions|\/suggestions$/.test(p)) return { fresh: 24 * 3600e3, max: 7 * 86400e3 };
+  if (/\/api\/v1\/videos\/|\/streams\//.test(p)) return { fresh: 30 * 60e3, max: 45 * 60e3 }; // فيه روابط بتنتهي
+  if (/\/api\/v1\/(search|channels|popular|trending|playlists)|\/(search|channel|nextpage|trending|playlists)\b/.test(p)) return { fresh: 10 * 60e3, max: 2 * 86400e3 };
+  return null;
+}
+async function swr(req, rule) {
+  const cache = await caches.open(API);
+  const hit = await cache.match(req);
+  const age = hit ? Date.now() - Number(hit.headers.get('x-nuvio-at') || 0) : Infinity;
+  const refresh = () => fetch(req).then(async res => {
+    if (res.ok && /json/.test(res.headers.get('content-type') || '')) {
+      const body = await res.clone().arrayBuffer();
+      const h = new Headers(res.headers); h.set('x-nuvio-at', String(Date.now()));
+      await cache.put(req, new Response(body, { status: 200, headers: h }));
+      trim(cache);
+    }
+    return res;
+  });
+  if (hit && age < rule.max) {
+    if (age > rule.fresh) refresh().catch(() => {}); // جواب قديم شوي: منرجّعو هلّق ومنحدّث بالخلفية
+    return hit;
+  }
+  try { return await refresh(); }
+  catch (err) { if (hit) return hit; throw err; } // بلا نت؟ منرجّع آخر شي محفوظ
+}
+let trimming = false;
+async function trim(cache) {
+  if (trimming) return; trimming = true;
+  try { const keys = await cache.keys(); for (let i = 0; i < keys.length - MAX_API; i++) await cache.delete(keys[i]); }
+  finally { trimming = false; }
+}

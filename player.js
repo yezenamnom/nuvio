@@ -499,8 +499,13 @@
     applySavedQuality() {
       const q = ls.get('q', 0);
       if (!q || !this.shaka) return;
-      const t = this._tracks().find(x => x.height === q);
-      if (t) { this.shaka.configure({ abr: { enabled: false } }); this.shaka.selectVariantTrack(t, true); }
+      // منبلّش خفيف (بداية أسرع)، ومنحوّل للجودة اللي اخترتها أول ما يبلّش الفيديو
+      const sp = this.shaka;
+      this.video.addEventListener('playing', () => setTimeout(() => {
+        if (this.shaka !== sp) return;
+        const t = this._tracks().find(x => x.height === q);
+        if (t) { sp.configure({ abr: { enabled: false } }); sp.selectVariantTrack(t, false); this._updQ(); }
+      }, 1200), { once: true });
     }
 
     /* ---------- مراقب التعليق ----------

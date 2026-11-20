@@ -62,11 +62,12 @@ function score(i) {
 const orderedInstances = () => [...instances].sort((a, b) => score(a) - score(b));
 const hasFreshOk = () => Object.values(health).some(h => h.ok && Date.now() - h.at < 30 * 60e3);
 
-async function fetchJSON(url, ms = 9000) {
+async function fetchJSON(url, ms = 9000, fresh = false) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), ms);
   try {
-    const r = await fetch(url, { signal: ctl.signal, referrerPolicy: 'no-referrer' });
+    // fresh = منتخطّى التخزين (للفحص لحتى نعرف إذا السيرفر عايش فعلاً)
+    const r = await fetch(url, { signal: ctl.signal, referrerPolicy: 'no-referrer', cache: fresh ? 'no-store' : 'default' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const ct = r.headers.get('content-type') || '';
     if (!ct.includes('json')) throw new Error('مش JSON');
@@ -84,8 +85,8 @@ async function probe(inst) {
   const t0 = performance.now();
   try {
     const d = inst.type === 'piped'
-      ? await fetchJSON(`${inst.url}/streams/${PROBE_VIDEO}`, 8000)
-      : await fetchJSON(`${inst.url}/api/v1/videos/${PROBE_VIDEO}`, 8000);
+      ? await fetchJSON(`${inst.url}/streams/${PROBE_VIDEO}`, 8000, true)
+      : await fetchJSON(`${inst.url}/api/v1/videos/${PROBE_VIDEO}`, 8000, true);
     const n = inst.type === 'piped' ? (d.videoStreams || []).length : (d.adaptiveFormats || []).length + (d.formatStreams || []).length;
     if (!n) throw new Error('ما في صيغ فيديو');
     mark(inst.url, true, performance.now() - t0);
@@ -176,10 +177,7 @@ function htmlText(html) {
 }
 
 const Invidious = {
-  pickThumb(base, arr, id) {
-    const t = (arr || []).find(x => x.quality === 'medium') || (arr || []).find(x => x.quality === 'high') || (arr || [])[0];
-    return t ? abs(base, t.url) : ytThumb(id);
-  },
+  pickThumb(base, arr, id) { return ytThumb(id); },
   pickAvatar(base, arr) {
     const a = (arr || []).filter(x => x.width >= 88).sort((x, y) => x.width - y.width)[0] || (arr || []).slice(-1)[0];
     return a ? abs(base, a.url) : '';
@@ -397,7 +395,11 @@ function relatedFeed(seedIds, seen) {
 /* ---- معلومات مسبقة: لمّا تقرّب على فيديو منبلّش نجيب معلوماتو ---- */
 const preview = new Map();
 const chPreview = new Map();
-function prefetchVideo(id) { getVideo(id).catch(() => {}); }
+function prefetchVideo(id, deep) {
+  const p = getVideo(id);
+  if (deep) p.then(({ res }) => { const d = res.sources.find(s => s.kind === 'dash'); if (d) manifestText(d.url).catch(() => {}); }).catch(() => {});
+  else p.catch(() => {});
+}
 
 function card(v, { row = false, noAuthorLink = false } = {}) {
   preview.set(v.id, v);
@@ -422,9 +424,9 @@ function card(v, { row = false, noAuthorLink = false } = {}) {
   const rest = [views, v.published].filter(Boolean).join(' • ');
   if (rest) sub.append((v.author ? ' • ' : '') + rest);
   let pre;
-  const warm = () => { clearTimeout(pre); pre = setTimeout(() => prefetchVideo(v.id), 120); };
+  const warm = () => { clearTimeout(pre); pre = setTimeout(() => prefetchVideo(v.id, true), 150); };
   c.addEventListener('pointerenter', warm);
-  c.addEventListener('touchstart', () => prefetchVideo(v.id), { passive: true });
+  c.addEventListener('touchstart', () => prefetchVideo(v.id, true), { passive: true });
   c.addEventListener('pointerleave', () => clearTimeout(pre));
   return c;
 }
@@ -433,10 +435,13 @@ function card(v, { row = false, noAuthorLink = false } = {}) {
 async function setImg(img, url) {
   if (!url) { img.remove(); return; }
   img.referrerPolicy = 'no-referrer';
-  img.onerror = () => {
-    const m = url.match(/\/ggpht\/(.+)$/);
-    if (m && !img.dataset.direct) { img.dataset.direct = '1'; img.src = 'https://yt3.ggpht.com/' + m[1]; }
-  };
+  img.decoding = 'async';
+  const m = url.match(/\/ggpht\/(.+)$/);
+  if (m) {
+    img.onerror = async () => { if (!img.dataset.via) { img.dataset.via = '1'; img.src = await fixUrl(url); } };
+    img.src = 'https://yt3.ggpht.com/' + m[1];
+    return;
+  }
   img.src = await fixUrl(url);
 }
 
@@ -565,7 +570,7 @@ function subButton(ch) {
     e.preventDefault(); e.stopPropagation();
     const on = subs.toggle(ch);
     draw();
-    note(on ? `اشتركت بـ ${ch.name} 🔔` : `لغيت الاشتراك بـ ${ch.name}`);
+    note(on ? `اشتركت بـ ${ch.name}` : `لغيت الاشتراك بـ ${ch.name}`);
   };
   return b;
 }
@@ -581,9 +586,12 @@ function channelBubble(c) {
   return a;
 }
 /* عنوان قسم + «الكل» */
-function sectionHead(title, href) {
+function sectionHead(title, href, icon) {
   const head = el('div', 'sec-head');
-  head.append(el('h2', 'section-title', title));
+  const h = el('h2', 'section-title');
+  if (icon && window.ico) { const s = el('span', 'sec-ico'); s.innerHTML = window.ico(icon); h.append(s); }
+  h.append(title);
+  head.append(h);
   if (href) { const a = el('a', 'sec-more', 'الكل'); a.href = href; head.append(a); }
   return head;
 }
@@ -668,7 +676,8 @@ function renderSearches() {
     const a = el('a', null, q); a.href = `#/search?q=${encodeURIComponent(q)}`; a.dir = 'auto';
     const x = el('button', 'card-x static', '✕'); x.title = 'شيل';
     x.onclick = () => { store.set('searches', store.get('searches', []).filter(s => s !== q)); row.remove(); };
-    row.append(el('span', 'search-ico', '🕘'), a, x);
+    const ic = el('span', 'search-ico'); ic.innerHTML = window.ico('clock');
+    row.append(ic, a, x);
     box.append(row);
   });
   view.append(box);
@@ -753,7 +762,7 @@ function renderList(id) {
 /* سجل المشاهدة / الإعجابات / المفضلة / السجل السماعي */
 function renderLibrary(kind) {
   const titles = { hist: 'سجل المشاهدة', likes: 'الإعجابات', favs: 'المحفوظة', mhist: 'السجل السماعي' };
-  const empties = { hist: 'لسا ما شفت شي.', likes: 'لسا ما عملت إعجاب لأي فيديو. اكبس 👍 تحت أي فيديو.', favs: 'ما في شي محفوظ. اكبس «حفظ» تحت أي فيديو.', mhist: 'لسا ما سمعت شي بـ Nuvio Music.' };
+  const empties = { hist: 'لسا ما شفت شي.', likes: 'لسا ما عملت إعجاب لأي فيديو. اكبس «إعجاب» تحت أي فيديو.', favs: 'ما في شي محفوظ. اكبس «حفظ» تحت أي فيديو.', mhist: 'لسا ما سمعت شي بـ Nuvio Music.' };
   document.title = `${titles[kind]} — Nuvio`;
   const items = lib.list(kind);
   const head = sectionHead(`${titles[kind]} (${items.length})`);
@@ -914,9 +923,9 @@ async function renderChannel(id, tab = 'home', sort = '') {
 
   if (tab === 'home') {
     body.append(
-      lazyShelf('🆕 الأحدث', () => channelTab(id, 'videos', 'newest').then(r => r.items), `#/channel?id=${encodeURIComponent(id)}&tab=videos`),
-      lazyShelf('🔥 الأكثر مشاهدة', () => channelTab(id, 'videos', 'popular').then(r => r.items), `#/channel?id=${encodeURIComponent(id)}&tab=videos&sort=popular`),
-      lazyShelf('⚡ الشورتس', () => channelTab(id, 'shorts').then(r => r.items), `#/channel?id=${encodeURIComponent(id)}&tab=shorts`),
+      lazyShelf('الأحدث', () => channelTab(id, 'videos', 'newest').then(r => r.items), `#/channel?id=${encodeURIComponent(id)}&tab=videos`, 'spark'),
+      lazyShelf('الأكثر مشاهدة', () => channelTab(id, 'videos', 'popular').then(r => r.items), `#/channel?id=${encodeURIComponent(id)}&tab=videos&sort=popular`, 'fire'),
+      lazyShelf('الشورتس', () => channelTab(id, 'shorts').then(r => r.items), `#/channel?id=${encodeURIComponent(id)}&tab=shorts`, 'bolt'),
     );
     return;
   }
@@ -1018,12 +1027,28 @@ async function resolveUrl(u, tries = 8) {
   throw last || new Error('ما وصل');
 }
 
+/* ملف DASH بينجاب مرة وحدة وبينحفظ دقايق: المشغّل والصوت بالخلفية والتحميل المسبق كلهن بيستعملوه */
+function manifestText(url) {
+  return cached('mf:' + url, 4 * 60e3, async () => {
+    let last;
+    for (let i = 0; i < 6; i++) {
+      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 6000);
+      try {
+        const r = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
+        if (r.ok) { const text = await r.text(); if (text.includes('<MPD')) return { text, final: r.url || url }; last = new Error('مش DASH'); }
+        else { last = new Error('HTTP ' + r.status); if (r.status >= 400 && r.status < 500) break; }
+      } catch (e) { last = e; } finally { clearTimeout(tm); }
+    }
+    throw last || new Error('ما وصل');
+  });
+}
+const toDataUri = (text, mime) => `data:${mime};base64,` + btoa(unescape(encodeURIComponent(text)));
+
 /* رابط صوت مباشر للتشغيل بالخلفية: منطلّعو من ملف DASH (مسموح CORS وبيوصل لسيرفر سليم) */
 async function bgAudioUrl(res) {
   const dash = res.sources.find(s => s.kind === 'dash');
   if (!dash) return res.audio || '';
-  const final = await resolveUrl(dash.url);
-  const xml = await (await fetch(final, { cache: 'force-cache' })).text();
+  const { text: xml, final } = await manifestText(dash.url);
   const doc = new DOMParser().parseFromString(xml, 'text/xml');
   let best = null;
   for (const set of doc.querySelectorAll('AdaptationSet')) {
@@ -1104,7 +1129,7 @@ async function renderWatch(id, startTime) {
     np.video.addEventListener('loadedmetadata', () => { try { np.video.currentTime = t; } catch { /* */ } np.video.play().catch(() => {}); }, { once: true });
     np.enableCast(true);
     const opened = await np.cast().catch(() => false);
-    note(opened ? 'اختار الشاشة 📺' : 'جاهز — اكبس زر 📺 بالمشغّل لتختار الشاشة');
+    note(opened ? 'اختار الشاشة' : 'جاهز — اكبس زر الشاشة بالمشغّل لتختار التلفزيون');
   }, music ? [{ ico: 'star', label: 'ضيف المطرب للمفضّلين', fn: () => toggleArtist(artistOf()) }] : []));
   if (pv) document.title = `${pv.title} — Nuvio`;
 
@@ -1146,20 +1171,22 @@ async function renderWatch(id, startTime) {
       player.configure({
         preferredVideoCodecs: ['avc1', 'vp9'],
         streaming: {
-          bufferingGoal: 40, rebufferingGoal: 1,
+          bufferingGoal: 30, rebufferingGoal: 0.5,
           retryParameters: { maxAttempts: 4, baseDelay: 400, backoffFactor: 1.6, timeout: 12000 },
           stallEnabled: true, stallThreshold: 1, stallSkip: 0.1,
         },
-        manifest: { retryParameters: { maxAttempts: 3, baseDelay: 400, timeout: 12000 } },
-        abr: { enabled: true, defaultBandwidthEstimate: 5e6 }, // منبلّش بجودة منيحة بدل ما نبلّش بالأوطى
+        manifest: { retryParameters: { maxAttempts: 3, baseDelay: 400, timeout: 12000 }, dash: { ignoreMinBufferTime: true } },
+        abr: { enabled: true, defaultBandwidthEstimate: 1.6e6, switchInterval: 2 }, // بداية سريعة، والجودة بتطلع لحالها
       });
       const me = player;
       player.addEventListener('error', ev => {
         console.warn('[nuvio] shaka', ev.detail);
         if (player === me && ev.detail && ev.detail.severity === 2) recover(np.video.currentTime);
       });
-      const url = await resolveUrl(s.url);
-      await player.load(url, startAt || null);
+      // ملف DASH من الذاكرة (أو بينجاب مرة وحدة) — بلا طلب تاني
+      const mf = s.kind === 'dash' ? await manifestText(s.url).catch(() => null) : null;
+      if (mf) await player.load(toDataUri(mf.text, 'application/dash+xml'), startAt || null, 'application/dash+xml');
+      else await player.load(await resolveUrl(s.url), startAt || null);
       np.setShaka(player);
       np.applySavedQuality();
     }
@@ -1204,6 +1231,15 @@ async function renderWatch(id, startTime) {
       tried.push(inst.url);
       if (!current) fillInfo(res);
       current = { inst, data: res };
+      // إذا الفيديو بلّش من قبل (التشغيل المبكر) ما منعيد تحميلو
+      if (early) {
+        const ok = await early.catch(() => false); early = null;
+        if (ok && np) {
+          np.setCaptions(res.captions || []);
+          bgAudioUrl(res).then(u => { if (u && np) np.setBgAudio(u); }).catch(() => {});
+          return;
+        }
+      }
       if (await playSources(inst, res.sources, startAt)) {
         if (np) np.setCaptions(res.captions || []);
         bgAudioUrl(res).then(u => { if (u && np) np.setBgAudio(u); }).catch(() => {});
@@ -1249,7 +1285,7 @@ async function renderWatch(id, startTime) {
       favBtn.classList.toggle('on', faved);
       favBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg><span>${faved ? 'محفوظ' : 'حفظ'}</span>`;
     };
-    likeBtn.onclick = () => { note(lib.toggle('likes', item) ? 'انضاف للإعجابات 👍' : 'انشال من الإعجابات'); drawBtns(); };
+    likeBtn.onclick = () => { note(lib.toggle('likes', item) ? 'انضاف للإعجابات' : 'انشال من الإعجابات'); drawBtns(); };
     favBtn.onclick = () => { note(lib.toggle('favs', item) ? 'انحفظ بالقائمة المفضلة' : 'انشال من القائمة المفضلة'); drawBtns(); };
     drawBtns();
     actions.append(likeBtn, favBtn);
@@ -1268,7 +1304,8 @@ async function renderWatch(id, startTime) {
     const urls = [...new Set((d.description || '').match(/https?:\/\/[^\s]+/g) || [])].slice(0, 12);
     if (urls.length) {
       const lk = el('div', 'desc-links');
-      lk.append(el('div', 'desc-links-t', `🔗 الروابط (${urls.length})`));
+      const lt = el('div', 'desc-links-t'); lt.innerHTML = window.ico('link'); lt.append(` الروابط (${urls.length})`);
+      lk.append(lt);
       urls.forEach(u => {
         const yt = parseYT(u);
         const a = el('a', 'desc-link');
@@ -1307,6 +1344,11 @@ async function renderWatch(id, startTime) {
   }
 
   setChip('…');
+  // تشغيل مبكر: رابط ملف DASH معروف مسبقاً، فمنبلّش الفيديو فوراً بنفس الوقت اللي عم تنجاب فيه معلوماتو
+  // (معلومات الفيديو أحياناً بتاخد ٢-٤ ثواني عند السيرفر العام)
+  let early = null;
+  const bestInv = orderedInstances().find(i => i.type === 'invidious' && health[i.url] && health[i.url].ok);
+  if (bestInv) early = playSources(bestInv, [{ kind: 'dash', url: `${bestInv.url}/api/manifest/dash/id/${id}?local=true` }], startTime);
   await tryNext(startTime);
 }
 
@@ -1416,7 +1458,7 @@ function buildFab(getNp, id, getTitle, toCastMode, extra = []) {
       menu.append(row('loop', 'تكرار الفيديو', r => {
         np.setLoop(!np.loop);
         r.querySelector('.fab-switch').classList.toggle('on', np.loop);
-        note(np.loop ? 'التكرار شغّال 🔁' : 'التكرار طافي');
+        note(np.loop ? 'التكرار شغّال' : 'التكرار طافي');
       }, sw(np.loop)));
       menu.append(row('cast', 'AirPlay / عرض على شاشة', () => {
         // مشغّلنا (بث مقسوم صوت/صورة) بيطلع عالتلفزيون صوت بس، فمنحوّل لمشغّل بيطلع الصورة كمان
@@ -1451,7 +1493,7 @@ function setSleep(min, getNp) {
   if (min === 0) { note('مؤقت النوم طافي'); return; }
   if (min === -1) {
     sleepState.endOfVideo = true;
-    note('رح يوقف بآخر هالفيديو 🌙');
+    note('رح يوقف بآخر هالفيديو');
     const np = getNp();
     if (np) {
       np.setLoop(false);
@@ -1462,7 +1504,7 @@ function setSleep(min, getNp) {
     return;
   }
   sleepState.at = Date.now() + min * 60000;
-  note(`رح يوقف بعد ${min >= 60 ? (min === 60 ? 'ساعة' : 'ساعة ونص') : min + ' دقيقة'} 🌙`);
+  note(`رح يوقف بعد ${min >= 60 ? (min === 60 ? 'ساعة' : 'ساعة ونص') : min + ' دقيقة'}`);
   sleepState.timer = setInterval(() => {
     if (!sleepState.at || Date.now() < sleepState.at) return;
     sleepState.at = 0; clearInterval(sleepState.timer);
@@ -1754,7 +1796,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120054013';
+const APP_VERSION = '20261120055149';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -1858,7 +1900,7 @@ async function route() {
   if (path === '/likes') return renderLibrary('likes');
   if (path === '/favs') return renderLibrary('favs');
   if (path === '/searches') return renderSearches();
-  if (path.startsWith('/music')) return renderMusic(path);
+  if (path.startsWith('/music')) return renderMusic(path, p);
   if (path === '/subs') return renderSubs(p.get('f') || 'new');
   if (path === '/lists') return renderLists();
   if (path === '/list' && p.get('id')) return renderList(p.get('id'));
@@ -1870,6 +1912,60 @@ window.addEventListener('hashchange', route);
 
 /* ================= البداية ================= */
 if (window.shaka) shaka.polyfill.installAll();
+/* ================= الرفوف الأفقية على الكمبيوتر =================
+   - دولاب الماوس فوق رف أفقي بيحرّكو يمين/يسار (وإذا وصل للآخر بترجع الصفحة تنزل عادي)
+   - أسهم ‹ › على الطرفين بتنقل صفحة كاملة */
+const HSCROLL = '.shelf, .sub-strip, .chips, .filter-bar, .ch-strip';
+document.addEventListener('wheel', e => {
+  if (e.ctrlKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+  const sh = e.target.closest && e.target.closest(HSCROLL);
+  if (!sh || sh.scrollWidth <= sh.clientWidth + 2) return;
+  const before = sh.scrollLeft;
+  sh.scrollLeft -= e.deltaY; // الصفحة يمين-لليسار: لتحت = لقدّام (يسار)
+  if (sh.scrollLeft !== before) e.preventDefault();
+}, { passive: false });
+
+const ARROW_L = '<svg viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6"/></svg>';
+const ARROW_R = '<svg viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></svg>';
+function decorateScroller(sh) {
+  if (sh.dataset.hs || !matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+  if (!sh.matches('.shelf, .sub-strip')) return;
+  sh.dataset.hs = '1';
+  const wrap = el('div', 'hs-wrap');
+  sh.replaceWith(wrap); wrap.append(sh);
+  const mk2 = (cls, html, dir) => {
+    const b = el('button', 'hs-btn ' + cls); b.innerHTML = html; b.setAttribute('aria-label', dir > 0 ? 'التالي' : 'السابق');
+    b.onclick = () => sh.scrollBy({ left: dir * sh.clientWidth * 0.85, behavior: 'smooth' });
+    wrap.append(b); return b;
+  };
+  const next = mk2('next', ARROW_L, -1), prev = mk2('prev', ARROW_R, 1);
+  const upd = () => {
+    const max = sh.scrollWidth - sh.clientWidth;
+    const pos = Math.abs(sh.scrollLeft);
+    prev.hidden = pos < 4; next.hidden = pos > max - 4 || max <= 4;
+  };
+  sh.addEventListener('scroll', upd, { passive: true });
+  new ResizeObserver(upd).observe(sh);
+  new MutationObserver(upd).observe(sh, { childList: true });
+  upd();
+}
+new MutationObserver(muts => {
+  for (const m of muts) for (const n of m.addedNodes) {
+    if (n.nodeType !== 1) continue;
+    if (n.matches && n.matches('.shelf, .sub-strip')) decorateScroller(n);
+    n.querySelectorAll && n.querySelectorAll('.shelf, .sub-strip').forEach(decorateScroller);
+  }
+}).observe(document.getElementById('view'), { childList: true, subtree: true });
+
+/* اتصال مسبق مع أسرع سيرفر وصوره */
+function preconnect(origin) {
+  if (!origin || document.querySelector(`link[rel=preconnect][href="${origin}"]`)) return;
+  const l = document.createElement('link'); l.rel = 'preconnect'; l.href = origin; l.crossOrigin = 'anonymous';
+  document.head.append(l);
+}
+try { const best = orderedInstances()[0]; if (best) preconnect(best.url); } catch { /* */ }
+ready.then(() => { const best = orderedInstances()[0]; if (best) preconnect(best.url); });
+
 /* تخزين هيكل الموقع على الجهاز (بيفتح فوراً حتى بلا ما ينزّل شي) */
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 probeAll();
