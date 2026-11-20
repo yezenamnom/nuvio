@@ -465,21 +465,54 @@ async function shortManifest(id) {
   }
   throw err || new Error('ما في سيرفر');
 }
+// خلاصة شورتس: من يوتيوب مباشرة (فلتر «Shorts» تبع البحث)، حسب بحوثك + مواضيع عامة
+async function ytShortsSearch(q) {
+  const d = await yti('search', { query: q, params: ytSearchParams({}, 9) });
+  const items = walk(d, 'shortsLockupViewModel').map(s => fromShort(s))
+    .concat(walk(d, 'videoRenderer').map(fromVR).filter(v => v.duration > 0 && v.duration <= 75));
+  return uniqById(items).filter(wanted).map(v => ({ ...v, short: true }));
+}
 function shortsFeed() {
-  const qs = shuffle(store.get('searches', []).slice(0, 6).map(q => q + ' #shorts').concat(['#shorts', 'مضحك #shorts', 'طبخ #shorts', 'رياضة #shorts', 'حيوانات #shorts', 'سفر #shorts']));
+  const qs = shuffle(store.get('searches', []).slice(0, 6)).concat(shuffle(['مضحك', 'طبخ', 'رياضة', 'حيوانات', 'سفر', 'كرة قدم', 'موسيقى', 'تقنية', 'funny', 'satisfying']));
   let i = 0;
   return async () => {
     while (i < qs.length) {
-      const q = qs[i++];
-      try {
-        const r = await YtApi.search('', q, 1, null, { dur: 'short' });
-        const items = r.items.filter(v => v.duration > 0 && v.duration <= 180 && wanted(v)).map(v => ({ ...v, short: true }));
-        if (items.length) return items;
-      } catch { /* اللي بعدو */ }
+      try { const items = await ytShortsSearch(qs[i++]); if (items.length) return shuffle(items); } catch { /* اللي بعدو */ }
     }
     return [];
   };
 }
+const homeShorts = () => cached('home-shorts', 30 * 60e3, async () => {
+  const f = shortsFeed(); let all = [];
+  for (let k = 0; k < 2 && all.length < 12; k++) all = all.concat(await f());
+  return uniqById(all).slice(0, 16);
+});
+// بطاقة شورت بالطول (للرفوف)
+function shortCard(v, list) {
+  const a = el('a', 'short-card'); a.href = `#/shorts?v=${encodeURIComponent(v.id)}`; a.dataset.vid = v.id;
+  const img = el('img'); img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
+  img.src = `https://i.ytimg.com/vi/${v.id}/oardefault.jpg`;
+  img.onerror = () => { if (!img.dataset.f) { img.dataset.f = '1'; img.src = ytThumb(v.id, 'hqdefault'); } };
+  const t = el('div', 'short-card-t', v.title || ''); t.dir = 'auto';
+  const s = el('div', 'short-card-s', v.viewsText || '');
+  a.append(img, t, s);
+  a.addEventListener('click', () => { shortsCtx = { ch: '', items: list() }; preview.set(v.id, v); });
+  return a;
+}
+// رف «شورتس» جوّا خلاصة الرئيسية
+function homeShortsRow() {
+  const wrap = el('div', 'shorts-row');
+  wrap.append(sectionHead('شورتس', '#/shorts', 'shorts'));
+  const row = el('div', 'short-strip');
+  for (let i = 0; i < 6; i++) row.append(el('div', 'short-card sk'));
+  wrap.append(row);
+  homeShorts().then(list => {
+    if (!list.length) { wrap.remove(); return; }
+    row.replaceChildren(...list.map(v => shortCard(v, () => list)));
+  }).catch(() => wrap.remove());
+  return wrap;
+}
+
 async function renderShorts(startId, ch) {
   shortsExit();
   if (typeof miniOn !== 'undefined' && miniOn && active) { const n = active.np(); if (n) n.pauseAll(); }
@@ -490,6 +523,13 @@ async function renderShorts(startId, ch) {
   back.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>';
   back.onclick = () => { if (history.length > 1) history.back(); else location.hash = '#/'; };
   const mute = el('button', 'shorts-mute'); mute.setAttribute('aria-label', 'الصوت');
+  // أسهم فوق/تحت (كمبيوتر)
+  const nav = el('div', 'shorts-nav');
+  const up = el('button', null); up.setAttribute('aria-label', 'اللي قبل'); up.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>';
+  const dn = el('button', null); dn.setAttribute('aria-label', 'اللي بعدو'); dn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>';
+  up.onclick = () => wrap.scrollBy({ top: -wrap.clientHeight, behavior: 'smooth' });
+  dn.onclick = () => wrap.scrollBy({ top: wrap.clientHeight, behavior: 'smooth' });
+  nav.append(up, dn);
   const video = document.createElement('video');
   video.playsInline = true; video.setAttribute('playsinline', ''); video.loop = true; video.preload = 'auto';
   video.className = 'short-video';
@@ -498,54 +538,88 @@ async function renderShorts(startId, ch) {
   mute.onclick = e => { e.stopPropagation(); video.muted = !video.muted; drawMute(); if (!video.muted) video.play().catch(() => {}); };
   video.addEventListener('volumechange', drawMute); drawMute();
   const s = shortsState = { wrap, video, sp: null, cur: null, seq: 0, seen: new Set(), more: null, busy: false };
-  view.replaceChildren(wrap, back, mute);
+  view.replaceChildren(wrap, back, mute, nav);
 
   const sideBtn = (icon, label, on, fn) => {
     const b = el('button', 'short-btn' + (on ? ' on' : ''));
     const i = el('span', 'short-ico'); i.innerHTML = window.ico ? window.ico(icon) : '';
-    const t = el('span', null, label);
-    b.append(i, t);
+    b.append(i, el('span', null, label));
     b.onclick = e => { e.stopPropagation(); const r = fn(); if (typeof r === 'boolean') b.classList.toggle('on', r); };
     return b;
+  };
+  const like = (sl, v) => {
+    if (!lib.has('likes', v.id)) lib.add('likes', v);
+    const b = sl.querySelector('.short-btn'); if (b) b.classList.add('on');
+    const h = el('div', 'short-heart'); h.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.3 3 4.5 6.7 4.5c2.1 0 3.6 1.1 5.3 3 1.7-1.9 3.2-3 5.3-3 3.7 0 5.8 3.8 4.3 7.3C19.5 16.4 12 21 12 21z"/></svg>';
+    sl.append(h); setTimeout(() => h.remove(), 900);
   };
   const addSlide = v => {
     if (!v || !v.id || s.seen.has(v.id)) return;
     s.seen.add(v.id);
     preview.set(v.id, v);
-    const sl = el('section', 'short'); sl._v = v;
+    const sl = el('section', 'short loading'); sl._v = v;
     const poster = el('img', 'short-poster'); poster.alt = '';
     poster.src = `https://i.ytimg.com/vi/${v.id}/oardefault.jpg`;
     poster.onerror = () => { if (!poster.dataset.f) { poster.dataset.f = '1'; poster.src = ytThumb(v.id, 'hqdefault'); } };
+    const spin = el('div', 'short-spin');
     const info = el('div', 'short-info');
-    if (v.author) { const a = el(v.authorId ? 'a' : 'span', 'short-ch', v.author); if (v.authorId) a.href = chHref(v.authorId); a.dir = 'auto'; info.append(a); }
+    if (v.author) { const a = el(v.authorId ? 'a' : 'span', 'short-ch', '@' + v.author.replace(/^@/, '')); if (v.authorId) a.href = chHref(v.authorId); a.dir = 'auto'; info.append(a); }
     const t = el('div', 'short-title', v.title || ''); t.dir = 'auto'; info.append(t);
     const side = el('div', 'short-side');
     side.append(
       sideBtn('like', 'إعجاب', lib.has('likes', v.id), () => lib.toggle('likes', v)),
       sideBtn('saved', 'حفظ', lib.has('favs', v.id), () => lib.toggle('favs', v)),
+      sideBtn('later', 'بعدين', queue.has(v.id), () => queue.toggle(v)),
       sideBtn('share', 'مشاركة', false, () => shareVideo(v)),
     );
-    const bar = el('div', 'short-bar'); bar.append(el('i'));
+    // شريط تقدّم بتقدر تسحبو
+    const bar = el('div', 'short-bar'); bar.dir = 'ltr'; const fill = el('i'); bar.append(fill);
+    const seek = e => { const r = bar.getBoundingClientRect(); const f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); if (s.cur === sl && video.duration) video.currentTime = f * video.duration; };
+    bar.addEventListener('pointerdown', e => { e.stopPropagation(); bar.setPointerCapture(e.pointerId); bar.classList.add('drag'); seek(e); });
+    bar.addEventListener('pointermove', e => { if (bar.classList.contains('drag')) seek(e); });
+    bar.addEventListener('pointerup', e => { e.stopPropagation(); bar.classList.remove('drag'); });
     const pp = el('div', 'short-pp');
-    sl.append(poster, info, side, bar, pp);
-    sl.onclick = e => {
-      if (e.target.closest('a, button')) return;
-      if (s.cur !== sl) return;
-      if (video.muted) { video.muted = false; video.play().catch(() => {}); return; }
-      if (video.paused) video.play().catch(() => {}); else video.pause();
-    };
+    const fast = el('div', 'short-fast', '2× ⏩');
+    const fail = el('div', 'short-fail');
+    const retry = el('button', null, 'جرّب مرة تانية'); retry.onclick = e => { e.stopPropagation(); sl.classList.remove('fail'); load(v, sl); };
+    fail.append(el('div', null, 'ما قدرت شغّل هالفيديو هلّق'), retry);
+    sl.append(poster, spin, info, side, bar, pp, fast, fail);
+    // كبسة = إيقاف/تشغيل، كبستين = إعجاب، ضغطة مطوّلة = 2×
+    let tapT = 0, lastTap = 0, holdT = 0, held = false;
+    sl.addEventListener('pointerdown', e => {
+      if (e.target.closest('a, button, .short-bar') || s.cur !== sl) return;
+      clearTimeout(holdT);
+      holdT = setTimeout(() => { held = true; video.playbackRate = 2; sl.classList.add('fast'); if (video.paused) video.play().catch(() => {}); }, 450);
+    });
+    const endHold = () => { clearTimeout(holdT); if (held) { held = false; video.playbackRate = 1; sl.classList.remove('fast'); return true; } return false; };
+    sl.addEventListener('pointercancel', endHold);
+    sl.addEventListener('pointerleave', endHold);
+    sl.addEventListener('pointerup', e => {
+      if (endHold()) return;
+      if (e.target.closest('a, button, .short-bar') || s.cur !== sl) return;
+      const now = Date.now();
+      if (now - lastTap < 300) { clearTimeout(tapT); lastTap = 0; like(sl, v); return; }
+      lastTap = now;
+      clearTimeout(tapT);
+      tapT = setTimeout(() => {
+        if (video.muted) { video.muted = false; video.play().catch(() => {}); return; }
+        if (video.paused) video.play().catch(() => {}); else video.pause();
+      }, 260);
+    });
+    sl.addEventListener('contextmenu', e => e.preventDefault());
     wrap.append(sl);
     s.io.observe(sl);
   };
-  const load = async v => {
+  const load = async (v, sl) => {
     const my = ++s.seq;
     video.pause();
+    sl.classList.add('loading'); sl.classList.remove('ready', 'fail');
     try {
       if (!s.sp) {
         s.sp = new shaka.Player();
         await s.sp.attach(video);
         s.sp.getNetworkingEngine().registerRequestFilter(async (type, req) => { req.uris = await Promise.all(req.uris.map(fixUrl)); });
-        s.sp.configure({ preferredVideoCodecs: ['avc1', 'vp9'], streaming: { bufferingGoal: 15, rebufferingGoal: 0.5 }, abr: { enabled: true, defaultBandwidthEstimate: 1.6e6 } });
+        s.sp.configure({ preferredVideoCodecs: ['avc1', 'vp9'], streaming: { bufferingGoal: 12, rebufferingGoal: 0.3 }, abr: { enabled: true, defaultBandwidthEstimate: 2e6 } });
       }
       s.sp.configure(saverCfg());
       let ok = false;
@@ -568,21 +642,22 @@ async function renderShorts(startId, ch) {
         video.muted = true; video.play().catch(() => {});
       }
       lib.add('hist', v);
-    } catch (e) {
-      if (my === s.seq && s.cur) s.cur.classList.add('fail');
+    } catch {
+      if (my === s.seq) { sl.classList.remove('loading'); sl.classList.add('fail'); }
     }
   };
   const activate = sl => {
     if (s.cur === sl) return;
-    if (s.cur) s.cur.classList.remove('active');
+    if (s.cur) s.cur.classList.remove('active', 'ready', 'paused', 'fast');
     s.cur = sl; sl.classList.add('active');
     sl.insertBefore(video, sl.children[1] || null);
-    load(sl._v);
-    // جهّز اللي بعدو
+    video.playbackRate = 1;
+    load(sl._v, sl);
+    // جهّز اللي بعدو (ملف الفيديو بيكون جاهز لمّا توصلو)
     const nx = sl.nextElementSibling;
     if (nx && nx._v) shortManifest(nx._v.id).catch(() => {});
-    const left = [...wrap.children].length - [...wrap.children].indexOf(sl);
-    if (left < 4) loadMore();
+    const kids = [...wrap.children];
+    if (kids.length - kids.indexOf(sl) < 4) loadMore();
   };
   s.io = new IntersectionObserver(es => {
     for (const e of es) if (e.isIntersecting && e.intersectionRatio >= 0.6) activate(e.target);
@@ -591,26 +666,30 @@ async function renderShorts(startId, ch) {
     const b = s.cur && s.cur.querySelector('.short-bar i');
     if (b && video.duration) b.style.width = `${(video.currentTime / video.duration) * 100}%`;
   });
+  // الصورة بتضل لحد ما يبلّش الفيديو فعلاً (بدل شاشة سودا)
+  video.addEventListener('playing', () => { if (s.cur) { s.cur.classList.add('ready'); s.cur.classList.remove('loading', 'paused'); } });
+  video.addEventListener('waiting', () => { if (s.cur) s.cur.classList.add('loading'); });
+  video.addEventListener('pause', () => { if (s.cur && !video.ended && s.cur.classList.contains('ready')) s.cur.classList.add('paused'); });
   video.addEventListener('play', () => { if (s.cur) s.cur.classList.remove('paused'); });
-  video.addEventListener('pause', () => { if (s.cur && !video.ended) s.cur.classList.add('paused'); });
   const loadMore = async () => {
     if (s.busy || !s.more) return;
     s.busy = true;
     try { (await s.more()).forEach(addSlide); } catch { /* */ } finally { s.busy = false; }
   };
-  // كيبورد (كمبيوتر): أسهم فوق/تحت
   wrap.tabIndex = 0;
   wrap.addEventListener('keydown', e => {
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); wrap.scrollBy({ top: (e.key === 'ArrowDown' ? 1 : -1) * wrap.clientHeight, behavior: 'smooth' }); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); (e.key === 'ArrowDown' ? dn : up).click(); }
     if (e.key === ' ') { e.preventDefault(); if (video.paused) video.play().catch(() => {}); else video.pause(); }
+    if (e.key.toLowerCase() === 'm') mute.click();
   });
 
-  // القائمة: من القناة (إذا جاي منها) أو خلاصة شورتس عامة
+  // القائمة: من القناة، أو من الرف اللي كبست منو، أو خلاصة شورتس
   let first = [];
   try {
+    const ctx = shortsCtx && shortsCtx.items && shortsCtx.items.some(v => v.id === startId) && (!ch || shortsCtx.ch === ch) ? shortsCtx : null;
     if (ch) {
       let next = null, fetched = false;
-      if (shortsCtx && shortsCtx.ch === ch && shortsCtx.items.length) first = shortsCtx.items;
+      if (ctx) first = ctx.items;
       else { const r = await channelTab(ch, 'shorts'); first = r.items; next = r.next; fetched = true; }
       s.more = async () => {
         if (!fetched) { fetched = true; const r = await channelTab(ch, 'shorts'); next = r.next; return r.items; }
@@ -619,7 +698,7 @@ async function renderShorts(startId, ch) {
       };
     } else {
       s.more = shortsFeed();
-      first = await s.more();
+      first = ctx ? ctx.items : await s.more();
     }
   } catch { /* */ }
   if (shortsState !== s) return;
@@ -631,4 +710,117 @@ async function renderShorts(startId, ch) {
   if (!first.length) { wrap.append(el('div', 'empty', 'ما لقيت شورتس هلّق. جرّب بعد شوي.')); return; }
   first.forEach(addSlide);
   wrap.focus({ preventScroll: true });
+}
+
+/* ================= الشريط السفلي العايم (للتلفون) ================= */
+const BNAV = [
+  ['/', 'home', 'الرئيسية'],
+  ['/shorts', 'shorts', 'شورتس'],
+  ['/music', 'music', 'موسيقى'],
+  ['/subs', 'subs', 'القنوات'],
+  ['/me', 'me', 'أنا'],
+];
+function buildBottomNav() {
+  if (document.querySelector('.bnav')) return;
+  const nav = el('nav', 'bnav'); nav.setAttribute('aria-label', 'التنقّل');
+  for (const [path, icon, label] of BNAV) {
+    const a = el('a', 'bnav-i'); a.href = '#' + path; a.dataset.path = path;
+    const ic = el('span', 'bnav-ico');
+    if (icon === 'me') ic.innerHTML = '<span class="bnav-me">N</span>';
+    else ic.innerHTML = window.ico ? window.ico(icon) : '';
+    a.append(ic, el('span', 'bnav-l', label));
+    nav.append(a);
+  }
+  document.body.append(nav);
+  document.body.classList.add('has-bnav');
+  updateBottomNav();
+}
+window.addEventListener('nuvio:store', e => { if (['chTop', 'chSeen', 'subs'].includes(e.detail)) updateBottomNav(); });
+function updateBottomNav() {
+  const nav = document.querySelector('.bnav'); if (!nav) return;
+  const path = (location.hash.slice(1) || '/').split('?')[0];
+  const sec = path.startsWith('/music') ? '/music' : ['/history', '/likes', '/favs', '/later', '/searches', '/lists', '/list'].includes(path) ? '/me' : path;
+  nav.querySelectorAll('.bnav-i').forEach(a => a.classList.toggle('on', a.dataset.path === sec));
+  const subsBtn = nav.querySelector('[data-path="/subs"]');
+  if (subsBtn) subsBtn.classList.toggle('dot', subs.list().some(c => chNew.has(c.id)));
+}
+
+/* ================= صفحة «أنا»: السجل ومكتبتك =================
+   هلّق كل شي على جهازك؛ لاحقاً منضيف تسجيل دخول لحتى تنحفظ بياناتك وتلاقيها على أي جهاز. */
+function libRow(href, title, sub, thumbId, icon) {
+  const a = el('a', 'lib-row'); a.href = href;
+  const st = el('div', 'lib-stack');
+  if (thumbId) { const img = el('img'); img.alt = ''; img.loading = 'lazy'; img.src = ytThumb(thumbId); st.append(img); }
+  else st.classList.add('empty-stack');
+  if (icon) { const b = el('span', 'lib-badge'); b.innerHTML = window.ico ? window.ico(icon) : ''; st.append(b); }
+  const tx = el('div', 'lib-tx');
+  const t = el('div', 'lib-t', title); t.dir = 'auto';
+  tx.append(t, el('div', 'lib-s', sub));
+  a.append(st, tx);
+  return a;
+}
+function renderMe(filter = 'all') {
+  document.title = 'أنا — Nuvio';
+  // الراس
+  const head = el('div', 'me-head');
+  const av = el('div', 'me-av', 'N');
+  const nm = el('div', 'me-name');
+  nm.append(el('b', null, 'ضيف Nuvio'), el('span', 'muted', 'كل شي محفوظ على جهازك بس'));
+  head.append(av, nm);
+  const acts = el('div', 'me-acts');
+  const login = el('button', 'me-btn soon', 'تسجيل دخول · قريباً'); login.disabled = true;
+  const bak = el('button', 'me-btn', 'نسخة احتياطية');
+  bak.onclick = () => openSheet('نسخة احتياطية لبياناتك', [
+    ['download', 'صدّر نسخة احتياطية', exportBackup],
+    ['upload', 'استورد من ملف', importBackup],
+  ]);
+  acts.append(login, bak);
+  // السجل (رف) + المكتبة — بيتحدّثوا لحالهن
+  const body = liveSection(['hist', 'likes', 'favs', 'later', 'mhist', 'artists', 'subs', 'ytlists', 'searches', 'pos'], () => {
+    const out = [];
+    const hist = lib.list('hist').slice(0, 20);
+    if (hist.length) {
+      const shelf = el('div', 'shelf');
+      hist.forEach(v => shelf.append(card(v)));
+      out.push(sectionHead('السجل', '#/history', 'clock'), shelf);
+    }
+    out.push(sectionHead('مكتبتك', null, 'folder'));
+    const chips = el('div', 'filter-bar');
+    [['all', 'الكل'], ['lists', 'قوائم التشغيل'], ['music', 'الموسيقى']].forEach(([k, label]) => {
+      const b = el('button', 'f-chip' + (k === filter ? ' on' : ''), label);
+      b.onclick = () => renderMe(k);
+      chips.append(b);
+    });
+    out.push(chips);
+    const rows = el('div', 'lib-rows');
+    const n = x => `${nf.format(x)} ${x === 1 ? 'فيديو' : 'فيديو'}`;
+    const first = k => (lib.list(k)[0] || {}).id;
+    const later = queue.list();
+    if (filter !== 'music') {
+      rows.append(
+        libRow('#/later', 'شغّل بعدين', later.length ? n(later.length) : 'فاضية', later[0] && later[0].id, 'later'),
+        libRow('#/likes', 'الإعجابات', n(lib.list('likes').length), first('likes'), 'like'),
+        libRow('#/favs', 'المحفوظة', n(lib.list('favs').length), first('favs'), 'saved'),
+      );
+      store.get('ytlists', []).forEach(l => rows.append(libRow(`#/list?id=${encodeURIComponent(l.id)}`, l.title || 'قائمة تشغيل', n(l.videos.length), l.videos[0] && l.videos[0].id, 'list')));
+    }
+    if (filter !== 'lists') {
+      rows.append(
+        libRow('#/music/hist', 'السجل السماعي', n(lib.list('mhist').length), first('mhist'), 'phones'),
+        libRow('#/music/fav', 'المطربين المفضّلين', `${nf.format(artists.list().length)} مطرب`, null, 'star'),
+      );
+    }
+    if (filter === 'all') {
+      rows.append(
+        libRow('#/subs', 'القنوات المشترك فيها', `${nf.format(subs.list().length)} قناة`, null, 'subs'),
+        libRow('#/searches', 'سجل البحث', `${nf.format(store.get('searches', []).length)} بحث`, null, 'search'),
+      );
+    }
+    out.push(rows);
+    return out;
+  });
+  // الإعدادات تحت (نفس اللي بالقائمة الجانبية)
+  const set = el('div', 'me-settings');
+  drawerSettings(set, t => el('div', 'drawer-sep', t), () => {});
+  view.replaceChildren(head, acts, body, set);
 }

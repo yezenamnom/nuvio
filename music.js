@@ -271,6 +271,7 @@ function openDrawer() {
   const sep = t => el('div', 'drawer-sep', t);
   d.append(
     item('home', 'الرئيسية', '#/'),
+    item('folder', 'مكتبتك', '#/me'),
     item('subs', 'القنوات المشترك فيها', '#/subs', subs.list().length),
     item('clock', 'سجل المشاهدة', '#/history', lib.list('hist').length),
     item('like', 'الإعجابات', '#/likes', lib.list('likes').length),

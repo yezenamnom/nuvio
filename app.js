@@ -1025,6 +1025,8 @@ async function renderHome(force) {
     g.replaceChildren();
     if (!shownFirst.length) throw new Error('فاضي');
     shownFirst.forEach(v => g.append(card(v)));
+    // رف الشورتس جوّا الخلاصة (بعد أول 6 فيديوهات، متل يوتيوب)
+    if (ytiUsable()) { const sr = homeShortsRow(); if (g.children.length > 6) g.insertBefore(sr, g.children[6]); else g.append(sr); }
     infinite(g, async () => { const more = await feed(); more.filter(suggestOk).forEach(v => g.append(card(v))); keep(more); return more.length > 0; });
   } catch {
     if (!g.isConnected) return;
@@ -2104,7 +2106,7 @@ let lastPage = '#/';
 const mini = el('div', 'mini'); mini.hidden = true;
 document.body.append(mini);
 
-function minimize() {
+function minimize(nav = true) {
   if (!active || miniOn) return;
   const { box, id } = active;
   miniOn = true;
@@ -2145,8 +2147,8 @@ function minimize() {
     mini.animate([{ backgroundColor: 'rgba(19,24,42,0)', borderColor: 'transparent' }, { backgroundColor: 'rgba(19,24,42,.97)' }], { duration: 300, delay: 160, fill: 'backwards' });
     a.onfinish = () => mini.classList.remove('anim');
   }
-  // ارجع لآخر صفحة كنت فيها غير الفيديو (مثلاً البحث)
-  location.hash = lastPage || '#/';
+  // ارجع لآخر صفحة كنت فيها غير الفيديو (مثلاً البحث) — إلا إذا التصغير صار لأنك رحت لصفحة تانية
+  if (nav) location.hash = lastPage || '#/';
 }
 function restoreMini() {
   if (!miniOn || !active) return false;
@@ -2231,7 +2233,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120064843';
+const APP_VERSION = '20261120065842';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -2321,6 +2323,7 @@ async function route() {
   savePage();
   const [path, qs] = hash.split('?');
   if (path !== '/shorts') shortsExit();
+  updateBottomNav();
   const p = new URLSearchParams(qs || '');
   hideSug();
   document.querySelectorAll('.top-nav a').forEach(x => x.classList.toggle('on', x.getAttribute('href') === '#' + path));
@@ -2329,7 +2332,9 @@ async function route() {
   if (path === '/watch' && active && miniOn && p.get('v') === active.id) { shownKey = hash; restoreMini(); window.scrollTo(0, 0); return; }
   if (path === '/watch' && miniOn) await closeMini();
   if (path === '/watch' && active && !miniOn && active.id !== p.get('v')) { const n = active.np(); if (n) n.destroy(); active = null; }
-  // إذا طلعت من الفيديو وهو مش مصغّر، منوقّفو
+  // طلعت من صفحة الفيديو (كبست عالقناة، رجعت، فتحت صفحة تانية): الفيديو بيصغر للشريط تحت متل يوتيوب
+  if (path !== '/watch' && active && !miniOn && active.np() && active.box.isConnected) minimize(false);
+  // إذا طلعت من الفيديو وهو مش مصغّر (ما اشتغل أصلاً)، منوقّفو
   if (path !== '/watch' && !miniOn) { await destroyPlayer(); if (active) { const n = active.np(); if (n) { n.pauseAll(); n.destroy(); } active = null; } }
   if (seq !== routeSeq) return; // صار في تنقّل أحدث وإحنا ناطرين
   shownKey = hash;
@@ -2344,6 +2349,7 @@ async function route() {
   if (path === '/channel' && p.get('id')) return renderChannel(p.get('id'), p.get('tab') || 'home', p.get('sort') || '');
   if (path === '/pl' && p.get('id')) return renderPlaylist(p.get('id'));
   if (path === '/shorts') return renderShorts(p.get('v'), p.get('ch'));
+  if (path === '/me') return renderMe();
   if (path === '/later') return renderLibrary('later');
   if (path === '/history') return renderLibrary('hist');
   if (path === '/likes') return renderLibrary('likes');
@@ -2443,4 +2449,5 @@ probeAll();
 discover();
 checkUpdate();
 setInterval(() => probeAll(), 10 * 60e3);
+buildBottomNav();
 route();
