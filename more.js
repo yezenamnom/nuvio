@@ -442,7 +442,19 @@ function shortsExit() {
   try { s.video.pause(); } catch { /* */ }
   if (s.sp) s.sp.destroy().catch(() => {});
 }
+// ملف DASH بمحاولة وحدة سريعة (بنفس ذاكرة المشغّل الكبير)
+const mfOnce = (url, ms = 8000) => cached('mf:' + url, 4 * 60e3, async () => {
+  const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
+    const text = r.ok ? await r.text() : '';
+    if (!text.includes('<MPD')) throw new Error('HTTP ' + r.status);
+    return { text, final: r.url || url };
+  } finally { clearTimeout(tm); }
+});
 async function shortManifest(id) {
+  // أول شي مصدرنا الخاص (سريع)، وبعدين السيرفرات العامة
+  if (svUsable()) { try { return await mfOnce(ownMpd(id), 6000); } catch { /* العامة */ } }
   const healthy = () => orderedInstances().filter(i => i.type === 'invidious' && health[i.url] && health[i.url].ok);
   if (!healthy().length) await Promise.race([ready, sleep(5000)]); // أول فتحة: منستنّى نعرف مين شغّال
   const ok = healthy();

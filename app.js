@@ -617,6 +617,17 @@ const ytNext = id => cached('nx:' + id, 10 * 60e3, () => yti('next', { videoId: 
 const relatedOf = id => cached('rel:' + id, 20 * 60e3, () => (ytiUsable() ? YtApi.related(id) : Promise.reject(new Error('x')))
   .catch(() => getVideo(id).then(r => r.res.related)));
 
+/* ================= مصدر الفيديو الخاص فينا (خدمة nuvio-stream على PH24) =================
+   بيجيب الفيديو من يوتيوب ويمرّقو لإلنا — أسرع وأثبت من السيرفرات العامة. إذا وقف، منرجع للعامة. */
+const SV = 'https://tube.glanzstar.de/sv';
+const OWN_INST = { url: SV, type: 'own' };
+const ownMpd = id => `${SV}/dash/${id}.mpd`;
+let svDown = 0;
+const svUsable = () => Date.now() - svDown > 3 * 60e3;
+function svCheck() { // إذا فشل، منشوف إذا الخدمة نفسها واقفة
+  fetch(`${SV}/health`, { cache: 'no-store' }).then(r => { if (!r.ok) svDown = Date.now(); }).catch(() => { svDown = Date.now(); });
+}
+
 const apiFor = inst => (inst.type === 'yti' ? YtApi : inst.type === 'piped' ? Piped : Invidious);
 
 /* ================= أدوات ================= */
@@ -702,6 +713,7 @@ function relatedFeed(seedIds, seen) {
 const preview = new Map();
 const chPreview = new Map();
 function prefetchVideo(id, deep) {
+  if (svUsable()) { if (deep) manifestText(ownMpd(id)).catch(() => {}); return; }
   const p = getVideo(id);
   if (deep) p.then(({ res }) => { const d = res.sources.find(s => s.kind === 'dash'); if (d) manifestText(d.url).catch(() => {}); }).catch(() => {});
   else p.catch(() => {});
@@ -747,7 +759,7 @@ function card(v, { row = false, noAuthorLink = false } = {}) {
   let pre;
   const warm = () => { clearTimeout(pre); pre = setTimeout(() => { prefetchVideo(v.id, true); if (ytiUsable()) ytNext(v.id).catch(() => {}); }, 150); };
   c.addEventListener('pointerenter', warm);
-  c.addEventListener('touchstart', () => prefetchVideo(v.id, true), { passive: true });
+  c.addEventListener('touchstart', () => prefetchVideo(v.id, false), { passive: true });
   c.addEventListener('pointerleave', () => clearTimeout(pre));
   return c;
 }
@@ -1655,7 +1667,37 @@ async function renderWatch(id, startTime) {
     } finally { recovering = false; }
   }
 
+  // من مصدرنا: الترجمة والصوت بالخلفية من خدمتنا، والمعلومات من يوتيوب المباشر (أو السيرفر العام إذا لزم)
+  const infoFromPublic = () => getVideo(id).then(({ inst, res }) => {
+    if (!box.isConnected) return;
+    fillInfo(res); if (!current) current = { inst, data: res };
+    if (np && !(np.captions && np.captions.length)) np.setCaptions(res.captions || []);
+  }).catch(() => {});
+  function ownExtras() {
+    setChip('بلا إعلانات ✓', 'ok');
+    fetch(`${SV}/info/${id}`).then(r => (r.ok ? r.json() : null)).then(j => {
+      if (!j || !np) return;
+      if (j.captions && j.captions.length) np.setCaptions(j.captions);
+      if (j.audio) np.setBgAudio(j.audio);
+    }).catch(() => {});
+    if (ytInfo) ytInfo.then(d => { if (!d) infoFromPublic(); }); else infoFromPublic();
+  }
+
   async function tryNext(startAt) {
+    // التشغيل المبكر (مصدرنا أو أسرع سيرفر عام) — إذا اشتغل ما منعيد
+    if (early) {
+      const how = await early.catch(() => false); early = null;
+      if (how === 'own') { ownExtras(); return; }
+      if (how) {
+        getVideo(id).then(({ inst, res }) => {
+          if (!box.isConnected) return;
+          if (shown || !ytInfo) fillInfo(res); else Promise.race([ytInfo, sleep(700)]).then(() => { if (box.isConnected) fillInfo(res); });
+          current = { inst, data: res };
+          if (np) { np.setCaptions(res.captions || []); bgAudioUrl(res).then(u => { if (u && np) np.setBgAudio(u); }).catch(() => {}); }
+        }).catch(() => {});
+        return;
+      }
+    }
     try {
       const { inst, res } = tried.length
         ? await withFallback(i => apiFor(i).video(i.url, id), { skip: tried })
@@ -1666,15 +1708,6 @@ async function renderWatch(id, startTime) {
       if (shown || !ytInfo) fillInfo(res);
       else Promise.race([ytInfo, sleep(700)]).then(() => { if (box.isConnected) fillInfo(res); });
       current = { inst, data: res };
-      // إذا الفيديو بلّش من قبل (التشغيل المبكر) ما منعيد تحميلو
-      if (early) {
-        const ok = await early.catch(() => false); early = null;
-        if (ok && np) {
-          np.setCaptions(res.captions || []);
-          bgAudioUrl(res).then(u => { if (u && np) np.setBgAudio(u); }).catch(() => {});
-          return;
-        }
-      }
       if (await playSources(inst, res.sources, startAt)) {
         if (np) np.setCaptions(res.captions || []);
         bgAudioUrl(res).then(u => { if (u && np) np.setBgAudio(u); }).catch(() => {});
@@ -1782,7 +1815,14 @@ async function renderWatch(id, startTime) {
   // (معلومات الفيديو أحياناً بتاخد ٢-٤ ثواني عند السيرفر العام)
   let early = null;
   const bestInv = orderedInstances().find(i => i.type === 'invidious' && health[i.url] && health[i.url].ok);
-  if (bestInv) early = playSources(bestInv, [{ kind: 'dash', url: `${bestInv.url}/api/manifest/dash/id/${id}?local=true` }], startTime);
+  const invEarly = () => (bestInv ? playSources(bestInv, [{ kind: 'dash', url: `${bestInv.url}/api/manifest/dash/id/${id}?local=true` }], startTime).then(ok => ok && 'inv') : Promise.resolve(false));
+  if (svUsable()) {
+    early = playSources(OWN_INST, [{ kind: 'dash', url: ownMpd(id) }], startTime).then(ok => {
+      if (ok) return 'own';
+      svCheck();
+      return invEarly();
+    });
+  } else early = invEarly();
   // المعلومات من يوتيوب مباشرة (~نص ثانية) بنفس الوقت؛ السيرفر العام بيضل للفيديو نفسو
   if (ytInfo) ytInfo.then(d => { if (d && box.isConnected) fillInfo(d); });
   await tryNext(startTime);
@@ -2233,7 +2273,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120065842';
+const APP_VERSION = '20261120071518';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
