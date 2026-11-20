@@ -622,6 +622,10 @@ const relatedOf = id => cached('rel:' + id, 20 * 60e3, () => (ytiUsable() ? YtAp
 /* ================= مصدر الفيديو الخاص فينا (خدمة nuvio-stream على PH24) =================
    بيجيب الفيديو من يوتيوب ويمرّقو لإلنا — أسرع وأثبت من السيرفرات العامة. إذا وقف، منرجع للعامة. */
 const SV = 'https://tube.glanzstar.de/sv';
+const COMP = 'https://tube.glanzstar.de/companion'; // Invidious Companion: إثبات يوتيوب (PO token) → الفيديو كامل بلا ما يوقف
+const compMpd = id => `${COMP}/api/manifest/dash/id/${id}?local=true`;
+// روابط الملف بتبلّش بـ «/companion/…»؛ منكمّلها لرابط كامل (الملف بيتحمّل كـ data: بلا عنوان)
+const absMpd = (text, url) => { try { return text.replace(/<BaseURL>\//g, `<BaseURL>${new URL(url).origin}/`); } catch { return text; } };
 const OWN_INST = { url: SV, type: 'own' };
 const ownMpd = id => `${SV}/dash/${id}.mpd`;
 let svDown = 0;
@@ -715,7 +719,7 @@ function relatedFeed(seedIds, seen) {
 const preview = new Map();
 const chPreview = new Map();
 function prefetchVideo(id, deep) {
-  if (svUsable()) { if (deep) manifestText(ownMpd(id)).catch(() => {}); return; }
+  if (svUsable()) { if (deep) manifestText(compMpd(id)).catch(() => {}); return; }
   const p = getVideo(id);
   if (deep) p.then(({ res }) => { const d = res.sources.find(s => s.kind === 'dash'); if (d) manifestText(d.url).catch(() => {}); }).catch(() => {});
   else p.catch(() => {});
@@ -1449,11 +1453,12 @@ async function resolveUrl(u, tries = 8) {
 function manifestText(url) {
   return cached('mf:' + url, 4 * 60e3, async () => {
     let last;
-    for (let i = 0; i < 6; i++) {
-      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 6000);
+    const tries = url.startsWith(COMP) ? 2 : 6; // الـ companion: إذا ما زبط مرتين، منروح للاحتياط فوراً
+    for (let i = 0; i < tries; i++) {
+      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), url.startsWith(COMP) ? 8000 : 6000);
       try {
         const r = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
-        if (r.ok) { const text = await r.text(); if (text.includes('<MPD')) return { text, final: r.url || url }; last = new Error('مش DASH'); }
+        if (r.ok) { const text = await r.text(); if (text.includes('<MPD')) return { text: absMpd(text, r.url || url), final: r.url || url }; last = new Error('مش DASH'); }
         else { last = new Error('HTTP ' + r.status); if (r.status >= 400 && r.status < 500) break; }
       } catch (e) { last = e; } finally { clearTimeout(tm); }
     }
@@ -1598,7 +1603,7 @@ async function renderWatch(id, startTime) {
     setChip('مشغّل احتياطي', 'warn');
   }
 
-  let srcList = [], srcIdx = 0, curInst = null, reloads = 0, secondRound = false;
+  let srcList = [], srcIdx = 0, curInst = null, reloads = 0, secondRound = false, goodSince = 0;
 
   async function loadSource(s, startAt) {
     if (s.kind === 'mp4') {
@@ -1622,12 +1627,14 @@ async function renderWatch(id, startTime) {
       player.configure({
         preferredVideoCodecs: ['avc1', 'vp9'],
         streaming: {
-          bufferingGoal: 30, rebufferingGoal: 0.5,
-          retryParameters: { maxAttempts: 4, baseDelay: 400, backoffFactor: 1.6, timeout: 12000 },
+          bufferingGoal: 60, rebufferingGoal: 1.5, bufferBehind: 30,
+          retryParameters: { maxAttempts: 7, baseDelay: 300, backoffFactor: 1.5, timeout: 20000, stallTimeout: 7000, connectionTimeout: 9000 },
           stallEnabled: true, stallThreshold: 1, stallSkip: 0.1,
+          ignoreTextStreamFailures: true,
         },
         manifest: { retryParameters: { maxAttempts: 3, baseDelay: 400, timeout: 12000 }, dash: { ignoreMinBufferTime: true } },
-        abr: { enabled: true, defaultBandwidthEstimate: 1.6e6, switchInterval: 2 }, // بداية سريعة، والجودة بتطلع لحالها
+        // بداية سريعة، والجودة بتطلع لحالها — بس مش أعلى من الشاشة (4K عالتلفون بيقطّش وما إلو داعي)
+        abr: { enabled: true, defaultBandwidthEstimate: 1.6e6, switchInterval: 4, bandwidthUpgradeTarget: 0.75, restrictToScreenSize: true },
       });
       player.configure(saverCfg()); // توفير الإنترنت: لحد 480p
       const me = player;
@@ -1650,6 +1657,7 @@ async function renderWatch(id, startTime) {
     for (srcIdx = 0; srcIdx < srcList.length; srcIdx++) {
       try {
         await loadSource(srcList[srcIdx], startAt);
+        goodSince = Date.now();
         setChip('بلا إعلانات ✓', 'ok');
         np.video.play().catch(() => { /* المتصفح ممكن يمنع التشغيل التلقائي */ });
         return true;
@@ -1664,9 +1672,16 @@ async function renderWatch(id, startTime) {
     if (recovering || !box.isConnected || !np) return;
     recovering = true;
     try {
+      if (goodSince && Date.now() - goodSince > 60e3) reloads = 0; // كان ماشي منيح من دقيقة: مش مشكلة دايمة
       reloads++;
-      if (reloads <= 2 && srcList[srcIdx]) {
-        try { await loadSource(srcList[srcIdx], t); np.video.play().catch(() => {}); return; } catch { /* كمّل للسيرفر التاني */ }
+      const cur = srcList[srcIdx];
+      if (reloads <= 3 && cur) {
+        if (cur.kind === 'dash') memo.delete('mf:' + cur.url); // ملف جديد بروابط جديدة
+        try { await loadSource(cur, t); np.video.play().catch(() => {}); goodSince = Date.now(); return; } catch { /* المصدر اللي بعدو */ }
+      }
+      // مصدر تاني من نفس القائمة (مثلاً من الـ companion لمصدرنا القديم) قبل السيرفرات العامة
+      for (let k = srcIdx + 1; k < srcList.length; k++) {
+        try { await loadSource(srcList[k], t); srcIdx = k; reloads = 0; np.video.play().catch(() => {}); goodSince = Date.now(); return; } catch { /* */ }
       }
       reloads = 0;
       if (curInst) mark(curInst.url, false);
@@ -1685,7 +1700,7 @@ async function renderWatch(id, startTime) {
     fetch(`${SV}/info/${id}`).then(r => (r.ok ? r.json() : null)).then(j => {
       if (!j || !np) return;
       if (j.captions && j.captions.length) np.setCaptions(j.captions);
-      if (j.audio) np.setBgAudio(j.audio);
+      np.setBgAudio(`${COMP}/latest_version?id=${encodeURIComponent(id)}&itag=140&local=true`);
     }).catch(() => {});
     if (ytInfo) ytInfo.then(d => { if (!d) infoFromPublic(); }); else infoFromPublic();
   }
@@ -1827,7 +1842,7 @@ async function renderWatch(id, startTime) {
   const bestInv = orderedInstances().find(i => i.type === 'invidious' && health[i.url] && health[i.url].ok);
   const invEarly = () => (bestInv ? playSources(bestInv, [{ kind: 'dash', url: `${bestInv.url}/api/manifest/dash/id/${id}?local=true` }], startTime).then(ok => ok && 'inv') : Promise.resolve(false));
   if (svUsable()) {
-    early = playSources(OWN_INST, [{ kind: 'dash', url: ownMpd(id) }], startTime).then(ok => {
+    early = playSources(OWN_INST, [{ kind: 'dash', url: compMpd(id) }, { kind: 'dash', url: ownMpd(id) }], startTime).then(ok => {
       if (ok) return 'own';
       svCheck();
       return invEarly();
@@ -2284,7 +2299,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120164101';
+const APP_VERSION = '20261120171143';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

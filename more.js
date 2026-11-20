@@ -546,12 +546,16 @@ const mfOnce = (url, ms = 8000) => cached('mf:' + url, 4 * 60e3, async () => {
     const r = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
     const text = r.ok ? await r.text() : '';
     if (!text.includes('<MPD')) throw new Error('HTTP ' + r.status);
-    return { text, final: r.url || url };
+    return { text: absMpd(text, r.url || url), final: r.url || url };
   } finally { clearTimeout(tm); }
 });
 async function shortManifest(id) {
   // أول شي مصدرنا الخاص (سريع)، وبعدين السيرفرات العامة
-  if (svUsable()) { try { return await mfOnce(ownMpd(id), 6000); } catch { /* العامة */ } }
+  if (svUsable()) {
+    // الشورت صغير (أقل من حد يوتيوب لمصدرنا السريع)، فمنبلّش فيه — ملفو بيجي بعشرات الميلي ثانية
+    try { return await mfOnce(ownMpd(id), 5000); } catch { /* الـ companion */ }
+    try { return await mfOnce(compMpd(id), 8000); } catch { /* العامة */ }
+  }
   const healthy = () => orderedInstances().filter(i => i.type === 'invidious' && health[i.url] && health[i.url].ok);
   if (!healthy().length) await Promise.race([ready, sleep(5000)]); // أول فتحة: منستنّى نعرف مين شغّال
   const ok = healthy();
@@ -770,7 +774,7 @@ async function renderShorts(startId, ch) {
         s.sp.getNetworkingEngine().registerRequestFilter(async (type, req) => { req.uris = await Promise.all(req.uris.map(fixUrl)); });
         s.sp.configure({
           preferredVideoCodecs: ['avc1', 'vp9'],
-          streaming: { bufferingGoal: 10, rebufferingGoal: 0.3, segmentPrefetchLimit: 2 },
+          streaming: { bufferingGoal: 12, rebufferingGoal: 0.6, segmentPrefetchLimit: 2, retryParameters: { maxAttempts: 6, baseDelay: 300, backoffFactor: 1.5, timeout: 15000, stallTimeout: 6000, connectionTimeout: 8000 } },
           manifest: { dash: { ignoreMinBufferTime: true } },
           abr: { enabled: true, defaultBandwidthEstimate: 1.5e6, switchInterval: 2 },
         });
@@ -817,9 +821,9 @@ async function renderShorts(startId, ch) {
     load(sl._v, sl);
     // جهّز اللي بعدو: ملفو + أول قطع منو، فبيبلّش فوراً لمّا تسحب
     const nx = sl.nextElementSibling;
-    if (nx && nx._v) setTimeout(() => preloadShort(nx._v), 600);
+    if (nx && nx._v) setTimeout(() => preloadShort(nx._v), 300);
     const nx2 = nx && nx.nextElementSibling;
-    if (nx2 && nx2._v) shortManifest(nx2._v.id).catch(() => {});
+    if (nx2 && nx2._v) setTimeout(() => preloadShort(nx2._v), 1800); // كمان اللي بعدو (للسحب السريع)
     const kids = [...wrap.children];
     if (kids.length - kids.indexOf(sl) < 4) loadMore();
   };
