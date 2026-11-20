@@ -174,7 +174,7 @@ const Invidious = {
     return {
       id: v.videoId, title: v.title, author: v.author, authorId: v.authorId,
       duration: v.lengthSeconds, views: v.viewCount ?? null, viewsText: v.viewCountText,
-      published: v.publishedText || '', thumb: Invidious.pickThumb(base, v.videoThumbnails, v.videoId),
+      published: v.publishedText || '', ts: v.published || 0, thumb: Invidious.pickThumb(base, v.videoThumbnails, v.videoId),
       live: !!v.liveNow,
     };
   },
@@ -473,6 +473,7 @@ function makeHomeFeed(seen) {
   const sources = [
     ...seeds.map(v => relSrc(v.id)),
     ...searches.map(searchSrc),
+    ...shuffle(store.get('subs', [])).slice(0, 6).map(c => () => getChannel(c.id).then(r => r.res.items.slice(0, 8))),
     () => withFallback(x => apiFor(x).trending(x.url)).then(r => r.res),
     ...shuffle(GENERAL_TOPICS).slice(0, 4).map(searchSrc),
   ].map(load => ({ load, pool: null, dead: false }));
@@ -523,8 +524,11 @@ async function renderHome() {
   view.replaceChildren();
   // آخر البحوث
   const searches = store.get('searches', []).slice(0, 12);
-  if (searches.length) {
+  const hasSubs = store.get('subs', []).length, hasLists = store.get('ytlists', []).length;
+  if (searches.length || hasSubs || hasLists) {
     const row = el('div', 'chips');
+    if (hasSubs) { const a = el('a', 'chip-q strong', '📺 اشتراكاتي'); a.href = '#/subs'; row.append(a); }
+    if (hasLists) { const a = el('a', 'chip-q strong', '📂 قوائمي'); a.href = '#/lists'; row.append(a); }
     searches.forEach(s => { const a = el('a', 'chip-q', s); a.href = `#/search?q=${encodeURIComponent(s)}`; a.dir = 'auto'; row.append(a); });
     view.append(row);
   }
@@ -538,12 +542,9 @@ async function renderHome() {
     hist.forEach(v => shelf.append(card(v)));
     view.append(head, shelf);
   }
-  if (!hist.length) {
-    const tip = el('a', 'import-tip');
-    tip.href = '#/history?import';
-    tip.append(el('span', null, '⬇️'), el('span', null, 'جيب سجلّك من يوتيوب لتصير المقترحات على ذوقك'));
-    view.append(tip);
-  }
+  // أول مرة، أو صار يوم من آخر مزامنة: منذكّرك بكبسة وحدة
+  const lastSync = store.get('lastSync', 0);
+  if (!lastSync || (Date.now() - lastSync > 24 * 3600e3 && scriptInstalled())) view.append(syncBox(true));
   view.append(el('h2', 'section-title', hist.length || searches.length ? 'مقترحات إلك' : 'مقترحات'));
   const g = el('div', 'grid'); g.append(skCards(12));
   view.append(g);
@@ -626,6 +627,137 @@ function importPanel(onDone) {
   return box;
 }
 
+/* ================= مزامنة مع يوتيوب (عن طريق سكربت «صافي») =================
+   Nuvio بيفتح يوتيوب ومعو ?nuvio_sync=1. السكربت (جوّا يوتيوب) بيسحب البيانات وبيرجّعها هون بالرابط (#/sync=…).
+   الرابط بعد # ما بيروح لأي سيرفر، فالبيانات بتضل على الجهاز. */
+const scriptInstalled = () => document.documentElement.hasAttribute('data-safi');
+const ago = t => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? `قبل ${m} دقيقة` : m < 1440 ? `قبل ${Math.round(m / 60)} ساعة` : `قبل ${Math.round(m / 1440)} يوم`; };
+function startSync() {
+  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  location.href = `https://${mobile ? 'm' : 'www'}.youtube.com/feed/history?nuvio_sync=1&nuvio_back=${encodeURIComponent(location.origin)}`;
+}
+function syncBox(compact) {
+  const box = el('div', 'sync-box' + (compact ? ' compact' : ''));
+  const b = el('button', 'btn primary', '🔄 مزامنة مع يوتيوب');
+  b.onclick = startSync;
+  const txt = el('div', 'sync-txt');
+  const last = store.get('lastSync', 0);
+  txt.append(el('b', null, last ? `آخر مزامنة: ${ago(last)}` : 'جيب سجلّك من يوتيوب'));
+  txt.append(el('div', 'muted', 'سجل المشاهدة، الاشتراكات، الإعجابات، وقوائم التشغيل — بيضلّو على جهازك.'));
+  if (!scriptInstalled()) {
+    const n = el('div', 'muted');
+    n.append('بدّها سكربت «صافي» متركّب — ');
+    const a = el('a', 'lnk', 'ركّبو من هون'); a.href = 'https://tube.glanzstar.de/'; a.target = '_blank'; a.rel = 'noopener';
+    n.append(a); txt.append(n);
+  }
+  box.append(txt, b);
+  return box;
+}
+function applySync(d) {
+  const at = d.at || Date.now();
+  const toItem = (x, when) => ({ id: x.i, title: x.t || x.i, thumb: ytThumb(x.i), author: x.a || '', authorId: x.c || '', at: when });
+  const r = applyImport({ watch: (d.hist || []).map((x, k) => ({ id: x.i, title: x.t, author: x.a, authorId: x.c, at: at - k * 60000 })), search: [] });
+  const likes = new Map(lib.list('likes').map(v => [v.id, v]));
+  (d.likes || []).forEach((x, k) => { if (!likes.has(x.i)) likes.set(x.i, toItem(x, at - k * 60000)); });
+  store.set('likes', [...likes.values()].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 500));
+  if ((d.subs || []).length) store.set('subs', d.subs.map(c => ({ id: c.i, name: c.n, avatar: c.p })));
+  const lists = (d.lists || []).filter(l => (l.v || []).length);
+  if (lists.length) store.set('ytlists', lists.map(l => ({ id: l.i, title: l.t, videos: l.v.map(x => toItem(x, 0)) })));
+  store.set('lastSync', at);
+  return { hist: (d.hist || []).length, newHist: r.videos, subs: (d.subs || []).length, likes: (d.likes || []).length, lists: lists.length };
+}
+async function handleSync(b64) {
+  history.replaceState(null, '', location.pathname + '#/'); // منشيل البيانات من الرابط فوراً
+  lastPage = '#/';
+  const box = el('div', 'sync-done');
+  box.append(el('div', 'spinner'));
+  view.replaceChildren(box);
+  try {
+    const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+    const json = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    const r = applySync(JSON.parse(json));
+    box.replaceChildren(el('h2', null, '✓ خلصت المزامنة'));
+    const ul = el('ul', 'sync-list');
+    [['سجل المشاهدة', r.hist], ['الاشتراكات', r.subs], ['الإعجابات', r.likes], ['قوائم التشغيل', r.lists]].forEach(([k, n]) => {
+      const li = el('li'); li.append(el('span', null, k), el('b', null, nf.format(n))); ul.append(li);
+    });
+    const go = el('a', 'btn primary', 'يلا عالرئيسية'); go.href = '#/';
+    const subs = el('a', 'btn', '📺 اشتراكاتي'); subs.href = '#/subs';
+    const row = el('div', 'v-actions'); row.style.justifyContent = 'center'; row.append(go, subs);
+    box.append(ul, row);
+  } catch (e) {
+    box.replaceChildren(el('p', null, 'ما قدرت اقرا بيانات المزامنة. جرّب مرة تانية.'), syncBox());
+  }
+}
+
+/* ---- اشتراكاتي: آخر فيديوهات القنوات اللي مشترك فيها ---- */
+async function renderSubs() {
+  document.title = 'اشتراكاتي — Nuvio';
+  const subs = store.get('subs', []);
+  const head = el('div', 'sec-head');
+  head.append(el('h2', 'section-title', `اشتراكاتي (${subs.length})`));
+  view.replaceChildren(head);
+  if (!subs.length) { view.append(syncBox()); return; }
+  const strip = el('div', 'sub-strip');
+  subs.forEach(c => {
+    const a = el('a', 'sub-chip'); a.href = chHref(c.id);
+    chPreview.set(c.id, { name: c.name });
+    const img = el('img'); img.alt = ''; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer'; img.src = c.avatar || '';
+    if (!c.avatar) img.remove();
+    a.append(img, el('span', null, c.name)); a.dir = 'auto';
+    strip.append(a);
+  });
+  view.append(strip, el('h2', 'section-title', 'آخر الفيديوهات'));
+  const g = el('div', 'grid'); g.append(skCards(12)); view.append(g);
+  const order = shuffle(subs);
+  let i = 0, first = true;
+  const load = async () => {
+    const batch = order.slice(i, i + 6); i += 6;
+    if (!batch.length) return false;
+    const res = await Promise.all(batch.map(c => getChannel(c.id).then(r => r.res.items.slice(0, 4)).catch(() => [])));
+    const items = res.flat().sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    if (first) { g.replaceChildren(); first = false; }
+    items.forEach(v => g.append(card(v)));
+    return i < order.length;
+  };
+  try { await load(); await load(); if (g.isConnected) infinite(g, load); } catch { /* */ }
+}
+
+/* ---- قوائم التشغيل من يوتيوب ---- */
+function renderLists() {
+  document.title = 'قوائمي — Nuvio';
+  const lists = store.get('ytlists', []);
+  const head = el('div', 'sec-head');
+  head.append(el('h2', 'section-title', `قوائم التشغيل (${lists.length})`));
+  view.replaceChildren(head);
+  if (!lists.length) { view.append(syncBox()); return; }
+  const g = el('div', 'grid');
+  lists.forEach(l => {
+    const a = el('a', 'card list-card'); a.href = `#/list?id=${encodeURIComponent(l.id)}`;
+    const th = el('div', 'thumb');
+    const img = el('img'); img.alt = ''; img.loading = 'lazy';
+    img.src = l.videos[0] ? ytThumb(l.videos[0].id) : 'icon-192.png';
+    const badge = el('span', 'list-count', `${nf.format(l.videos.length)} ▶`);
+    th.append(img, badge);
+    const meta = el('div', 'meta'); const tt = el('h3', 'title', l.title); tt.dir = 'auto'; meta.append(tt);
+    a.append(th, meta); g.append(a);
+  });
+  view.append(g);
+}
+function renderList(id) {
+  const l = store.get('ytlists', []).find(x => x.id === id);
+  if (!l) { location.hash = '#/lists'; return; }
+  document.title = `${l.title} — Nuvio`;
+  const head = el('div', 'sec-head');
+  const back = el('a', 'sec-more', '← كل القوائم'); back.href = '#/lists';
+  const h = el('h2', 'section-title', `${l.title} (${l.videos.length})`); h.dir = 'auto';
+  head.append(h, back);
+  const g = el('div', 'grid');
+  l.videos.forEach(v => g.append(card(v)));
+  view.replaceChildren(head, g);
+}
+
 /* سجل المشاهدة / الإعجابات / المفضلة */
 function renderLibrary(kind) {
   const titles = { hist: 'سجل المشاهدة', likes: 'الإعجابات', favs: 'القائمة المفضلة' };
@@ -639,8 +771,13 @@ function renderLibrary(kind) {
     clr.onclick = () => { if (confirm('متأكد؟ ما في رجعة.')) { lib.clear(kind); if (kind === 'hist') store.set('searches', []); renderLibrary(kind); } };
     head.append(clr);
   }
+  if (kind !== 'favs') {
+    const sb = el('button', 'btn primary', '🔄 مزامنة');
+    sb.onclick = startSync;
+    head.append(sb);
+  }
   if (kind === 'hist') {
-    const imp = el('button', 'btn', '⬇️ استورد من يوتيوب');
+    const imp = el('button', 'btn', '⬇️ ملف');
     const wantPanel = !items.length || /import/.test(location.hash);
     imp.onclick = () => { const ex = view.querySelector('.import-box'); if (ex) ex.remove(); else head.after(importPanel(() => renderLibrary('hist'))); };
     head.append(imp);
@@ -1371,7 +1508,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120042002';
+const APP_VERSION = '20261120045849';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -1389,6 +1526,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) chec
 /* ================= التنقّل ================= */
 async function route() {
   const hash = location.hash.slice(1) || '/';
+  if (hash.startsWith('/sync=')) return handleSync(hash.slice(6));
   const [path, qs] = hash.split('?');
   const p = new URLSearchParams(qs || '');
   hideSug();
@@ -1407,6 +1545,9 @@ async function route() {
   if (path === '/history') return renderLibrary('hist');
   if (path === '/likes') return renderLibrary('likes');
   if (path === '/favs') return renderLibrary('favs');
+  if (path === '/subs') return renderSubs();
+  if (path === '/lists') return renderLists();
+  if (path === '/list' && p.get('id')) return renderList(p.get('id'));
   $('#q').value = '';
   return renderHome();
 }
