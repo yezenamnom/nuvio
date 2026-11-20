@@ -37,6 +37,7 @@
 
       const v = this.video = document.createElement('video');
       v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto'; v.autoplay = true;
+      v.setAttribute('x-webkit-airplay', 'allow'); v.disableRemotePlayback = false;
       v.volume = ls.get('vol', 1); v.muted = ls.get('muted', false);
       this.rate = ls.get('rate', 1);
 
@@ -93,6 +94,39 @@
       if (this.bg) { this.bg.pause(); this.bg.removeAttribute('src'); this.bg.load(); }
     }
 
+    /* ---------- أدوات القائمة العايمة ---------- */
+    setLoop(on) {
+      this.loop = !!on;
+      this.video.loop = this.loop;
+      if (this.bg) this.bg.loop = this.loop;
+    }
+    pauseAll() {
+      this.userPaused = true;
+      this.video.pause();
+      if (this.bg) this.bg.pause();
+    }
+    canPip() {
+      const v = this.video;
+      return !!((document.pictureInPictureEnabled && v.requestPictureInPicture) || (v.webkitSupportsPresentationMode && v.webkitSupportsPresentationMode('picture-in-picture')));
+    }
+    async pip() {
+      const v = this.video;
+      if (document.pictureInPictureElement) { await document.exitPictureInPicture(); return true; }
+      if (document.pictureInPictureEnabled && v.requestPictureInPicture) { await v.requestPictureInPicture(); return true; }
+      if (v.webkitSupportsPresentationMode && v.webkitSupportsPresentationMode('picture-in-picture')) {
+        v.webkitSetPresentationMode(v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
+        return true;
+      }
+      return false;
+    }
+    /* AirPlay على آيفون/ماك، أو Chromecast/عرض على شاشة بأندرويد وكروم */
+    async cast() {
+      const v = this.video;
+      if (v.webkitShowPlaybackTargetPicker) { v.webkitShowPlaybackTargetPicker(); return true; }
+      if (v.remote && v.remote.prompt) { await v.remote.prompt(); return true; }
+      return false;
+    }
+
     /* ---------- شاشة القفل ومركز التحكّم ---------- */
     setMeta(m) {
       this.meta = m;
@@ -120,7 +154,7 @@
         this.bg = new Audio();
         this.bg.preload = 'auto';
         this.bg.setAttribute('playsinline', '');
-        this.bg.addEventListener('ended', () => { this.bgOn = false; });
+        this.bg.addEventListener('ended', () => { this.bgOn = false; }); this.bg.loop = !!this.loop;
       }
       if (!this._vis) {
         this._vis = () => {

@@ -737,6 +737,7 @@ async function renderWatch(id, startTime) {
     },
   });
   np.video.poster = ytThumb(id, 'hqdefault');
+  window.__nuvioNp = np;
   box.classList.add('loading');
 
   const h1 = el('h1', 'v-title'); h1.dir = 'auto';
@@ -752,6 +753,7 @@ async function renderWatch(id, startTime) {
   const sideList = el('div', 'related-list'); sideList.append(skCards(8, true));
   side.append(el('h2', 'section-title', 'فيديوهات مشابهة'), sideList);
   view.replaceChildren(layout);
+  layout.append(buildFab(() => np, id, () => (current && current.data.title) || (pv && pv.title) || ''));
   if (pv) document.title = `${pv.title} — Nuvio`;
 
   function embed() {
@@ -949,6 +951,121 @@ function renderRich(node, text, onTime) {
     last = m.index + m[0].length;
   }
   if (last < text.length) node.append(text.slice(last));
+}
+
+/* ================= الزر العايم (صفحة الفيديو) =================
+   مشاركة، إعادة تحميل، مؤقت النوم، تكرار، AirPlay، صورة داخل صورة */
+const FAB_ICO = {
+  more: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
+  share: '<svg viewBox="0 0 24 24"><path d="M12 15V3.5M7.5 8L12 3.5 16.5 8"/><path d="M5 12.5v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>',
+  reload: '<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
+  sleep: '<svg viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>',
+  loop: '<svg viewBox="0 0 24 24"><path d="M17 2.5l3 3-3 3"/><path d="M4 11V9.5a4 4 0 0 1 4-4h12"/><path d="M7 21.5l-3-3 3-3"/><path d="M20 13v1.5a4 4 0 0 1-4 4H4"/></svg>',
+  cast: '<svg viewBox="0 0 24 24"><path d="M5 17H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-1"/><path d="M12 15l5 6H7z"/></svg>',
+  pip: '<svg viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><rect x="12" y="11.5" width="7" height="5.5" rx="1"/></svg>',
+};
+const SLEEP_OPTS = [[0, 'إيقاف'], [15, '15 د'], [30, '30 د'], [45, '45 د'], [60, 'ساعة'], [90, 'ساعة ونص'], [-1, 'آخر الفيديو']];
+const sleepState = { at: 0, endOfVideo: false, timer: null };
+
+function buildFab(getNp, id, getTitle) {
+  const wrap = el('div', 'fab-wrap');
+  const btn = el('button', 'fab'); btn.innerHTML = FAB_ICO.more; btn.setAttribute('aria-label', 'أدوات');
+  const menu = el('div', 'fab-menu'); menu.hidden = true;
+  wrap.append(menu, btn);
+
+  const row = (ico, label, onClick, extra) => {
+    const r = el('button', 'fab-row');
+    const i = el('span', 'fab-ico'); i.innerHTML = FAB_ICO[ico];
+    r.append(i, el('span', 'fab-label', label));
+    if (extra) r.append(extra);
+    r.onclick = e => { e.stopPropagation(); onClick(r); };
+    return r;
+  };
+  const sw = on => { const s = el('span', 'fab-switch' + (on ? ' on' : '')); s.append(el('span')); return s; };
+  const fmtLeft = () => {
+    if (sleepState.endOfVideo) return 'آخر الفيديو';
+    if (!sleepState.at) return 'إيقاف';
+    const m = Math.max(0, Math.ceil((sleepState.at - Date.now()) / 60000));
+    return m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')} س` : `${m} د`;
+  };
+
+  function draw() {
+    menu.replaceChildren();
+    const np = getNp();
+    const url = `https://youtu.be/${id}`;
+    menu.append(row('share', 'مشاركة', async () => {
+      const title = getTitle();
+      if (navigator.share) { try { await navigator.share({ title, url }); } catch { /* سكّرها */ } }
+      else { try { await navigator.clipboard.writeText(url); note('انسخ الرابط ✓'); } catch { note(url); } }
+      close();
+    }));
+    menu.append(row('reload', 'إعادة تحميل', () => { location.reload(); }));
+
+    const sleepVal = el('span', 'fab-val', fmtLeft());
+    const sleepRow = row('sleep', 'مؤقت النوم', () => { chips.hidden = !chips.hidden; }, sleepVal);
+    const chips = el('div', 'fab-chips'); chips.hidden = true;
+    SLEEP_OPTS.forEach(([m, label]) => {
+      const on = m === 0 ? !sleepState.at && !sleepState.endOfVideo : m === -1 ? sleepState.endOfVideo : false;
+      const c = el('button', 'fab-chip' + (on ? ' on' : ''), label);
+      c.onclick = e => { e.stopPropagation(); setSleep(m, getNp); draw(); };
+      chips.append(c);
+    });
+    menu.append(sleepRow, chips);
+
+    if (np) {
+      menu.append(row('loop', 'تكرار الفيديو', r => {
+        np.setLoop(!np.loop);
+        r.querySelector('.fab-switch').classList.toggle('on', np.loop);
+        note(np.loop ? 'التكرار شغّال 🔁' : 'التكرار طافي');
+      }, sw(np.loop)));
+      menu.append(row('cast', 'AirPlay / عرض على شاشة', async () => {
+        try { if (!(await np.cast())) note('العرض على شاشة مش مدعوم بهالمتصفح'); } catch { note('ما لقيت شاشة'); }
+        close();
+      }));
+      if (np.canPip()) menu.append(row('pip', 'صورة داخل صورة', async () => {
+        try { await np.pip(); } catch { note('ما زبطت صورة داخل صورة'); }
+        close();
+      }));
+    }
+  }
+  function open() { draw(); menu.hidden = false; btn.classList.add('on'); }
+  function close() { menu.hidden = true; btn.classList.remove('on'); }
+  btn.onclick = e => { e.stopPropagation(); menu.hidden ? open() : close(); };
+  const outside = e => { if (!wrap.isConnected) return document.removeEventListener('pointerdown', outside); if (!wrap.contains(e.target)) close(); };
+  document.addEventListener('pointerdown', outside);
+  // تحديث العدّاد وهي مفتوحة
+  const tick = setInterval(() => {
+    if (!wrap.isConnected) return clearInterval(tick);
+    const v = menu.querySelector('.fab-val'); if (v && !menu.hidden) v.textContent = fmtLeft();
+  }, 15000);
+  return wrap;
+}
+
+/* مؤقت النوم: بيوقّف الفيديو (أو الصوت بالخلفية) بعد المدة اللي بتختارها، حتى لو نقلت لفيديو تاني */
+function setSleep(min, getNp) {
+  clearInterval(sleepState.timer);
+  sleepState.at = 0; sleepState.endOfVideo = false;
+  if (min === 0) { note('مؤقت النوم طافي'); return; }
+  if (min === -1) {
+    sleepState.endOfVideo = true;
+    note('رح يوقف بآخر هالفيديو 🌙');
+    const np = getNp();
+    if (np) {
+      np.setLoop(false);
+      const stop = () => { if (sleepState.endOfVideo) { sleepState.endOfVideo = false; np.pauseAll(); } };
+      np.video.addEventListener('ended', stop, { once: true });
+      if (np.bg) np.bg.addEventListener('ended', stop, { once: true });
+    }
+    return;
+  }
+  sleepState.at = Date.now() + min * 60000;
+  note(`رح يوقف بعد ${min >= 60 ? (min === 60 ? 'ساعة' : 'ساعة ونص') : min + ' دقيقة'} 🌙`);
+  sleepState.timer = setInterval(() => {
+    if (!sleepState.at || Date.now() < sleepState.at) return;
+    sleepState.at = 0; clearInterval(sleepState.timer);
+    document.querySelectorAll('video, audio').forEach(m => m.pause());
+    if (window.__nuvioNp) window.__nuvioNp.pauseAll();
+  }, 5000);
 }
 
 /* ================= البحث: روابط + اقتراحات ================= */
