@@ -151,6 +151,7 @@
     destroy() {
       this.dead = true; clearInterval(this._wd); clearTimeout(this._hideT); clearTimeout(this._apT);
       if (this.opts.media && this.opts.media.destroy) this.opts.media.destroy();
+      if (this._fakeFs) this._setFakeFs(false);
       if (this._orient) { window.removeEventListener('orientationchange', this._orient); try { screen.orientation.removeEventListener('change', this._orient); } catch { /* */ } }
       document.removeEventListener('keydown', this._key); document.removeEventListener('fullscreenchange', this._fsc);
       document.removeEventListener('visibilitychange', this._vis);
@@ -456,6 +457,7 @@
     async fullscreen() {
       const v = this.video, box = this.box;
       this.markTransition();
+      if (this._fakeFs) { this._setFakeFs(false); return; }
       if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
       if (box.requestFullscreen) {
         try {
@@ -464,7 +466,17 @@
           return;
         } catch { /* جرّب طريقة الآيفون */ }
       }
-      if (v.webkitEnterFullscreen) v.webkitEnterFullscreen(); // آيفون: ملء الشاشة تبع النظام
+      if (v.webkitEnterFullscreen) { v.webkitEnterFullscreen(); return; } // آيفون: ملء الشاشة تبع النظام
+      this._setFakeFs(true); // آيفون مع مشغّل يوتيوب: المشغّل بيغطّي كل الشاشة (لفّ التلفون بالعرض)
+    }
+    _setFakeFs(on) {
+      if (!!this._fakeFs === !!on) return;
+      this._fakeFs = !!on;
+      this.box.classList.toggle('fakefs', this._fakeFs);
+      document.documentElement.classList.toggle('np-fakefs', this._fakeFs);
+      this.bFs.innerHTML = this._fakeFs ? ICON.fsx : ICON.fs;
+      lockScroll(this._fakeFs);
+      this._showUI();
     }
 
     _progress() {
@@ -695,6 +707,19 @@
       window.addEventListener('message', this._onMsg);
       f.addEventListener('load', () => { this._listen(); setTimeout(() => this._listen(), 400); setTimeout(() => this._listen(), 1200); });
     }
+    /* الموبايل (خاصة الآيفون) ما بيشغّل لحالو بالإطار رغم autoplay: منبعت «بلا صوت + شغّل» كذا مرة لحد ما يمشي */
+    _kick() {
+      if (this._kicking) return;
+      this._kicking = true;
+      let n = 0;
+      const go = () => {
+        if (!this.f.isConnected || n++ > 8 || !this.wantPlay || this.st === 1 || this.st === 3) { this._kicking = false; return; }
+        if (!this.revealed) this.cmd('mute');
+        this.cmd('playVideo');
+        setTimeout(go, 700);
+      };
+      go();
+    }
     setAttribute() { /* متل <video> */ }
     removeAttribute() { /* */ }
     get isConnected() { return this.el.isConnected; }
@@ -702,7 +727,7 @@
       this.revealed = false;
       this.st = -1; this.vid = ''; this.curDur = 0; this.ct0 = -1; this.ctMoveAt = 0; this.seekingTo = null;
       this.t0 = Math.max(0, Math.floor(start || 0)); this.ct = this.t0; this.ctAt = 0;
-      this.loadAt = Date.now();
+      this.loadAt = Date.now(); this._kicking = false;
       this.f.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(this.id)}?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&iv_load_policy=3&rel=0&playsinline=1&enablejsapi=1&start=${this.t0}&origin=${encodeURIComponent(location.origin)}&_=${Date.now()}`;
       this._emit('loadstart'); this._emit('waiting');
     }
@@ -715,6 +740,7 @@
       let d = e.data; try { d = typeof d === 'string' ? JSON.parse(d) : d; } catch { return; }
       if (!d || typeof d !== 'object') return;
       if (d.event === 'onError') { this.errorCode = d.info; this._emit('yterror'); return; }
+      if (d.event === 'onReady' || d.event === 'initialDelivery') this._kick();
       const i = d.info; if (!i || typeof i !== 'object') return;
       if (i.videoData && i.videoData.video_id) this.vid = i.videoData.video_id;
       const pd = (i.progressState && i.progressState.duration) || i.duration;
@@ -787,7 +813,7 @@
     set volume(x) { this._wantVol = +x; if (this.revealed) { this.cmd('setVolume', [Math.round(Math.max(0, Math.min(1, +x)) * 100)]); this._emit('volumechange'); } }
     get playbackRate() { return this._wantRate || 1; }
     set playbackRate(r) { this._wantRate = +r || 1; this.cmd('setPlaybackRate', [this._wantRate]); }
-    play() { this.wantPlay = true; this.cmd('playVideo'); return Promise.resolve(); }
+    play() { this.wantPlay = true; this.cmd('playVideo'); this._kick(); return Promise.resolve(); }
     pause() { this.wantPlay = false; this.cmd('pauseVideo'); if (this.revealed && this.st !== 2 && this.st !== 0) { this.st = 2; this._emit('pause'); } }
     destroy() { window.removeEventListener('message', this._onMsg); try { this.f.src = 'about:blank'; } catch { /* */ } }
   }

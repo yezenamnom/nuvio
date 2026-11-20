@@ -1745,8 +1745,8 @@ async function renderWatch(id, startTime) {
     const media = new YtMedia(id);
     const cover = el('div', 'emb-cover');
     const img = el('img'); img.alt = ''; img.src = ytThumb(id, 'hqdefault');
-    const msg = el('div', 'emb-msg', 'عم جهّز الفيديو…');
-    cover.append(img, el('div', 'emb-spin'), msg);
+    const msg = el('div', 'emb-msg', '');
+    cover.append(img, msg);
     media.el.append(cover);
     if (prev) { try { prev.video.pause(); } catch { /* */ } prev.destroy(); }
     box.classList.remove('ui', 'paused', 'loading');
@@ -1765,13 +1765,13 @@ async function renderWatch(id, startTime) {
       if (ex.chapters) ex.chapters(shown.description || '');
     }
     const want = +(pv && pv.duration) || 0;
-    let tries = 0, mids = 0, goodCt = 0, dur = want, failed = false;
+    let tries = 0, mids = 0, goodCt = 0, dur = want, failed = false, waitUser = false;
     const reloadAt = (t, why) => {
       if (failed || !box.isConnected) return;
       if (why && mids >= 3) return;
       if (why) mids++;
       tries = why ? 0 : tries;
-      cover.hidden = false; msg.textContent = why === 'ad' ? 'عم شيل الإعلان…' : 'عم جهّز الفيديو…';
+      cover.hidden = false; msg.textContent = why === 'ad' ? 'عم شيل الإعلان…' : '';
       media.hide(); tries++; media.load(t);
     };
     const fail = () => {
@@ -1796,9 +1796,14 @@ async function renderWatch(id, startTime) {
       const now = Date.now();
       if (document.hidden) { media.loadAt = now; media.ctMoveAt = now; return; } // بالخلفية الرسايل بتبطى: ما منحكم
       if (!media.revealed) {
-        if (isContent()) { goodCt = media.ct; cover.hidden = true; media.reveal(); return; }
+        if (isContent()) { waitUser = false; msg.textContent = ''; goodCt = media.ct; cover.hidden = true; media.reveal(); return; }
+        if (waitUser || !media.wantPlay) return; // ناطرين كبسة «تشغيل» منك
         if (now - media.loadAt > 3500) {
-          if (tries < 4) { msg.textContent = 'عم شيل الإعلان…'; tries++; media.load(media.t0); } // إعلان أو بطء: من نفس الثانية
+          const started = media.st === 1 || media.st === 3 || media.ct > media.t0 + 0.3;
+          if (!started) { // ما بلّش أبداً (الموبايل منع التشغيل): صورتنا بتضل فوق وزر التشغيل تبعنا بيبيّن
+            waitUser = true; msg.textContent = ''; media.wantPlay = false; media._emit('pause'); return;
+          }
+          if (tries < 4) { msg.textContent = 'عم شيل الإعلان…'; tries++; media.load(media.t0); } // إعلان: من نفس الثانية
           else { goodCt = media.ct; cover.hidden = true; media.reveal(); } // آخر شي: منفرجيك اللي في
         }
         return;
@@ -1838,7 +1843,7 @@ async function renderWatch(id, startTime) {
         streaming: {
           // مخزون أكبر + طلب القطع الجاية سلفاً: أي بطء قصير عالشبكة ما بيبيّن
           bufferingGoal: 90, rebufferingGoal: 2, bufferBehind: 30, segmentPrefetchLimit: 2,
-          retryParameters: { maxAttempts: 7, baseDelay: 300, backoffFactor: 1.5, timeout: 20000, stallTimeout: 7000, connectionTimeout: 9000 },
+          retryParameters: { maxAttempts: 5, baseDelay: 300, backoffFactor: 1.5, timeout: 15000, stallTimeout: 6000, connectionTimeout: 8000 },
           stallEnabled: true, stallThreshold: 1, stallSkip: 0.1,
           ignoreTextStreamFailures: true,
         },
@@ -1850,6 +1855,11 @@ async function renderWatch(id, startTime) {
       const me = player;
       player.addEventListener('error', ev => {
         console.warn('[nuvio] shaka', ev.detail);
+        try {
+          const d = ev.detail || {}, dt = d.data || [];
+          const u = typeof dt[0] === 'string' ? dt[0].replace(/^https?:\/\/[^/]+/, '').split('?')[0].slice(0, 60) : '';
+          navigator.sendBeacon('https://tube.glanzstar.de/acc/err', JSON.stringify({ m: `shaka ${d.code} sev${d.severity} ${typeof dt[1] === 'number' ? 'http' + dt[1] : ''} ${u} src=${(s.url || '').replace(/^https?:\/\/[^/]+/, '').split('/').slice(0, 3).join('/')} t=${Math.round(np && np.video ? np.video.currentTime : 0)}`, s: 'app.js', l: 0, v: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '', ua: navigator.userAgent.slice(0, 180), p: '/watch' }));
+        } catch { /* */ }
         if (player === me && ev.detail && ev.detail.severity === 2) recover(np.video.currentTime);
       });
       // ملف DASH من الذاكرة (أو بينجاب مرة وحدة) — بلا طلب تاني
@@ -1886,7 +1896,7 @@ async function renderWatch(id, startTime) {
       if (goodSince && Date.now() - goodSince > 60e3) reloads = 0; // كان ماشي منيح من دقيقة: مش مشكلة دايمة
       reloads++;
       const cur = srcList[srcIdx];
-      if (reloads <= 3 && cur) {
+      if (reloads <= (cur && cur.url && cur.url.startsWith(COMP) ? 1 : 3) && cur) {
         if (cur.kind === 'dash') memo.delete('mf:' + cur.url); // ملف جديد بروابط جديدة
         try { await loadSource(cur, t); np.autoplay(); goodSince = Date.now(); return; } catch { /* المصدر اللي بعدو */ }
       }
@@ -2539,7 +2549,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120193801';
+const APP_VERSION = '20261120194925';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
