@@ -562,7 +562,7 @@ const YtApi = {
     return mark(r);
   },
   async related(id) {
-    const d = await yti('next', { videoId: id });
+    const d = await ytNext(id);
     const sec = ((d.contents || {}).twoColumnWatchNextResults || {}).secondaryResults || d;
     const list = uniqById(walk(sec, 'lockupViewModel').map(l => fromLockup(l)).concat(walk(sec, 'compactVideoRenderer').map(fromVR)))
       .filter(v => v.id !== id);
@@ -570,7 +570,50 @@ const YtApi = {
     return list;
   },
 };
+// معلومات صفحة الفيديو (عنوان، قناة، مشاهدات، إعجابات، وصف، مشابه) من يوتيوب مباشرة
+YtApi.watch = async function (id) {
+  const d = await ytNext(id);
+  const pr = walk(d, 'videoPrimaryInfoRenderer')[0];
+  const se = walk(d, 'videoSecondaryInfoRenderer')[0];
+  if (!pr || !se) throw new Error('ما في معلومات');
+  const o = (se.owner || {}).videoOwnerRenderer || {};
+  const by = ((o.title || {}).runs || [])[0] || {};
+  const vt = ytTxt(((pr.viewCount || {}).videoViewCountRenderer || {}).viewCount);
+  const like = walk(walk(d, 'likeButtonViewModel'), 'buttonViewModel')[0] || {};
+  const sec = ((d.contents || {}).twoColumnWatchNextResults || {}).secondaryResults || {};
+  return {
+    id, title: ytTxt(pr.title), author: by.text || '', authorId: ((by.navigationEndpoint || {}).browseEndpoint || {}).browseId || '',
+    avatar: httpsUrl(lastThumb(o.thumbnail)), subs: ytTxt(o.subscriberCountText).replace(/\u00a0/g, ' '),
+    views: parseCount(vt), viewsText: vt,
+    published: ytTxt(pr.relativeDateText) || ytTxt(pr.dateText).replace(/\u200f/g, ''),
+    likes: parseCount(like.accessibilityText) || parseCount(like.title) || 0,
+    description: ytDescription(se.attributedDescription, id),
+    related: uniqById(walk(sec, 'lockupViewModel').map(l => fromLockup(l)).concat(walk(sec, 'compactVideoRenderer').map(fromVR))).filter(v => v.id !== id),
+  };
+};
+// الوصف: يوتيوب بيقصّر الروابط وبيحط بطاقات فيديو — منرجّعهن روابط كاملة لحتى تنكبس
+function ytDescription(ad, selfId) {
+  if (!ad || !ad.content) return '';
+  let s = ad.content;
+  const runs = (ad.commandRuns || []).slice().sort((a, b) => b.startIndex - a.startIndex); // من الآخر للأول
+  for (const r of runs) {
+    const seg = s.substr(r.startIndex, r.length);
+    const ue = walk(r, 'urlEndpoint')[0], we = walk(r, 'watchEndpoint')[0];
+    let rep = null;
+    if (ue && ue.url) {
+      let u = ue.url;
+      try { const x = new URL(u, 'https://www.youtube.com'); u = x.pathname === '/redirect' ? x.searchParams.get('q') || x.href : x.href; } catch { /* */ }
+      if (!/^https?:\/\//.test(seg.trim()) || seg.includes('…') || seg.includes('...')) rep = u;
+    } else if (we && we.videoId && we.videoId !== selfId) {
+      rep = `${seg.replace(/^\s*•\s*/, '').trim()} https://youtu.be/${we.videoId}`;
+    }
+    if (rep != null) s = s.slice(0, r.startIndex) + rep + s.slice(r.startIndex + r.length);
+  }
+  return s;
+}
+
 // فيديوهات مشابهة: من يوتيوب مباشرة، والسيرفرات العامة احتياط
+const ytNext = id => cached('nx:' + id, 10 * 60e3, () => yti('next', { videoId: id }));
 const relatedOf = id => cached('rel:' + id, 20 * 60e3, () => (ytiUsable() ? YtApi.related(id) : Promise.reject(new Error('x')))
   .catch(() => getVideo(id).then(r => r.res.related)));
 
@@ -687,7 +730,7 @@ function card(v, { row = false, noAuthorLink = false } = {}) {
   const rest = [views, v.published].filter(Boolean).join(' • ');
   if (rest) sub.append((v.author ? ' • ' : '') + rest);
   let pre;
-  const warm = () => { clearTimeout(pre); pre = setTimeout(() => prefetchVideo(v.id, true), 150); };
+  const warm = () => { clearTimeout(pre); pre = setTimeout(() => { prefetchVideo(v.id, true); if (ytiUsable()) ytNext(v.id).catch(() => {}); }, 150); };
   c.addEventListener('pointerenter', warm);
   c.addEventListener('touchstart', () => prefetchVideo(v.id, true), { passive: true });
   c.addEventListener('pointerleave', () => clearTimeout(pre));
@@ -1404,13 +1447,15 @@ async function renderWatch(id, startTime) {
   const info = el('div', 'info');
   const side = el('aside', 'related');
   main.append(box, info); layout.append(main, side);
-  active = { id, box, layout, main, title: () => (current && current.data.title) || (pv && pv.title) || '', author: () => (current && current.data.author) || (pv && pv.author) || '', np: () => np };
+  const ytInfo = ytiUsable() ? YtApi.watch(id).catch(() => null) : null;
+  let shown = null; // المعلومات اللي انعرضت (من يوتيوب المباشر أو من السيرفر العام، اللي بيوصل أول)
+  active = { id, box, layout, main, title: () => (current && current.data.title) || (shown && shown.title) || (pv && pv.title) || '', author: () => (current && current.data.author) || (shown && shown.author) || (pv && pv.author) || '', np: () => np };
   enableSwipeDown(box);
 
   const setChip = () => {};
 
   const music = isMusic();
-  const artistOf = () => ({ id: (current && current.data.authorId) || (pv && pv.authorId), name: (current && current.data.author) || (pv && pv.author), avatar: current && current.data.avatar });
+  const artistOf = () => ({ id: (current && current.data.authorId) || (shown && shown.authorId) || (pv && pv.authorId), name: (current && current.data.author) || (shown && shown.author) || (pv && pv.author), avatar: (current && current.data.avatar) || (shown && shown.avatar) });
   let np = new NuvioPlayer(box, {
     onStall: t => recover(t), onError: t => recover(t),
     copyIcon: music ? 'plus' : 'copy',
@@ -1571,7 +1616,9 @@ async function renderWatch(id, startTime) {
         : await getVideo(id);
       if (!box.isConnected) return;
       tried.push(inst.url);
-      if (!current) fillInfo(res);
+      // منفضّل معلومات يوتيوب المباشر (عربي وكاملة): منستنّاها لحد 0.7 ثانية، بلا ما نأخّر الفيديو
+      if (shown || !ytInfo) fillInfo(res);
+      else Promise.race([ytInfo, sleep(700)]).then(() => { if (box.isConnected) fillInfo(res); });
       current = { inst, data: res };
       // إذا الفيديو بلّش من قبل (التشغيل المبكر) ما منعيد تحميلو
       if (early) {
@@ -1593,12 +1640,14 @@ async function renderWatch(id, startTime) {
       if (!box.isConnected) return;
       // دورة تانية على كل السيرفرات قبل المشغّل الاحتياطي (الخلل عندهن غالباً مؤقت)
       if (!secondRound && tried.length) { secondRound = true; tried.length = 0; memo.delete('v:' + id); return tryNext(startAt); }
-      if (!current) { if (!h1.dataset.oe) h1.textContent = 'ما قدرت جيب معلومات الفيديو'; metaRow.replaceChildren(); descSk.remove(); }
+      if (!shown) { if (!h1.dataset.oe) h1.textContent = 'ما قدرت جيب معلومات الفيديو'; metaRow.replaceChildren(); descSk.remove(); }
       embed();
     }
   }
 
   function fillInfo(d) {
+    if (shown || !d) return; // انعرضت من قبل (من المصدر الأسرع)
+    shown = d;
     document.title = `${d.title} — Nuvio`;
     if (np) {
       np.opts.onNext = d.related[0] ? () => { location.hash = `#/watch?v=${encodeURIComponent(d.related[0].id)}`; } : null;
@@ -1687,6 +1736,8 @@ async function renderWatch(id, startTime) {
   let early = null;
   const bestInv = orderedInstances().find(i => i.type === 'invidious' && health[i.url] && health[i.url].ok);
   if (bestInv) early = playSources(bestInv, [{ kind: 'dash', url: `${bestInv.url}/api/manifest/dash/id/${id}?local=true` }], startTime);
+  // المعلومات من يوتيوب مباشرة (~نص ثانية) بنفس الوقت؛ السيرفر العام بيضل للفيديو نفسو
+  if (ytInfo) ytInfo.then(d => { if (d && box.isConnected) fillInfo(d); });
   await tryNext(startTime);
 }
 
@@ -2135,7 +2186,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120062251';
+const APP_VERSION = '20261120062827';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
