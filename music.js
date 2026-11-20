@@ -241,6 +241,33 @@ async function renderMusic(path, params) {
 }
 
 /* ================= القائمة الجانبية ☰ ================= */
+/* رقم النسخة (20261120200827) → «20/11 20:08» */
+const verShort = v => (v && v.length >= 12 ? `${v.slice(6, 8)}/${v.slice(4, 6)} ${v.slice(8, 10)}:${v.slice(10, 12)}` : v || '?');
+/* تحديث إجباري: منجيب آخر نسخة من السيرفر ومنحمّلها هلّق (بلا ما نستنّى الفتحة الجاية) */
+async function forceUpdate(btn) {
+  const cur = typeof APP_VERSION !== 'undefined' ? APP_VERSION : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'عم شيّك…'; }
+  try {
+    const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
+    const v = r.ok ? (await r.text()).trim() : '';
+    if (v && v === cur) {
+      if (btn) { btn.disabled = false; btn.textContent = `نسخة ${verShort(cur)} ✓`; }
+      note('عندك آخر نسخة ✓');
+      return;
+    }
+    if (btn) btn.textContent = 'عم حدّث…';
+    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    if (reg) {
+      await new Promise(res => {
+        let done = false; const go = () => { if (!done) { done = true; res(); } };
+        navigator.serviceWorker.addEventListener('controllerchange', go, { once: true });
+        reg.update().catch(() => {});
+        setTimeout(go, 3500);
+      });
+    }
+    location.replace(`${location.pathname}?v=${encodeURIComponent(v || Date.now())}${location.hash}`);
+  } catch { location.reload(); }
+}
 function openDrawer() {
   let ov = document.querySelector('.drawer-ov');
   if (!ov) {
@@ -257,8 +284,20 @@ function openDrawer() {
   const d = ov.querySelector('.drawer');
   d.replaceChildren();
   const head = el('div', 'drawer-head');
-  head.append(el('b', null, 'Nuvio'), el('span', 'muted', 'بيضل كل شي على جهازك'));
+  // رقم النسخة جنب الاسم: بيتغيّر مع كل تحديث. كبسة عليه بتجيب آخر نسخة فوراً
+  const row = el('div', 'drawer-brand');
+  const cur = typeof APP_VERSION !== 'undefined' ? APP_VERSION : '';
+  const ver = el('button', 'ver-badge', `نسخة ${verShort(cur)}`);
+  ver.title = cur; ver.setAttribute('aria-label', `النسخة ${cur}`);
+  ver.onclick = e => { e.stopPropagation(); forceUpdate(ver); };
+  row.append(el('b', null, 'Nuvio'), ver);
+  head.append(row, el('span', 'muted', 'بيضل كل شي على جهازك'));
   d.append(head);
+  // في نسخة أجدد؟ الزر بيصير «تحديث جديد»
+  fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' }).then(r => (r.ok ? r.text() : '')).then(v => {
+    v = (v || '').trim();
+    if (v && cur && v !== cur && ver.isConnected) { ver.classList.add('new'); ver.textContent = `تحديث جديد ↻ ${verShort(v)}`; }
+  }).catch(() => {});
   const item = (icon, label, href, count) => {
     const a = el('a', 'drawer-item'); a.href = href;
     const ic = el('span', 'drawer-ico'); ic.innerHTML = window.ico ? window.ico(icon) : '';

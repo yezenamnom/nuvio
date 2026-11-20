@@ -1421,3 +1421,9 @@ html.tv .tv-sinput.tv-f { border-color: #fff; }
 .player-box.fakefs { position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; width: 100vw !important; height: 100vh !important; height: 100dvh !important; max-width: none !important; aspect-ratio: auto !important; border-radius: 0 !important; margin: 0 !important; transform: none !important; z-index: 9999; }
 .player-box.fakefs .yt-frame { --crop: 90px; }
 html.np-fakefs .bnav, html.np-fakefs .topbar, html.np-fakefs .fab-wrap { display: none !important; }
+
+/* رقم النسخة جنب الاسم بالقائمة الجانبية */
+.drawer-brand { display: flex; align-items: center; gap: 10px; }
+.ver-badge { border: 1px solid var(--line); background: var(--bg2); color: var(--muted); font: inherit; font-size: .72rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; cursor: pointer; white-space: nowrap; direction: rtl; }
+.ver-badge.new { background: var(--accent); border-color: transparent; color: #fff; }
+.ver-badge:disabled { opacity: .7; cursor: default; }
