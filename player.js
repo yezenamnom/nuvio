@@ -15,6 +15,8 @@
     fs: svg('<path class="s" d="M4 9V4.8c0-.4.4-.8.8-.8H9M15 4h4.2c.4 0 .8.4.8.8V9M20 15v4.2c0 .4-.4.8-.8.8H15M9 20H4.8c-.4 0-.8-.4-.8-.8V15"/>'),
     fsx: svg('<path class="s" d="M9 4v4.2c0 .4-.4.8-.8.8H4M20 9h-4.2c-.4 0-.8-.4-.8-.8V4M15 20v-4.2c0-.4.4-.8.8-.8H20M4 15h4.2c.4 0 .8.4.8.8V20"/>'),
     copy: svg('<rect class="s" x="8.5" y="8.5" width="11" height="11" rx="2.2"/><path class="s" d="M15.5 8.5V6.2c0-1-.8-1.7-1.7-1.7H6.2c-1 0-1.7.8-1.7 1.7v7.6c0 1 .8 1.7 1.7 1.7h2.3"/>'),
+    tv: svg('<path class="s" d="M3 17.5V6.5A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5v11a1.5 1.5 0 0 1-1.5 1.5H15"/><path d="M8 21l4-5 4 5z"/>'),
+    plus: svg('<path class="s" d="M12 5v14M5 12h14"/>'),
     back: svg('<path d="M11 6.5v11L3 12zM20 6.5v11L12 12z"/>'),
     fwd: svg('<path d="M13 6.5v11l8-5.5zM4 6.5v11l8-5.5z"/>'),
   };
@@ -60,11 +62,16 @@
       this.vol = mk('input', 'np-vol'); Object.assign(this.vol, { type: 'range', min: 0, max: 1, step: 0.05, value: v.muted ? 0 : v.volume });
       this.time = mk('div', 'np-time', '0:00 / 0:00');
       this.qBadge = mk('span', 'np-q');
-      this.bCopy = mk('button', 'np-btn', ICON.copy); this.bCopy.setAttribute('aria-label', 'نسخ الرابط'); this.bCopy.title = 'نسخ الرابط';
+      // بوضع الميوزك: زر ➕ (ضيف المطرب لمفضّلينك) بدل زر النسخ
+      const plus = opts.copyIcon === 'plus';
+      this.bCopy = mk('button', 'np-btn', plus ? ICON.plus : ICON.copy);
+      this.bCopy.title = plus ? 'ضيف المطرب للمفضّلين' : 'نسخ الرابط'; this.bCopy.setAttribute('aria-label', this.bCopy.title);
       this.bGear = mk('button', 'np-btn', ICON.gear); this.bGear.setAttribute('aria-label', 'الإعدادات');
       this.bFs = mk('button', 'np-btn', ICON.fs); this.bFs.setAttribute('aria-label', 'ملء الشاشة');
       const volWrap = mk('div', 'np-volwrap'); volWrap.append(this.bVol, this.vol);
-      row.append(this.bPlay, volWrap, this.time, mk('div', 'np-space'), this.bCopy, this.qBadge, this.bGear, this.bFs);
+      this.bCast = mk('button', 'np-btn', ICON.tv); this.bCast.title = 'عرض على شاشة'; this.bCast.setAttribute('aria-label', 'عرض على شاشة'); this.bCast.hidden = true;
+      this.bCast.onclick = e => { e.stopPropagation(); this.cast(); };
+      row.append(this.bPlay, volWrap, this.time, mk('div', 'np-space'), this.bCast, this.bCopy, this.qBadge, this.bGear, this.bFs);
       bottom.append(this.bar, row);
 
       this.menu = mk('div', 'np-menu'); this.menu.dir = 'rtl'; this.menu.hidden = true;
@@ -120,6 +127,7 @@
       return false;
     }
     /* AirPlay على آيفون/ماك، أو Chromecast/عرض على شاشة بأندرويد وكروم */
+    enableCast(on) { this.bCast.hidden = !on; }
     async cast() {
       const v = this.video;
       if (v.webkitShowPlaybackTargetPicker) { v.webkitShowPlaybackTargetPicker(); return true; }
@@ -331,7 +339,7 @@
       clearTimeout(this._hideT);
       if (!stay && !this.video.paused) this._hideT = setTimeout(() => this._hideUI(), 2800);
     }
-    _hideUI() { if (this.menu.hidden && !this.video.paused) this.box.classList.remove('ui'); }
+    _hideUI() { if (!this._sheet && this.menu.hidden && !this.video.paused) this.box.classList.remove('ui'); }
 
     /* ---------- الجودة ---------- */
     _tracks() {
@@ -348,37 +356,125 @@
       const act = this.shaka && this.shaka.getVariantTracks().find(t => t.active);
       this.qBadge.textContent = act && act.height >= 720 ? 'HD' : '';
     }
-    _menu() {
-      const m = this.menu;
-      if (!m.hidden) { m.hidden = true; return; }
-      m.replaceChildren();
+    /* ---------- الترجمة (بيعطيها app.js من السيرفر) ---------- */
+    setCaptions(list) { this.captions = (list || []).filter(c => c && c.url); }
+    async _pickCaption(c) {
       const v = this.video;
-      const group = (title, items) => {
-        m.append(mk('div', 'np-mt', title));
-        const g = mk('div', 'np-chips');
-        items.forEach(([label, on, fn]) => {
-          const b = mk('button', 'np-chip' + (on ? ' on' : ''), label);
-          b.onclick = e => { e.stopPropagation(); fn(); m.hidden = true; this._showUI(); };
-          g.append(b);
-        });
-        m.append(g);
-      };
-      const tracks = this._tracks();
-      if (tracks.length) {
-        const abr = this.shaka.getConfiguration().abr.enabled;
-        const act = this.shaka.getVariantTracks().find(t => t.active);
-        group('الجودة', [
-          [`تلقائي${abr && act ? ` (${act.height}p)` : ''}`, abr, () => { this.shaka.configure({ abr: { enabled: true } }); ls.set('q', 0); }],
-          ...tracks.map(t => [`${t.height}p`, !abr && act && act.height === t.height, () => {
-            this.shaka.configure({ abr: { enabled: false } });
-            this.shaka.selectVariantTrack(t, true, 4);
-            ls.set('q', t.height); this._updQ();
-          }]),
-        ]);
+      this.capSel = c ? c.label : '';
+      ls.set('cap', c ? c.lang : '');
+      if (this.shaka) {
+        if (!c) { this.shaka.setTextTrackVisibility(false); return; }
+        try {
+          const tr = await this.shaka.addTextTrackAsync(c.url, c.lang || 'und', 'subtitles', 'text/vtt', undefined, c.label);
+          this.shaka.selectTextTrack(tr);
+          await this.shaka.setTextTrackVisibility(true);
+        } catch (e) { console.warn('[nuvio] caption', e); }
+        return;
       }
-      group('السرعة', SPEEDS.map(s => [s === 1 ? 'عادي' : `${s}×`, v.playbackRate === s, () => { v.playbackRate = s; this.rate = s; ls.set('rate', s); }]));
-      m.hidden = false;
+      [...v.querySelectorAll('track')].forEach(t => t.remove());
+      if (!c) return;
+      const tr = document.createElement('track');
+      Object.assign(tr, { kind: 'subtitles', label: c.label, srclang: c.lang || 'und', src: c.url, default: true });
+      v.append(tr);
+      tr.addEventListener('load', () => { tr.track.mode = 'showing'; });
+    }
+
+    /* ---------- قائمة الإعدادات: بتطلع من تحت لفوق متل يوتيوب، وكل خيار بيبيّن بس إذا متوفر ---------- */
+    _menu() {
+      if (this._sheet) { this._closeSheet(); return; }
+      const v = this.video;
+      const fs = document.fullscreenElement === this.box;
+      const ov = mk('div', 'np-sheet-ov' + (fs ? ' in-fs' : ''));
+      const sh = mk('div', 'np-sheet'); sh.dir = 'rtl';
+      ov.append(sh);
+      ov.addEventListener('click', e => { if (e.target === ov) this._closeSheet(); });
+      (fs ? this.box : document.body).append(ov);
+      this._sheet = ov;
       this._showUI(true);
+      const I = {
+        q: '<path class="s" d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle class="s" cx="15" cy="7" r="2.2"/><circle class="s" cx="9" cy="17" r="2.2"/>',
+        sp: '<path class="s" d="M5 18a8 8 0 1 1 14 0"/><path class="s" d="M12 14l4-5"/>',
+        cc: '<rect class="s" x="3" y="5" width="18" height="14" rx="2.5"/><path class="s" d="M10 10.5a2 2 0 1 0 0 3M17 10.5a2 2 0 1 0 0 3"/>',
+        au: '<circle class="s" cx="9" cy="8" r="3.2"/><path class="s" d="M3.5 19c.8-3.2 3-5 5.5-5s4.7 1.8 5.5 5M17 8.5a3.5 3.5 0 0 1 0 5M19.5 6.5a6.5 6.5 0 0 1 0 9"/>',
+        sl: '<path class="s" d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/>',
+        lp: '<path class="s" d="M17 2.5l3 3-3 3M4 11V9.5a4 4 0 0 1 4-4h12M7 21.5l-3-3 3-3M20 13v1.5a4 4 0 0 1-4 4H4"/>',
+      };
+      const icon = k => `<svg viewBox="0 0 24 24">${I[k]}</svg>`;
+      const row = (k, label, value, onClick, toggle) => {
+        const r = mk('button', 'np-row');
+        const l = mk('span', 'np-row-l'); l.textContent = label;
+        r.append(mk('span', 'np-row-ico', icon(k)), l);
+        if (toggle != null) r.append(mk('span', 'np-sw' + (toggle ? ' on' : ''), '<span></span>'));
+        else { const val = mk('span', 'np-row-v'); val.textContent = value || ''; r.append(val, mk('span', 'np-row-c', '‹')); }
+        r.onclick = e => { e.stopPropagation(); onClick(r); };
+        return r;
+      };
+      const sub = (title, opts) => {
+        sh.replaceChildren(mk('div', 'np-grip'));
+        const h = mk('button', 'np-sub-h'); h.textContent = '› ' + title;
+        h.onclick = e => { e.stopPropagation(); main(); };
+        sh.append(h);
+        opts.forEach(([label, on, fn]) => {
+          const b = mk('button', 'np-opt' + (on ? ' on' : ''));
+          b.textContent = label;
+          b.onclick = e => { e.stopPropagation(); fn(); this._closeSheet(); };
+          sh.append(b);
+        });
+      };
+      const main = () => {
+        sh.replaceChildren(mk('div', 'np-grip'));
+        // الجودة
+        const tracks = this._tracks();
+        if (tracks.length) {
+          const abr = this.shaka.getConfiguration().abr.enabled;
+          const act = this.shaka.getVariantTracks().find(t => t.active);
+          sh.append(row('q', 'الجودة', abr ? `تلقائي${act ? ` (${act.height}p)` : ''}` : `${act ? act.height : ''}p`, () => sub('الجودة', [
+            [`تلقائي${act ? ` (${act.height}p)` : ''}`, abr, () => { this.shaka.configure({ abr: { enabled: true } }); ls.set('q', 0); }],
+            ...tracks.map(t => [`${t.height}p${t.height >= 720 ? '  HD' : ''}`, !abr && act && act.height === t.height, () => {
+              this.shaka.configure({ abr: { enabled: false } });
+              this.shaka.selectVariantTrack(t, true, 4);
+              ls.set('q', t.height); this._updQ();
+            }]),
+          ])));
+        }
+        // السرعة
+        sh.append(row('sp', 'سرعة التشغيل', v.playbackRate === 1 ? 'عادي' : `${v.playbackRate}×`, () => sub('سرعة التشغيل',
+          SPEEDS.map(s => [s === 1 ? 'عادي' : `${s}×`, v.playbackRate === s, () => { v.playbackRate = s; this.rate = s; ls.set('rate', s); }]))));
+        // الترجمة (إذا في)
+        if (this.captions && this.captions.length) {
+          sh.append(row('cc', 'الترجمة والشرح', this.capSel || 'إيقاف', () => sub('الترجمة والشرح', [
+            ['إيقاف', !this.capSel, () => this._pickCaption(null)],
+            ...this.captions.map(c => [c.label, this.capSel === c.label, () => this._pickCaption(c)]),
+          ])));
+        }
+        // المقطع الصوتي (إذا في أكتر من لغة)
+        if (this.shaka && this.shaka.getAudioLanguagesAndRoles) {
+          const langs = this.shaka.getAudioLanguagesAndRoles();
+          if (langs.length > 1) {
+            const cur = (this.shaka.getVariantTracks().find(t => t.active) || {}).language || '';
+            sh.append(row('au', 'المقطع الصوتي', cur, () => sub('المقطع الصوتي',
+              langs.map(l => [l.label || l.language, l.language === cur, () => this.shaka.selectAudioLanguage(l.language, l.role)]))));
+          }
+        }
+        // مؤقت الإيقاف (من app.js)
+        if (typeof setSleep === 'function' && typeof SLEEP_OPTS !== 'undefined') {
+          const st = typeof sleepState !== 'undefined' ? sleepState : {};
+          const val = st.endOfVideo ? 'آخر الفيديو' : st.at ? `${Math.max(1, Math.ceil((st.at - Date.now()) / 60000))} د` : 'غير مفعّل';
+          sh.append(row('sl', 'مؤقّت إيقاف التشغيل', val, () => sub('مؤقّت إيقاف التشغيل',
+            SLEEP_OPTS.map(([m, label]) => [label, m === 0 ? !st.at && !st.endOfVideo : m === -1 ? !!st.endOfVideo : false, () => setSleep(m, () => this)]))));
+        }
+        // تكرار
+        sh.append(row('lp', 'تكرار الفيديو', '', r => { this.setLoop(!this.loop); r.querySelector('.np-sw').classList.toggle('on', this.loop); }, !!this.loop));
+      };
+      main();
+      requestAnimationFrame(() => ov.classList.add('open'));
+    }
+    _closeSheet() {
+      const ov = this._sheet; if (!ov) return;
+      this._sheet = null;
+      ov.classList.remove('open');
+      setTimeout(() => ov.remove(), 260);
+      this._showUI();
     }
     /* إذا اخترت جودة قبل، رجّعها */
     applySavedQuality() {

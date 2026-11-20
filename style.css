@@ -559,3 +559,86 @@ html { overscroll-behavior-y: contain; }
 .desc-links-t { font-weight: 700; font-size: .85rem; color: var(--muted); }
 .desc-link { direction: ltr; text-align: left; color: #93c5fd; font-size: .85rem; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desc-link:hover { border-color: #93c5fd; }
+
+/* ---------- زر الاشتراك ---------- */
+.sub-btn { border: 0; border-radius: 999px; padding: 8px 16px; font: inherit; font-weight: 800; font-size: .88rem; cursor: pointer; background: var(--text); color: var(--bg); flex-shrink: 0; }
+.sub-btn.on { background: var(--bg2); color: var(--text); border: 1px solid var(--line); font-weight: 600; }
+.au-wrap { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.ch-row .sub-btn { margin-inline-start: auto; }
+.sub-ph { width: 60px; height: 60px; border-radius: 50%; background: linear-gradient(135deg, #8b5cf6, #ec4899); display: grid; place-items: center; font-size: 1.5rem; font-weight: 800; color: #fff; }
+.sub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.sub-grid .sub-chip { width: auto; }
+.search-list { display: grid; gap: 6px; }
+.search-row { display: flex; align-items: center; gap: 12px; background: var(--bg2); border-radius: 12px; padding: 10px 14px; }
+.search-row a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-x.static { position: static; opacity: 1; flex-shrink: 0; }
+
+/* ---------- القائمة الجانبية ☰ ---------- */
+.drawer-ov { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0); pointer-events: none; transition: background .25s; }
+.drawer-ov.open { background: rgba(0,0,0,.5); pointer-events: auto; }
+.drawer {
+  position: absolute; top: 0; bottom: 0; right: 0; width: min(300px, 84vw); background: var(--bg2); border-inline-start: 1px solid var(--line);
+  transform: translateX(100%); transition: transform .28s cubic-bezier(.2,.8,.2,1); overflow-y: auto; padding: calc(14px + env(safe-area-inset-top)) 10px 24px;
+}
+.drawer-ov.open .drawer { transform: none; }
+.drawer-head { display: flex; flex-direction: column; padding: 4px 12px 14px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.drawer-head b { font-size: 1.3rem; background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.drawer-head .muted { margin: 0; font-size: .78rem; }
+.drawer-item { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: 12px; font-size: .97rem; }
+.drawer-item:hover, .drawer-item.on { background: var(--card); }
+.drawer-ico { width: 24px; text-align: center; font-size: 1.1rem; }
+.drawer-count { margin-inline-start: auto; color: var(--muted); font-size: .8rem; }
+.drawer-sep { margin: 14px 12px 6px; padding-top: 12px; border-top: 1px solid var(--line); color: #c4b5fd; font-weight: 800; font-size: .9rem; }
+
+/* ---------- اختيار Nuvio / Nuvio Music (ضغطة مطوّلة على اللوغو) ---------- */
+.brand { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.mode-ov { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,0); display: flex; align-items: flex-start; justify-content: center; padding-top: 70px; pointer-events: none; transition: background .2s; }
+.mode-ov.open { background: rgba(0,0,0,.55); pointer-events: auto; }
+.mode-box { width: min(360px, 92vw); background: var(--bg2); border: 1px solid var(--line); border-radius: 18px; padding: 14px; transform: translateY(-12px) scale(.97); opacity: 0; transition: transform .22s, opacity .22s; }
+.mode-ov.open .mode-box { transform: none; opacity: 1; }
+.mode-title { font-weight: 800; margin: 2px 6px 10px; }
+.mode-opt { display: flex; align-items: center; gap: 14px; width: 100%; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 14px; padding: 12px; margin: 8px 0; font: inherit; cursor: pointer; text-align: right; }
+.mode-opt:hover { border-color: var(--accent); }
+.mode-ico { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-size: 1.2rem; color: #fff; flex-shrink: 0; }
+.mode-opt.v .mode-ico { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
+.mode-opt.m .mode-ico { background: linear-gradient(135deg, #f43f5e, #f59e0b); }
+.mode-txt { display: flex; flex-direction: column; }
+.mode-txt span { color: var(--muted); font-size: .85rem; }
+
+/* ---------- Nuvio Music ---------- */
+body.music-mode .brand-name { background: linear-gradient(90deg, #f43f5e, #f59e0b); -webkit-background-clip: text; background-clip: text; color: transparent; }
+body.music-mode .logo circle { fill: #f43f5e; }
+.m-tabs { display: flex; gap: 8px; overflow-x: auto; margin: 0 0 16px; padding-bottom: 4px; scrollbar-width: none; position: sticky; top: 57px; z-index: 10; background: var(--bg); padding-top: 6px; }
+.m-tabs::-webkit-scrollbar { display: none; }
+.m-tab { flex-shrink: 0; padding: 7px 16px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--line); font-weight: 700; font-size: .9rem; }
+.m-tab.on { background: linear-gradient(90deg, #f43f5e, #f59e0b); color: #fff; border-color: transparent; }
+.m-sec { margin-bottom: 6px; }
+@media (max-width: 600px) { .brand-name { display: inline; font-size: 1.05rem; } .m-tabs { top: 50px; } }
+
+/* ---------- إعدادات المشغّل: بتطلع من تحت لفوق ---------- */
+.np-sheet-ov { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,0); transition: background .25s; display: flex; align-items: flex-end; justify-content: center; }
+.np-sheet-ov.in-fs { position: absolute; }
+.np-sheet-ov.open { background: rgba(0,0,0,.45); }
+.np-sheet {
+  width: min(560px, 100%); max-height: 78%; overflow-y: auto; background: #1b1b22; color: #fff; border-radius: 18px 18px 0 0;
+  padding: 6px 8px calc(12px + env(safe-area-inset-bottom)); transform: translateY(100%); transition: transform .28s cubic-bezier(.2,.8,.2,1);
+  font-family: "Cairo", "Segoe UI", system-ui, sans-serif;
+}
+.np-sheet-ov.open .np-sheet { transform: none; }
+.np-grip { width: 40px; height: 4px; border-radius: 4px; background: rgba(255,255,255,.25); margin: 6px auto 8px; }
+.np-row, .np-opt, .np-sub-h { display: flex; align-items: center; gap: 14px; width: 100%; border: 0; background: none; color: #fff; font: inherit; font-size: .97rem; padding: 13px 12px; border-radius: 12px; cursor: pointer; text-align: right; }
+.np-row:hover, .np-opt:hover, .np-sub-h:hover { background: rgba(255,255,255,.07); }
+.np-row-ico svg { width: 24px; height: 24px; display: block; }
+.np-row-l { flex: 1; }
+.np-row-v { color: rgba(255,255,255,.65); font-size: .9rem; }
+.np-row-c { color: rgba(255,255,255,.5); font-size: 1.2rem; }
+.np-sw { width: 40px; height: 22px; border-radius: 999px; background: rgba(255,255,255,.25); position: relative; flex-shrink: 0; transition: background .2s; }
+.np-sw span { position: absolute; top: 3px; right: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: right .2s; }
+.np-sw.on { background: linear-gradient(90deg, #8b5cf6, #ec4899); }
+.np-sw.on span { right: 21px; }
+.np-sub-h { font-weight: 800; color: #c4b5fd; }
+.np-opt { padding-inline-start: 46px; position: relative; }
+.np-opt.on::before { content: "✓"; position: absolute; right: 16px; color: #ec4899; font-weight: 800; }
+.np-opt.on { font-weight: 800; }
+.np-menu { display: none !important; }
+.np-sheet svg .s { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
