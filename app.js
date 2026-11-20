@@ -810,7 +810,7 @@ function card(v, { row = false, noAuthorLink = false } = {}) {
     a.onpointerenter = () => getChannel(v.authorId).catch(() => {});
     sub.append(a);
   } else if (v.author) sub.append(v.author);
-  const rest = [views, v.published].filter(Boolean).join(' • ');
+  const rest = [views, arAgo(v.published)].filter(Boolean).join(' • ');
   if (rest) sub.append((v.author ? ' • ' : '') + rest);
   const wb = progBar(v.id); if (wb) c.querySelector('.thumb').append(wb);
   const cav = el(v.authorId ? 'span' : 'span', 'card-av');
@@ -879,7 +879,18 @@ function addSearch(q) {
 /* ---- خلاصة الرئيسية: أول شي حسب ذوقك (آخر تشغيلات، آخر بحوث، إعجابات، مفضلة)،
         وإذا خلصو منكمّل باقتراحات عامة ومشابهاتها — تقريباً بلا نهاية ---- */
 const shuffle = arr => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-const GENERAL_TOPICS = ['وثائقي', 'أغاني عربية', 'كوميديا', 'طبخ', 'رياضة', 'تقنية', 'ألعاب فيديو', 'سفر', 'مسلسلات', 'علوم', 'music', 'nature 4k', 'funny', 'cars'];
+const GENERAL_TOPICS = ['وثائقي', 'أغاني عربية', 'كوميديا', 'طبخ', 'رياضة', 'تقنية', 'ألعاب فيديو', 'سفر', 'مسلسلات', 'علوم', 'أفلام', 'كرة قدم', 'برامج عربية', 'مقالب'];
+/* الوقت اللي بيجي بالإنكليزي من السيرفرات العامة («23 hours ago») → بالعربي */
+const AR_UNITS = { second: ['ثانية', 'ثانيتين', 'ثواني'], minute: ['دقيقة', 'دقيقتين', 'دقايق'], hour: ['ساعة', 'ساعتين', 'ساعات'], day: ['يوم', 'يومين', 'أيام'], week: ['أسبوع', 'أسبوعين', 'أسابيع'], month: ['شهر', 'شهرين', 'أشهر'], year: ['سنة', 'سنتين', 'سنين'] };
+function arAgo(s) {
+  s = String(s || '');
+  if (!/[a-z]/i.test(s)) return s;
+  const st = /^\s*streamed/i.test(s) ? 'بُثّ ' : '';
+  const m = /(\d+)\s*(second|minute|hour|day|week|month|year)s?\s*ago/i.exec(s);
+  if (!m) return st ? s.replace(/^\s*streamed\s*/i, st) : s;
+  const n = +m[1], u = AR_UNITS[m[2].toLowerCase()];
+  return `${st}قبل ${n === 1 ? u[0] : n === 2 ? u[1] : n <= 10 ? `${n} ${u[2]}` : `${n} ${u[0]}`}`;
+}
 
 /* خلاصة منوّعة: كل مصدر (فيديو شفتو، بحث عملتو، إعجاب، مواضيع عامة عشوائية) بياخد دور صغير بكل دفعة،
    وما في قناة وحدة بتاخد أكتر من فيديوين بالدفعة. لهيك ما بيغلب «مستر بيست» أو غيرو. */
@@ -890,14 +901,21 @@ function makeHomeFeed(seen) {
   const seeds = [];
   for (let i = 0; i < 10; i++) for (const v of [hist[i], likes[i], favs[i]]) if (v && !seeds.some(s => s.id === v.id)) seeds.push(v);
   const searchSrc = q => () => cached('s:' + q, 10 * 60e3, () => withFallback(x => apiFor(x).search(x.url, q, 1), { yti: true })).then(r => r.res.items);
+  // «رائج» من يوتيوب نفسو (هالأسبوع، الأكثر مشاهدة) بدل السيرفرات العامة الأمريكية
+  const popSrc = q => () => cached('pop:' + q, 30 * 60e3, () => YtApi.search(YTI, q, 1, null, { date: 'week', sort: 'view_count' })).then(r => r.items);
   const relSrc = id => () => relatedOf(id);
+  const chSrc = (id, n) => () => getChannel(id).then(r => r.res.items.slice(0, n));
+  const subIds = new Set(store.get('subs', []).map(c => c.id));
   const sources = [
-    ...seeds.map(v => relSrc(v.id)),
-    ...searches.map(searchSrc),
-    ...shuffle(store.get('subs', [])).slice(0, 6).map(c => () => getChannel(c.id).then(r => r.res.items.slice(0, 8))),
-    () => withFallback(x => apiFor(x).trending(x.url)).then(r => r.res),
-    ...shuffle(GENERAL_TOPICS).slice(0, 4).map(searchSrc),
-  ].map(load => ({ load, pool: null, dead: false }));
+    // متل يوتيوب: آخر شي حضرتو هو الأقوى (آخر 3 فيديوهات بياخدو دورين بكل جولة)
+    ...seeds.map((v, i) => ({ load: relSrc(v.id), w: i < 3 && hist.some(h => h.id === v.id) ? 2 : 1 })),
+    ...searches.map(q => ({ load: searchSrc(q) })),
+    ...shuffle(store.get('subs', [])).slice(0, 6).map(c => ({ load: chSrc(c.id, 8) })),
+    // قنوات بتحضرها كتير حتى لو مش مشترك فيها: أحدث فيديوهاتها
+    ...favChannels(4).filter(id => !subIds.has(id)).map(id => ({ load: chSrc(id, 6) })),
+    ...shuffle(GENERAL_TOPICS).slice(0, 2).map(q => ({ load: popSrc(q) })),
+    ...shuffle(GENERAL_TOPICS).slice(0, 2).map(q => ({ load: searchSrc(q) })),
+  ].map(s => ({ w: 1, ...s, pool: null, dead: false }));
   const expandIds = [];
   const ensure = s => {
     if (s.pool || s.dead) return Promise.resolve();
@@ -917,28 +935,29 @@ function makeHomeFeed(seen) {
       }
       const live = shuffle(sources.filter(s => s.pool && s.pool.length));
       const out = [], perAuthor = {};
-      for (let round = 0; round < 3 && out.length < 18; round++) {
-        for (const s of live) {
-          let tries = 0;
-          while (s.pool.length && tries++ < 6) {
-            const v = s.pool.shift();
-            if (seen.has(v.id)) continue;
-            if (watched.has(v.id)) { seen.add(v.id); continue; }
-            const a = v.authorId || v.author || '';
-            if ((perAuthor[a] || 0) >= 2) { s.pool.push(v); continue; }
-            perAuthor[a] = (perAuthor[a] || 0) + 1;
-            seen.add(v.id); expandIds.push(v.id); out.push(v);
-            break;
-          }
+      const pick = s => {
+        let tries = 0;
+        while (s.pool.length && tries++ < 6) {
+          const v = s.pool.shift();
+          if (seen.has(v.id)) continue;
+          if (watched.has(v.id)) { seen.add(v.id); continue; }
+          const a = v.authorId || v.author || '';
+          if ((perAuthor[a] || 0) >= 2) { s.pool.push(v); continue; }
+          perAuthor[a] = (perAuthor[a] || 0) + 1;
+          seen.add(v.id); expandIds.push(v.id); out.push(v);
+          return;
         }
+      };
+      for (let round = 0; round < 3 && out.length < 18; round++) {
+        for (const s of live) for (let k = 0; k < (s.w || 1); k++) pick(s);
       }
       // لحتى يضل لا نهائي: كل ما قلّت المصادر منضيف مشابهات فيديوهات عشوائية من اللي طلعو
       if (sources.filter(s => !s.dead && (!s.pool || s.pool.length)).length < 6) {
         for (let k = 0; k < 3 && expandIds.length; k++) {
           const id = expandIds.splice(Math.floor(Math.random() * expandIds.length), 1)[0];
-          sources.push({ load: relSrc(id), pool: null, dead: false });
+          sources.push({ load: relSrc(id), w: 1, pool: null, dead: false });
         }
-        if (Math.random() < 0.5) sources.push({ load: searchSrc(GENERAL_TOPICS[Math.floor(Math.random() * GENERAL_TOPICS.length)]), pool: null, dead: false });
+        if (Math.random() < 0.5) sources.push({ load: popSrc(GENERAL_TOPICS[Math.floor(Math.random() * GENERAL_TOPICS.length)]), w: 1, pool: null, dead: false });
       }
       if (out.length) return out;
       if (!sources.some(s => !s.dead && (!s.pool || s.pool.length))) return [];
@@ -946,6 +965,83 @@ function makeHomeFeed(seen) {
     return [];
   };
 }
+
+/* القنوات اللي بتحضرها كتير (من سجلّك): الأكثر أول */
+function favChannels(n) {
+  const cnt = {};
+  for (const v of lib.list('hist').slice(0, 80)) if (v.authorId) cnt[v.authorId] = (cnt[v.authorId] || 0) + 1;
+  return Object.entries(cnt).filter(([, k]) => k >= 2).sort((a, b) => b[1] - a[1]).slice(0, n).map(([id]) => id);
+}
+
+/* ---- شرائح المواضيع فوق الرئيسية (متل يوتيوب): «الكل» = خلاصتك، والباقي خلاصة لموضوع واحد ---- */
+const CHIP_TOPICS = [
+  ['new', 'محتوى جديد لك'],
+  ['music', 'موسيقى', 'أغاني'], ['mix', 'مكسات', 'مكس أغاني'], ['live', 'مباشر', 'بث مباشر', { feat: 'live' }],
+  ['games', 'ألعاب فيديو', 'ألعاب فيديو'], ['podcast', 'بودكاست', 'بودكاست'], ['news', 'أخبار', 'أخبار', { date: 'today' }],
+  ['sport', 'رياضة', 'رياضة'], ['series', 'مسلسلات', 'مسلسلات'], ['cook', 'طبخ', 'وصفات طبخ'], ['comedy', 'كوميديا', 'كوميديا'], ['doc', 'وثائقي', 'وثائقي'],
+  ['recent', 'محمّلة مؤخراً'], ['watched', 'شاهدتها'],
+];
+let homeChip = 'all';
+function homeChipList() {
+  const mine = [];
+  for (const s of store.get('searches', [])) {
+    if (mine.length >= 3) break;
+    const q = String(s).trim();
+    if (q && q.length <= 24 && !/^https?:/i.test(q) && !mine.some(m => m[2].toLowerCase() === q.toLowerCase())) mine.push(['q:' + q, q, q]);
+  }
+  return [['all', 'الكل'], ...CHIP_TOPICS.slice(0, 1), ...mine, ...CHIP_TOPICS.slice(1)];
+}
+function homeChipBar() {
+  const bar = el('div', 'home-chips');
+  const row = el('div', 'hchips');
+  for (const c of homeChipList()) {
+    const b = el('button', 'hchip' + (c[0] === homeChip ? ' on' : ''), c[1]); b.dir = 'auto';
+    b.onclick = () => { if (homeChip === c[0]) return; homeChip = c[0]; window.scrollTo(0, 0); renderHome(); };
+    row.append(b);
+  }
+  // عالكمبيوتر: عجلة الماوس بتحرّك الشرائح يمين وشمال
+  row.addEventListener('wheel', e => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { row.scrollLeft -= e.deltaY; e.preventDefault(); } }, { passive: false });
+  bar.append(row);
+  requestAnimationFrame(() => { const on = row.querySelector('.on'); if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'center' }); });
+  return bar;
+}
+function chipFeed(c, seen) {
+  const [k, , q, f] = c;
+  const fresh = list => list.filter(v => v && v.id && !seen.has(v.id) && (seen.add(v.id), true));
+  if (k === 'watched') { let done = false; return async () => { if (done) return []; done = true; return lib.list('hist').slice(0, 80); }; }
+  if (k === 'new') { // اشتراكاتك + القنوات اللي بتحضرها: الأحدث أول
+    let done = false;
+    return async () => {
+      if (done) return []; done = true;
+      const ids = [...new Set([...store.get('subs', []).map(x => x.id), ...favChannels(6)])].slice(0, 14);
+      const lists = await Promise.allSettled(ids.map(id => getChannel(id).then(r => r.res.items.slice(0, 6))));
+      const all = fresh(uniqById(lists.flatMap(x => (x.status === 'fulfilled' ? x.value : []))));
+      return all.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    };
+  }
+  if (k === 'recent') { // من مواضيعك وبحوثك: اللي انرفع هالأسبوع
+    const qs = [...store.get('searches', []).slice(0, 4), ...shuffle(GENERAL_TOPICS).slice(0, 2)];
+    let i = 0;
+    return async () => {
+      while (i < qs.length) {
+        const r = await YtApi.search(YTI, qs[i++], 1, null, { date: 'week', sort: 'upload_date' }).catch(() => null);
+        const l = r ? fresh(r.items) : [];
+        if (l.length) return l;
+      }
+      return [];
+    };
+  }
+  // موضوع: بحث يوتيوب مع التكملة (لا نهائي)
+  let next = null, first = true;
+  return async () => {
+    if (!first && !next) return [];
+    const r = first ? await YtApi.search(YTI, q, 1, null, f || {}) : await YtApi.search(YTI, q, 1, next);
+    first = false; next = r.next;
+    return fresh(r.items);
+  };
+}
+// كم عمود بالشبكة هلّق (لحتى رف الشورتس ييجي بعد صفّين كاملين، بلا كرت لحالو بسطر)
+const gridCols = g => Math.max(1, getComputedStyle(g).gridTemplateColumns.split(' ').filter(Boolean).length);
 
 /* ================= الاشتراكات (محفوظة على جهازك) ================= */
 const subs = {
@@ -1081,39 +1177,67 @@ function homeTop() {
 }
 async function renderHome(force) {
   document.title = 'Nuvio — فيديو بلا إعلانات';
-  view.replaceChildren(liveSection(['searches', 'subs', 'hist', 'chTop', 'chSeen', 'prefs'], homeTop));
+  const chips = homeChipBar();
+  // شريحة غير «الكل»: خلاصة الموضوع بس (متل يوتيوب)
+  const chip = homeChip !== 'all' && homeChipList().find(c => c[0] === homeChip);
+  if (chip) {
+    view.replaceChildren(chips);
+    const g = el('div', 'grid feed'); g.append(skCards(9));
+    view.append(g);
+    const feed = chipFeed(chip, new Set());
+    try {
+      let first = (await feed()).filter(v => chip[0] === 'watched' || suggestOk(v));
+      if (!g.isConnected) return;
+      g.replaceChildren();
+      if (!first.length) throw new Error('فاضي');
+      first.forEach(v => g.append(card(v)));
+      infinite(g, async () => { const more = await feed(); more.filter(v => chip[0] === 'watched' || suggestOk(v)).forEach(v => g.append(card(v))); return more.length > 0; });
+    } catch {
+      if (!g.isConnected) return;
+      g.replaceWith(el('div', 'empty', chip[0] === 'watched' ? 'ما حضرت شي لسّا.' : chip[0] === 'new' ? 'اشترك بقنوات أو احضر فيديوهات، وبيطلعلك هون الجديد منها.' : 'ما لقيت شي هلّق — جرّب بعد شوي.'));
+    }
+    return;
+  }
+  view.replaceChildren(chips, liveSection(['searches', 'subs', 'hist', 'chTop', 'chSeen', 'prefs'], homeTop));
   setTimeout(() => refreshChannelTops(), 2500);
   const personal = store.get('searches', []).length || subs.list().length || lib.list('hist').length;
   // ٤) مقترح لك (بيتحمّل شوي شوي مع التمرير)
   view.append(sectionHead(personal ? 'مقترح لك' : 'مقترحات'));
-  const g = el('div', 'grid'); g.append(skCards(8));
+  const g = el('div', 'grid feed'); g.append(skCards(9));
   view.append(g);
   const seen = new Set();
   const feed = makeHomeFeed(seen);
   // القائمة بتنحفظ على الجهاز: لمّا تفتح الموقع بتلاقي آخر قائمة فوراً، وبتتجدّد بس بالسحب للتحديث
   const kept = [];
-  const keep = items => { kept.push(...items.map(slim)); if (kept.length <= 120) store.set('homeFeed', { at: Date.now(), items: kept }); };
+  const keep = items => { kept.push(...items.map(slim)); if (kept.length <= 120) store.set('homeFeed', { at: Date.now(), items: kept, v: 2 }); };
   const saved = !force && store.get('homeFeed', null);
   try {
     let first = [];
-    if (saved && saved.items && saved.items.length && Date.now() - saved.at < 3 * 86400e3) {
+    // (v: 2 = الخوارزمية الجديدة؛ القديمة كان فيها رائج أمريكي — منتركها)
+    if (saved && saved.v === 2 && saved.items && saved.items.length && Date.now() - saved.at < 3 * 86400e3) {
       first = saved.items.filter(v => v && v.id);
       first.forEach(v => seen.add(v.id));
       kept.push(...first);
-      // صارت قديمة (أكتر من 12 ساعة)؟ منجهّز وحدة جديدة بالخلفية، وبتبيّن بالفتحة الجاية (بلا ما تنط الصفحة هلّق)
-      if (Date.now() - saved.at > 12 * 3600e3) makeHomeFeed(new Set())().then(m => { if (m && m.length) store.set('homeFeed', { at: Date.now(), items: m.map(slim) }); }).catch(() => {});
+      // صارت قديمة (أكتر من 6 ساعات)؟ منجهّز وحدة جديدة بالخلفية، وبتبيّن بالفتحة الجاية (بلا ما تنط الصفحة هلّق)
+      if (Date.now() - saved.at > 6 * 3600e3) makeHomeFeed(new Set())().then(m => { if (m && m.length) store.set('homeFeed', { at: Date.now(), items: m.map(slim), v: 2 }); }).catch(() => {});
     } else {
       first = await feed();
       keep(first);
     }
     let shownFirst = first.filter(suggestOk);
     for (let k = 0; !shownFirst.length && k < 3; k++) { const m = await feed(); keep(m); shownFirst = m.filter(suggestOk); if (!m.length) break; }
+    // أول دفعة لازم تعبّي صفّين عالأقل (عالشاشات الكبيرة)
+    for (let k = 0; shownFirst.length < 12 && k < 2; k++) { const m = await feed(); keep(m); shownFirst = shownFirst.concat(m.filter(suggestOk)); if (!m.length) break; }
     if (!g.isConnected) return;
     g.replaceChildren();
     if (!shownFirst.length) throw new Error('فاضي');
     shownFirst.forEach(v => g.append(card(v)));
-    // رف الشورتس جوّا الخلاصة (بعد أول 6 فيديوهات، متل يوتيوب)
-    if (ytiUsable()) { const sr = homeShortsRow(); if (g.children.length > 6) g.insertBefore(sr, g.children[6]); else g.append(sr); }
+    // رف الشورتس جوّا الخلاصة: بعد صفّين كاملين (متل يوتيوب)
+    if (ytiUsable()) {
+      const sr = homeShortsRow();
+      const at = gridCols(g) * 2;
+      if (g.children.length > at) g.insertBefore(sr, g.children[at]); else g.append(sr);
+    }
     infinite(g, async () => { const more = await feed(); more.filter(suggestOk).forEach(v => g.append(card(v))); keep(more); return more.length > 0; });
   } catch {
     if (!g.isConnected) return;
@@ -2929,7 +3053,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120215033';
+const APP_VERSION = '20261120221122';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -3045,6 +3169,8 @@ async function routeInner() {
   hideSug();
   document.querySelectorAll('.top-nav a').forEach(x => x.classList.toggle('on', x.getAttribute('href') === '#' + path));
   document.body.classList.toggle('watching', path === '/watch');
+  document.body.classList.toggle('home-page', path === '/');
+  if (typeof fillGuide === 'function') fillGuide();
   if (path !== '/watch') lastPage = '#' + hash;
   if (path === '/watch' && active && miniOn && p.get('v') === active.id) { shownKey = hash; restoreMini(); window.scrollTo(0, 0); return; }
   if (path === '/watch' && miniOn) await closeMini();

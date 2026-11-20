@@ -19,10 +19,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap">
-  <link rel="stylesheet" href="style.css?v=20261120215033">
+  <link rel="stylesheet" href="style.css?v=20261120221122">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.12.6/shaka-player.compiled.js" defer></script>
-  <script src="player.js?v=20261120215033" defer></script>
-  <script src="more.js?v=20261120215033" defer></script>
+  <script src="player.js?v=20261120221122" defer></script>
+  <script src="more.js?v=20261120221122" defer></script>
   <script>
   /* الأخطاء: بتنبعت للوحة التحكّم (بلا بيانات شخصية: الرسالة، الملف، نوع الجهاز، الصفحة) */
   (function () {
@@ -32,7 +32,7 @@
     function send(m, s, l) {
       m = String(m || ''); if (local || !m || skip.test(m) || ++n > 6) return;
       try {
-        var v = (document.querySelector('script[src*="app.js?v=20261120215033"]') || {}).src || '';
+        var v = (document.querySelector('script[src*="app.js?v=20261120221122"]') || {}).src || '';
         fetch('https://tube.glanzstar.de/acc/err', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, keepalive: true,
           body: JSON.stringify({ m: m.slice(0, 400), s: String(s || '').split('/').pop().slice(0, 60), l: l || 0, v: (v.match(/v=(\d+)/) || [])[1] || '', ua: navigator.userAgent.slice(0, 180), p: (location.hash.slice(1) || '/').split('?')[0] }) });
       } catch (e) { /* */ }
@@ -56,10 +56,10 @@
     } catch (e) { /* */ }
   })();
   </script>
-  <script src="tv.js?v=20261120215033" defer></script>
-  <script src="acc.js?v=20261120215033" defer></script>
-  <script src="music.js?v=20261120215033" defer></script>
-  <script src="app.js?v=20261120215033" defer></script>
+  <script src="tv.js?v=20261120221122" defer></script>
+  <script src="acc.js?v=20261120221122" defer></script>
+  <script src="music.js?v=20261120221122" defer></script>
+  <script src="app.js?v=20261120221122" defer></script>
 </head>
 <body>
   <header class="topbar">

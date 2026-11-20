@@ -372,7 +372,17 @@ document.addEventListener('DOMContentLoaded', () => {
   if (name) name.textContent = isMusic() ? 'NM' : 'N';
   document.body.classList.toggle('music-mode', isMusic());
   const menu = document.getElementById('menuBtn');
-  if (menu) menu.onclick = openDrawer;
+  // ☰: عالكمبيوتر العريض بيصغّر/بيكبّر الشريط الجانبي (متل يوتيوب)؛ غير هيك بيفتح القائمة
+  if (menu) menu.onclick = () => {
+    const page = document.body;
+    if (guideWide() && page.classList.contains('has-guide') && !page.classList.contains('watching') && !page.classList.contains('shorts-mode')) {
+      const mini = page.classList.toggle('guide-mini');
+      try { localStorage.setItem('nuvio:guideMini', mini ? '1' : '0'); } catch { /* */ }
+      return;
+    }
+    openDrawer();
+  };
+  fillGuide();
   const brand = document.querySelector('.brand');
   if (brand) {
     let t = null, long = false;
@@ -388,3 +398,78 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+/* ================= الشريط الجانبي الثابت عالكمبيوتر (متل يوتيوب) =================
+   عريض (≥1312px): كل الأقسام. أصغر (800–1311px) أو لمّا تكبس ☰: أيقونات بس.
+   صفحة الفيديو والشورتس والتلفزيون: مخفي (☰ بيفتح القائمة العايمة متل قبل). */
+const guideDesk = () => matchMedia('(hover: hover) and (pointer: fine) and (min-width: 800px)').matches;
+const guideWide = () => matchMedia('(hover: hover) and (pointer: fine) and (min-width: 1312px)').matches;
+let guideAll = false;
+function fillGuide() {
+  let g = document.querySelector('.guide');
+  if (!guideDesk() || document.documentElement.classList.contains('tv')) { if (g) g.remove(); document.body.classList.remove('has-guide'); return; }
+  if (!g) {
+    g = el('nav', 'guide'); g.setAttribute('aria-label', 'القائمة');
+    document.body.append(g);
+    try { document.body.classList.toggle('guide-mini', localStorage.getItem('nuvio:guideMini') === '1'); } catch { /* */ }
+  }
+  document.body.classList.add('has-guide');
+  const tb = document.querySelector('.topbar');
+  if (tb) document.documentElement.style.setProperty('--tb-h', tb.getBoundingClientRect().height + 'px');
+  const cur = '#' + ((location.hash.slice(1) || '/').split('?')[0]);
+  const curFull = '#' + (location.hash.slice(1) || '/');
+  const item = (icon, label, href, opts = {}) => {
+    const a = el('a', 'g-item' + (opts.cls ? ' ' + opts.cls : '')); a.href = href; a.title = label;
+    const ic = el('span', 'g-ico');
+    if (opts.img !== undefined) {
+      if (opts.img) { const im = el('img'); im.alt = ''; im.loading = 'lazy'; im.referrerPolicy = 'no-referrer'; im.src = opts.img; im.onerror = () => { ic.textContent = (label || '?').trim().charAt(0); }; ic.append(im); }
+      else ic.textContent = (label || '?').trim().charAt(0);
+      ic.classList.add('av');
+    } else ic.innerHTML = window.ico ? window.ico(icon) : '';
+    const tx = el('span', 'g-tx', label); tx.dir = 'auto';
+    a.append(ic, tx);
+    if (opts.dot) a.append(el('span', 'g-dot'));
+    if (href === curFull || (href === cur && !href.includes('?'))) a.classList.add('on');
+    return a;
+  };
+  const head = (label, href) => { const h = el(href ? 'a' : 'div', 'g-head'); if (href) h.href = href; h.append(el('span', null, label)); if (href) h.append(el('span', 'g-chev', '‹')); return h; };
+  const hr = () => el('div', 'g-hr');
+  // أيقونات بس (الشريط الصغير)
+  const core = el('div', 'g-core');
+  core.append(item('home', 'الرئيسية', '#/'), item('shorts', 'شورتس', '#/shorts'), item('subs', 'الاشتراكات', '#/subs'), item('folder', 'أنت', '#/me'), item('music', 'موسيقى', '#/music'));
+  // كل الأقسام (الشريط العريض)
+  const full = el('div', 'g-full');
+  full.append(item('home', 'الرئيسية', '#/'), item('shorts', 'شورتس', '#/shorts'), item('music', 'Nuvio Music', '#/music'), hr());
+  const sl = typeof subs !== 'undefined' ? subs.list() : [];
+  full.append(head('الاشتراكات', '#/subs'));
+  if (!sl.length) full.append(el('div', 'g-note muted', 'اشترك بقنوات وبيطلعو هون'));
+  const isNew = id => { try { return typeof chNew !== 'undefined' && chNew.has(id); } catch { return false; } };
+  const ordered = [...sl].sort((a, b) => isNew(b.id) - isNew(a.id));
+  ordered.slice(0, guideAll ? 60 : 7).forEach(c => full.append(item('', c.name || 'قناة', `#/channel?id=${encodeURIComponent(c.id)}`, { img: c.avatar || '', dot: isNew(c.id) })));
+  if (sl.length > 7) {
+    const more = el('button', 'g-item g-more');
+    const mi = el('span', 'g-ico'); mi.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + (guideAll ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6') + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+    more.append(mi, el('span', 'g-tx', guideAll ? 'إظهار أقل' : `إظهار المزيد (${nf.format(sl.length - 7)})`));
+    more.onclick = () => { guideAll = !guideAll; fillGuide(); };
+    full.append(more);
+  }
+  full.append(hr(), head('أنت', '#/me'),
+    item('clock', 'السجل', '#/history'), item('later', 'شغّل بعدين', '#/later'), item('like', 'الفيديوهات اللي عجبتك', '#/likes'),
+    item('saved', 'المحفوظة', '#/favs'), item('search', 'سجل البحث', '#/searches'));
+  if (store.get('ytlists', []).length) full.append(item('list', 'قوائم التشغيل', '#/lists'));
+  const q = s => `#/search?q=${encodeURIComponent(s)}`;
+  full.append(hr(), head('استكشاف'),
+    item('music', 'موسيقى', '#/music'), item('fire', 'رائج', q('الأكثر مشاهدة هالأسبوع')), item('globe', 'مباشر', q('بث مباشر')),
+    item('bolt', 'ألعاب فيديو', q('ألعاب فيديو')), item('book', 'أخبار', q('أخبار')), item('star', 'رياضة', q('رياضة')), item('mic', 'بودكاست', '#/music/podcast'));
+  const me = typeof accUser === 'function' && accUser();
+  full.append(hr(), item('laptop', 'أجهزتي', '#/devices'), item('later', 'الإعدادات', '#/settings'));
+  if (me && me.admin) full.append(item('fire', 'لوحة التحكّم', '#/admin'));
+  if (!me) full.append(item('folder', 'تسجيل الدخول', '#/login'));
+  const cv = typeof APP_VERSION !== 'undefined' ? APP_VERSION : '';
+  const foot = el('div', 'g-foot muted', `Nuvio · نسخة ${verShort(cv)}`);
+  full.append(foot);
+  g.replaceChildren(core, full);
+}
+let guideT = 0;
+window.addEventListener('nuvio:store', () => { clearTimeout(guideT); guideT = setTimeout(fillGuide, 300); });
+window.addEventListener('resize', () => { clearTimeout(guideT); guideT = setTimeout(fillGuide, 200); });

@@ -1583,3 +1583,76 @@ a.cmt-name:hover { text-decoration: underline; }
 html.tv .cmts { display: none; }
 /* إطار يوتيوب جوّا المشغّل الصغير: بيضل بحدود الفيديو (بلا ما يغطّي العنوان والأزرار) */
 .mini-vid { position: relative; overflow: hidden; }
+
+/* ===== الشريط الجانبي الثابت (كمبيوتر) — متل يوتيوب ===== */
+.guide { display: none; }
+@media (hover: hover) and (pointer: fine) and (min-width: 800px) {
+  body.has-guide .guide {
+    display: block; position: fixed; top: var(--tb-h, 57px); right: 0; bottom: 0; z-index: 15;
+    width: 76px; overflow-y: auto; overflow-x: hidden; padding: 6px 4px 24px; background: var(--bg);
+    scrollbar-width: thin; scrollbar-color: transparent transparent;
+  }
+  body.has-guide .guide:hover { scrollbar-color: var(--line) transparent; }
+  body.has-guide main { max-width: none; margin: 0; margin-inline-start: 76px; padding-inline: 24px; }
+  .guide .g-full { display: none; }
+  .guide .g-core { display: grid; gap: 2px; }
+  .guide .g-core .g-item { flex-direction: column; gap: 6px; padding: 14px 0 12px; border-radius: 10px; font-size: .66rem; text-align: center; }
+  .guide .g-core .g-tx { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 68px; }
+}
+@media (hover: hover) and (pointer: fine) and (min-width: 1312px) {
+  body.has-guide:not(.guide-mini) .guide { width: 240px; padding: 10px 12px 28px; }
+  body.has-guide:not(.guide-mini) main { margin-inline-start: 240px; }
+  body.has-guide:not(.guide-mini) .guide .g-full { display: block; }
+  body.has-guide:not(.guide-mini) .guide .g-core { display: none; }
+}
+body.watching .guide, body.shorts-mode .guide, html.tv .guide { display: none !important; }
+body.has-guide.watching main, body.has-guide.shorts-mode main { margin-inline-start: auto !important; }
+@media (hover: hover) and (pointer: fine) and (min-width: 800px) {
+  body.has-guide.watching main { margin: 0 auto !important; max-width: 1500px; }
+}
+@media (hover: hover) and (pointer: fine) and (min-width: 1300px) {
+  body.has-guide.watching main { max-width: 2600px; } /* صفحة الفيديو عالشاشات الكبيرة: فيديو كبير متل يوتيوب */
+}
+.g-item { display: flex; align-items: center; gap: 22px; padding: 9px 12px; border-radius: 10px; color: var(--text); text-decoration: none; font-size: .9rem; border: 0; background: none; width: 100%; font-family: inherit; cursor: pointer; text-align: right; position: relative; }
+.g-item:hover { background: var(--card); }
+.g-item.on { background: var(--card); font-weight: 700; }
+.g-ico { width: 24px; height: 24px; flex-shrink: 0; display: grid; place-items: center; }
+.g-ico svg { width: 24px; height: 24px; }
+.g-ico.av { border-radius: 50%; overflow: hidden; background: var(--card); font-weight: 800; font-size: .8rem; }
+.g-ico.av img { width: 100%; height: 100%; object-fit: cover; }
+.g-tx { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.g-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+.g-head { display: flex; align-items: center; gap: 8px; padding: 6px 12px 4px; font-weight: 800; font-size: 1rem; color: var(--text); text-decoration: none; border-radius: 10px; }
+a.g-head:hover { background: var(--card); }
+.g-chev { color: var(--muted); font-size: 1.2rem; line-height: 1; }
+.g-hr { height: 1px; background: var(--line); margin: 10px 4px; }
+.g-note { padding: 4px 12px 8px; font-size: .8rem; }
+.g-foot { padding: 14px 12px 0; font-size: .72rem; }
+
+/* ===== شرائح المواضيع فوق الرئيسية ===== */
+.home-chips { position: sticky; top: var(--tb-h, 57px); z-index: 12; background: var(--bg); margin: -16px -16px 14px; padding: 10px 16px; }
+body.has-guide .home-chips { margin-inline: -24px; padding-inline: 24px; }
+.hchips { display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth; }
+.hchips::-webkit-scrollbar { display: none; }
+.hchip { flex-shrink: 0; border: 0; border-radius: 8px; padding: 7px 13px; background: var(--card); color: var(--text); font: inherit; font-size: .88rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.hchip:hover { filter: brightness(1.25); }
+.hchip.on { background: var(--text); color: var(--bg); }
+@media (max-width: 600px) { .home-chips { top: 0; } body.has-bnav .home-chips { top: 0; } }
+
+/* ===== شبكة الرئيسية: كروت كبيرة متل يوتيوب ===== */
+@media (min-width: 700px) {
+  .grid.feed { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px 16px; }
+}
+@media (min-width: 1100px) {
+  .grid.feed { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px 16px; }
+}
+@media (min-width: 3000px) { .grid.feed { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (min-width: 3800px) { .grid.feed { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.grid.feed > .card { contain-intrinsic-size: auto 360px; }
+.grid.feed .thumb { border-radius: 12px; }
+/* صورة القناة جنب العنوان (بكل الثيمات بالرئيسية) */
+.grid.feed .card:not(.row) .meta { display: grid; grid-template-columns: 36px 1fr; column-gap: 12px; padding: 12px 2px 0; }
+.grid.feed .card:not(.row) .meta .title, .grid.feed .card:not(.row) .meta .sub { grid-column: 2; }
+.grid.feed .card:not(.row) .card-av { display: grid; place-items: center; grid-row: 1 / span 2; width: 36px; height: 36px; border-radius: 50%; overflow: hidden; background: var(--card); color: var(--text); font-weight: 700; font-size: .95rem; cursor: pointer; }
+.grid.feed .card-av img { width: 100%; height: 100%; object-fit: cover; }
+@media (min-width: 1100px) { .grid.feed .title { font-size: 1.02rem; line-height: 1.45; } .grid.feed .sub { font-size: .86rem; } }
