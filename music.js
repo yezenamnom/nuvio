@@ -185,23 +185,27 @@ async function renderMusic(path, params) {
 
   if (path === '/music/fav') {
     const list = artists.list();
-    view.append(sectionHead(`المطربين المفضّلين (${list.length})`, null, 'star'));
-    if (!list.length) { view.append(el('div', 'empty', 'لسا ما ضفت مطربين. وقت تسمع أغنية اكبس + بالمشغّل، أو «ضيف المطرب» من الزر العايم.')); }
-    else {
+    view.append(liveSection(['artists'], () => {
+      const l = artists.list();
+      if (!l.length) return [sectionHead('المطربين المفضّلين (0)', null, 'star'), el('div', 'empty', 'لسا ما ضفت مطربين. وقت تسمع أغنية اكبس + بالمشغّل، أو «ضيف المطرب» من الزر العايم.')];
       const grid = el('div', 'sub-grid');
-      list.forEach(a => grid.append(channelBubble(a)));
-      view.append(grid);
-      list.slice(0, 12).forEach(a => view.append(lazyShelf(a.name, () => getChannel(a.id).then(r => r.res.items), chHref(a.id))));
-    }
+      l.forEach(a => grid.append(channelBubble(a)));
+      return [sectionHead(`المطربين المفضّلين (${l.length})`, null, 'star'), grid];
+    }));
+    list.slice(0, 12).forEach(a => view.append(lazyShelf(a.name, () => getChannel(a.id).then(r => r.res.items), chHref(a.id))));
     return;
   }
 
   // الرئيسية: مطربينك (إذا في) + مطربين مشهورين + الأقسام
   const mine = artists.list();
-  if (mine.length) {
+  view.append(liveSection(['artists'], () => {
+    const l = artists.list();
+    if (!l.length) return [];
     const row = el('div', 'sub-strip');
-    mine.slice(0, 20).forEach(a => row.append(channelBubble(a)));
-    view.append(sectionHead('مطربينك', '#/music/fav', 'star'), row);
+    l.slice(0, 20).forEach(a => row.append(channelBubble(a)));
+    return [sectionHead('مطربينك', '#/music/fav', 'star'), row];
+  }));
+  if (mine.length) {
     view.append(lazyShelf('من مطربينك', async () => {
       const res = await Promise.all(shuffle(mine).slice(0, 5).map(a => getChannel(a.id).then(r => r.res.items.slice(0, 4)).catch(() => [])));
       return shuffle(res.flat());

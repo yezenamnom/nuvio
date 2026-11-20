@@ -717,3 +717,29 @@ body.music-mode .sec-ico { color: #fb7185; }
 .search-ico { display: grid; place-items: center; color: var(--muted); }
 .desc-links-t { display: flex; align-items: center; gap: 6px; }
 .desc-links-t .ic { width: 16px; height: 16px; }
+
+/* ===== تحميل الصور (قاعدة عامة): هيكل نابض لحد ما تجهز الصورة، وبعدين بتبيّن بنعومة ===== */
+.thumb::before {
+  content: ''; position: absolute; inset: 0; background: var(--card);
+  animation: sk-pulse 1.2s ease-in-out infinite;
+}
+.thumb:has(img.ok)::before, .thumb:has(img.bad)::before { animation: none; }
+.thumb img { position: relative; opacity: 0; transition: opacity .35s ease; }
+.thumb img.ok { opacity: 1; }
+.thumb img.now { transition: none; }
+/* صور القنوات والمطربين المدوّرة */
+.sub-chip img, .ch-card img, .ch-avatar, .author-avatar, img.ch-banner { background: var(--card); }
+.sub-chip img:not(.ok):not(.bad), .ch-card img:not(.ok):not(.bad), img.ch-avatar:not(.ok):not(.bad),
+img.author-avatar:not(.ok):not(.bad), img.ch-banner:not(.ok):not(.bad) {
+  animation: sk-pulse 1.2s ease-in-out infinite;
+}
+.sub-chip img.ok:not(.now), .ch-card img.ok:not(.now), img.ch-avatar.ok:not(.now),
+img.author-avatar.ok:not(.now), img.ch-banner.ok:not(.now) { animation: img-in .35s ease both; }
+@keyframes img-in { from { opacity: .35; } to { opacity: 1; } }
+/* الصورة اللي ما اشتغلت: بلا نبض، وبلا أيقونة الصورة المكسورة */
+.thumb img.bad { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .thumb::before, .sub-chip img, .ch-card img, .ch-avatar, .author-avatar, img.ch-banner { animation: none !important; }
+  .thumb img { transition: none; }
+}
+.thumb.sk::before { display: none; }

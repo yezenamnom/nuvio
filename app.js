@@ -32,10 +32,21 @@ const SEED_INSTANCES = [
 ];
 const PROBE_VIDEO = 'jNQXAC9IVRw'; // فيديو قصير ثابت منفحص فيه إذا السيرفر فعلاً بيقدر يجيب فيديوهات
 
+const storeVer = {}; // نسخة كل مفتاح: بتزيد مع كل تغيير
 const store = {
   get(k, d) { try { const v = localStorage.getItem('nuvio:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem('nuvio:' + k, JSON.stringify(v)); } catch { /* ignore */ } },
+  set(k, v) {
+    try { localStorage.setItem('nuvio:' + k, JSON.stringify(v)); } catch { /* ignore */ }
+    storeVer[k] = (storeVer[k] || 0) + 1;
+    window.dispatchEvent(new CustomEvent('nuvio:store', { detail: k }));
+  },
 };
+// تغيير من تبويب تاني بنفس المتصفح
+window.addEventListener('storage', e => {
+  if (!e.key || !e.key.startsWith('nuvio:')) return;
+  const k = e.key.slice(6); storeVer[k] = (storeVer[k] || 0) + 1;
+  window.dispatchEvent(new CustomEvent('nuvio:store', { detail: k }));
+});
 
 function loadInstances() {
   const all = [...SEED_INSTANCES];
@@ -575,16 +586,60 @@ function subButton(ch) {
   return b;
 }
 /* صورة قناة مدوّرة + اسم (للصفوف) */
+const avatarAsked = new Set();
+function fillAvatar(id, avatar) {
+  if (!id || !avatar) return;
+  for (const k of ['subs', 'artists']) {
+    const arr = store.get(k, []);
+    const it = arr.find(x => x.id === id && !x.avatar);
+    if (it) { it.avatar = avatar; store.set(k, arr); }
+  }
+}
 function channelBubble(c) {
   const a = el('a', 'sub-chip'); a.href = chHref(c.id); a.dir = 'auto';
   chPreview.set(c.id, { name: c.name });
   a.onpointerenter = () => getChannel(c.id).catch(() => {});
   const img = el('img'); img.alt = ''; img.loading = 'lazy';
-  if (c.avatar) setImg(img, c.avatar); else img.remove();
   const ph = el('span', 'sub-ph', (c.name || '?').trim().charAt(0));
+  if (c.avatar) setImg(img, c.avatar);
+  else if (c.id && !avatarAsked.has(c.id)) {
+    // ما في صورة محفوظة: منجيبها من القناة، ومنحطها مكان الحرف
+    avatarAsked.add(c.id);
+    getChannel(c.id).then(({ res }) => {
+      const av = res && res.info && res.info.avatar;
+      if (!av) return;
+      if (ph.isConnected) { setImg(img, av); ph.replaceWith(img); }
+      fillAvatar(c.id, av);
+    }).catch(() => {});
+  }
   a.append(c.avatar ? img : ph, el('span', null, c.name));
   return a;
 }
+
+/* أقسام «حيّة»: بتنبنى من بياناتك المحفوظة (اشتراكات، سجل، بحث، مطربين…)
+   وبتتحدّث لحالها أول ما يتغيّر شي — بلا ما تحدّث الصفحة كلها */
+const liveVer = keys => keys.map(k => storeVer[k] || 0).join(',');
+function fillLive(box) {
+  box._ver = liveVer(box._keys);
+  box.replaceChildren(...(box._build() || []).filter(Boolean));
+}
+function liveSection(keys, build) {
+  const box = el('div', 'live');
+  box._keys = keys; box._build = build;
+  fillLive(box);
+  return box;
+}
+function refreshLive() {
+  view.querySelectorAll('.live').forEach(box => {
+    if (box._ver === liveVer(box._keys)) return;
+    const r = box.getBoundingClientRect();
+    const above = r.bottom <= 0, h = r.height;
+    fillLive(box);
+    if (above) window.scrollBy(0, box.getBoundingClientRect().height - h); // ما منخلّي الصفحة تنط
+  });
+}
+let liveT = 0;
+window.addEventListener('nuvio:store', () => { clearTimeout(liveT); liveT = setTimeout(refreshLive, 60); });
 /* عنوان قسم + «الكل» */
 function sectionHead(title, href, icon) {
   const head = el('div', 'sec-head');
@@ -597,32 +652,38 @@ function sectionHead(title, href, icon) {
 }
 
 /* ================= الصفحات ================= */
-async function renderHome(force) {
-  document.title = 'Nuvio — فيديو بلا إعلانات';
-  view.replaceChildren();
+/* راس الرئيسية: سجل البحث، القنوات، آخر اللي شفتو (قسم حي) */
+function homeTop() {
+  const out = [];
   // ١) سجل البحث
   const searches = store.get('searches', []).slice(0, 14);
   if (searches.length) {
     const row = el('div', 'chips');
     searches.forEach(s => { const a = el('a', 'chip-q', s); a.href = `#/search?q=${encodeURIComponent(s)}`; a.dir = 'auto'; row.append(a); });
-    view.append(sectionHead('سجل البحث', '#/searches'), row);
+    out.push(sectionHead('سجل البحث', '#/searches'), row);
   }
   // ٢) القنوات المشترك فيها
   const mySubs = subs.list().slice(0, 20);
   if (mySubs.length) {
     const row = el('div', 'sub-strip');
     mySubs.forEach(c => row.append(channelBubble(c)));
-    view.append(sectionHead('القنوات', '#/subs'), row);
+    out.push(sectionHead('القنوات', '#/subs'), row);
   }
   // ٣) آخر اللي شفتو
   const hist = lib.list('hist').slice(0, 16);
   if (hist.length) {
     const shelf = el('div', 'shelf');
     hist.forEach(v => shelf.append(card(v)));
-    view.append(sectionHead('آخر اللي شفتو', '#/history'), shelf);
+    out.push(sectionHead('آخر اللي شفتو', '#/history'), shelf);
   }
+  return out;
+}
+async function renderHome(force) {
+  document.title = 'Nuvio — فيديو بلا إعلانات';
+  view.replaceChildren(liveSection(['searches', 'subs', 'hist'], homeTop));
+  const personal = store.get('searches', []).length || subs.list().length || lib.list('hist').length;
   // ٤) مقترح لك (بيتحمّل شوي شوي مع التمرير)
-  view.append(sectionHead(hist.length || searches.length || mySubs.length ? 'مقترح لك' : 'مقترحات'));
+  view.append(sectionHead(personal ? 'مقترح لك' : 'مقترحات'));
   const g = el('div', 'grid'); g.append(skCards(8));
   view.append(g);
   const seen = new Set();
@@ -687,15 +748,19 @@ function renderSearches() {
 async function renderSubs(mode = 'new') {
   document.title = 'القنوات — Nuvio';
   const list = subs.list();
-  view.replaceChildren(sectionHead(`القنوات المشترك فيها (${list.length})`));
+  const top = liveSection(['subs'], () => {
+    const l = subs.list();
+    const strip = el('div', 'sub-strip');
+    l.forEach(c => strip.append(channelBubble(c)));
+    return [sectionHead(`القنوات المشترك فيها (${l.length})`), l.length ? strip : null];
+  });
+  view.replaceChildren(top);
   if (!list.length) { view.append(el('div', 'empty', 'ما في اشتراكات لسّا. اكبس «اشتراك» بصفحة أي قناة أو تحت أي فيديو.')); return; }
-  const strip = el('div', 'sub-strip');
-  list.forEach(c => strip.append(channelBubble(c)));
   // فلترة بخط واحد (على الفيديوهات اللي إجت)
   const MODES = [['new', 'الأحدث'], ['views', 'الأكثر مشاهدة'], ['old', 'الأقدم'], ['today', 'اليوم'], ['week', 'هالأسبوع'], ['month', 'هالشهر'], ['short', 'قصير'], ['long', 'طويل']];
   const bar = chipBar(MODES, mode, m => { location.hash = m === 'new' ? '#/subs' : `#/subs?f=${m}`; });
   const g = el('div', 'grid'); g.append(skCards(8));
-  view.append(strip, bar, g);
+  view.append(bar, g);
   const all = [];
   const now = Date.now() / 1000;
   const keepIt = v => {
@@ -911,6 +976,7 @@ async function renderChannel(id, tab = 'home', sort = '') {
     chPreview.set(id, { name: info.name, subs: info.subs });
     if (info.banner) { const b = el('img', 'ch-banner'); b.alt = ''; setImg(b, info.banner); bannerSlot.replaceWith(b); } else bannerSlot.remove();
     const avImg = el('img', 'ch-avatar'); avImg.alt = ''; setImg(avImg, info.avatar); av.replaceWith(avImg);
+    fillAvatar(id, info.avatar);
     row.append(subButton({ id, name: info.name, avatar: info.avatar }));
     if (info.description) {
       const d = el('div', 'desc', info.description); d.dir = 'auto';
@@ -1796,7 +1862,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120055149';
+const APP_VERSION = '20261120060143';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -1827,6 +1893,7 @@ const CACHEABLE = k => /^\/($|search\?|subs$|subs\?|channel\?|lists$|music$|musi
 function savePage() {
   if (!shownKey || !CACHEABLE(shownKey) || !view.childNodes.length) return;
   if (view.querySelector('.grid > .sk-card:first-child')) return; // لسا عم تحمّل أول مرة
+  if (view.querySelector('.watch, .player-ph')) return; // صفحة فيديو — ما بتنحفظ هون
   pageCache.set(shownKey, { nodes: [...view.childNodes], y: window.scrollY, title: document.title, at: Date.now() });
   if (pageCache.size > 10) pageCache.delete(pageCache.keys().next().value);
 }
@@ -1835,6 +1902,8 @@ function restorePage(key) {
   if (!c || Date.now() - c.at > 60 * 60e3) return false;
   view.replaceChildren(...c.nodes);
   document.title = c.title;
+  refreshLive(); // اشتركت/شفت/بحثت عن شي من وقتها؟ بيبيّن فوراً
+  markLoaded(view);
   window.scrollTo(0, c.y);
   requestAnimationFrame(() => window.scrollTo(0, c.y));
   return true;
@@ -1880,7 +1949,7 @@ async function route() {
   document.querySelectorAll('.top-nav a').forEach(x => x.classList.toggle('on', x.getAttribute('href') === '#' + path));
   document.body.classList.toggle('watching', path === '/watch');
   if (path !== '/watch') lastPage = '#' + hash;
-  if (path === '/watch' && active && miniOn && p.get('v') === active.id) { restoreMini(); window.scrollTo(0, 0); return; }
+  if (path === '/watch' && active && miniOn && p.get('v') === active.id) { shownKey = hash; restoreMini(); window.scrollTo(0, 0); return; }
   if (path === '/watch' && miniOn) await closeMini();
   if (path === '/watch' && active && !miniOn && active.id !== p.get('v')) { const n = active.np(); if (n) n.destroy(); active = null; }
   // إذا طلعت من الفيديو وهو مش مصغّر، منوقّفو
@@ -1954,8 +2023,26 @@ new MutationObserver(muts => {
     if (n.nodeType !== 1) continue;
     if (n.matches && n.matches('.shelf, .sub-strip')) decorateScroller(n);
     n.querySelectorAll && n.querySelectorAll('.shelf, .sub-strip').forEach(decorateScroller);
+    markLoaded(n);
   }
 }).observe(document.getElementById('view'), { childList: true, subtree: true });
+
+/* تحميل الصور: كل صورة بتبلّش هيكل نابض، ولمّا تجهز بتبيّن بنعومة.
+   الصورة اللي شفناها قبل (بالذاكرة) بتطلع فوراً بلا حركة. */
+const loadedSrc = new Set();
+function imgReady(img) {
+  if (img.classList.contains('ok')) return;
+  const src = img.currentSrc || img.src;
+  if (loadedSrc.has(src)) img.classList.add('now'); else loadedSrc.add(src);
+  img.classList.remove('bad'); // صورة احتياطية اشتغلت بعد ما فشلت الأولى
+  img.classList.add('ok');
+}
+function markLoaded(root) {
+  if (root.tagName === 'IMG') { if (root.complete && root.naturalWidth) imgReady(root); return; }
+  if (root.querySelectorAll) root.querySelectorAll('img:not(.ok)').forEach(i => { if (i.complete && i.naturalWidth) imgReady(i); });
+}
+document.addEventListener('load', e => { if (e.target.tagName === 'IMG') imgReady(e.target); }, true);
+document.addEventListener('error', e => { if (e.target.tagName === 'IMG') e.target.classList.add('bad'); }, true);
 
 /* اتصال مسبق مع أسرع سيرفر وصوره */
 function preconnect(origin) {
