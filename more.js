@@ -578,7 +578,7 @@ let shortsCtx = null; // { ch, items } — من صفحة القناة
 function shortsExit() {
   const s = shortsState; if (!s) return;
   shortsState = null;
-  document.body.classList.remove('shorts-mode');
+  document.body.classList.remove('shorts-mode', 'shorts-clean');
   if (s.io) s.io.disconnect();
   try { s.video.pause(); } catch { /* */ }
   if (s.pre) for (const m of s.pre.values()) try { m.destroy(); } catch { /* */ }
@@ -681,6 +681,7 @@ function shortsMenu(v, sl) {
     { type: 'choice', icon: 'bolt', label: 'سرعة الضغط المطوّل', options: HOLD_RATES.map(r => [r, `${r}×`]), get: () => +prefs.get('holdRate') || 2, set: x => prefs.set('holdRate', x) },
     { type: 'toggle', icon: 'music', label: 'كتم الصوت', get: () => video.muted, set: x => { video.muted = x; if (!x) video.play().catch(() => {}); } },
     { type: 'choice', icon: 'wifi', label: 'توفير الإنترنت', options: [['auto', 'تلقائي'], ['on', 'دايماً (480p)'], ['off', 'أبداً']], get: () => prefs.get('saver'), set: x => { prefs.set('saver', x); if (st.sp) try { st.sp.configure(saverCfg()); } catch { /* */ } } },
+    { type: 'toggle', icon: 'eye', label: 'خبّي الأزرار (أو زوم بإصبعين)', get: () => !!prefs.get('shortsClean'), set: x => { if (st.setClean) st.setClean(x); } },
     { type: 'action', icon: 'list', label: 'ضيف لقائمة تشغيل', fn: () => addToPlaylist(v) },
     { type: 'action', icon: 'later', label: queue.has(v.id) ? 'شيل من «شغّل بعدين»' : 'شغّل بعدين', fn: () => note(queue.toggle(v) ? 'انضاف لـ«شغّل بعدين» ✓' : 'انشال من «شغّل بعدين»') },
     { type: 'action', icon: 'ban', label: 'مش مهتم', fn: () => { addNope('nope', v.id); note('تمام، ما رح نقترحلك ياه'); st.wrap.scrollBy({ top: st.wrap.clientHeight, behavior: 'smooth' }); } },
@@ -712,6 +713,20 @@ async function renderShorts(startId, ch) {
   mute.onclick = e => { e.stopPropagation(); video.muted = !video.muted; drawMute(); if (!video.muted) video.play().catch(() => {}); };
   video.addEventListener('volumechange', drawMute); drawMute();
   const s = shortsState = { wrap, video, sp: null, cur: null, seq: 0, seen: new Set(), more: null, busy: false, pre: new Map() };
+  // زوم بإصبعين (قرّب أو بعّد) = خبّي/رجّع الأزرار. بيضل متل ما هو حتى لمّا تقلب للشورت الجاي
+  document.body.classList.toggle('shorts-clean', !!prefs.get('shortsClean'));
+  const setClean = on => { prefs.set('shortsClean', on); document.body.classList.toggle('shorts-clean', on); note(on ? 'الأزرار مخفية — زوم بإصبعين كمان مرة لترجّعها' : 'رجعت الأزرار'); };
+  let pinch0 = 0, pinched = false;
+  const dist = e => Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+  wrap.addEventListener('touchstart', e => { if (e.touches.length === 2) { pinch0 = dist(e); pinched = false; } }, { passive: true });
+  wrap.addEventListener('touchmove', e => {
+    if (e.touches.length !== 2 || !pinch0) return;
+    if (e.cancelable) e.preventDefault(); // ما منخلّي الصفحة تكبر
+    const r = dist(e) / pinch0;
+    if (!pinched && (r > 1.18 || r < 0.85)) { pinched = true; setClean(!prefs.get('shortsClean')); }
+  }, { passive: false });
+  wrap.addEventListener('touchend', e => { if (e.touches.length < 2) pinch0 = 0; }, { passive: true });
+  s.setClean = setClean;
   const preloadShort = async v => {
     if (!s.sp || !s.sp.preload || s.pre.has(v.id) || shortsState !== s) return;
     try {

@@ -311,6 +311,7 @@ function openDrawer() {
   d.append(
     item('home', 'الرئيسية', '#/'),
     item('folder', 'مكتبتك', '#/me'),
+    item('laptop', 'أجهزتي', '#/devices'),
     item('subs', 'القنوات المشترك فيها', '#/subs', subs.list().length),
     item('clock', 'سجل المشاهدة', '#/history', lib.list('hist').length),
     item('like', 'الإعجابات', '#/likes', lib.list('likes').length),

@@ -2876,7 +2876,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120210057';
+const APP_VERSION = '20261120211731';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -3019,6 +3019,7 @@ async function routeInner() {
   if (path === '/login') return renderLogin(p.get('m') || 'login');
   if (path === '/admin') return renderAdmin();
   if (path === '/pair') return renderPair(p.get('c') || '');
+  if (path === '/devices') return renderDevices();
   if (path === '/lib') return renderLibView(p.get('t') || 'videos', p.get('k') || 'hist');
   if (path === '/plist' && p.get('id')) return renderUserPlaylist(p.get('id'));
   if (path === '/later') return renderLibrary('later');

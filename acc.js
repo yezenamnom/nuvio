@@ -156,7 +156,7 @@ function confirmLogout() {
 }
 
 /* ---------- لوحة التحكّم (للمدير بس) ---------- */
-const PAGE_AR = { '/': 'الرئيسية', '/watch': 'عم يتفرّج على فيديو', '/shorts': 'شورتس', '/search': 'بحث', '/channel': 'قناة', '/subs': 'القنوات', '/me': 'صفحة أنا', '/settings': 'الإعدادات', '/admin': 'لوحة التحكّم', '/login': 'تسجيل الدخول', '/lib': 'مكتبتو', '/plist': 'قائمة تشغيل' };
+const PAGE_AR = { '/devices': 'أجهزتي', '/pair': 'ربط جهاز', '/': 'الرئيسية', '/watch': 'عم يتفرّج على فيديو', '/shorts': 'شورتس', '/search': 'بحث', '/channel': 'قناة', '/subs': 'القنوات', '/me': 'صفحة أنا', '/settings': 'الإعدادات', '/admin': 'لوحة التحكّم', '/login': 'تسجيل الدخول', '/lib': 'مكتبتو', '/plist': 'قائمة تشغيل' };
 const pageAr = p => PAGE_AR[p] || (p.startsWith('/music') ? 'Nuvio Music' : p);
 function agoAr(ms) {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -297,7 +297,8 @@ function loadLib(url) {
   return libs[url];
 }
 const QR_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
-const SCAN_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
+const SCAN_LIB = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js'; // (cdnjs ما عندو jsQR — كان 404)
+const SCAN_LIB2 = 'https://unpkg.com/jsqr@1.4.0/dist/jsQR.min.js';
 async function qrSvg(text) {
   await loadLib(QR_LIB);
   const q = qrcode(0, 'M'); q.addData(text); q.make();
@@ -425,12 +426,27 @@ async function renderPair(code) {
     const mic = el('button', 'remote-mic'); mic.type = 'button'; mic.setAttribute('aria-label', 'احكي'); mic.innerHTML = window.ico ? window.ico('mic') : '🎤';
     const go = el('button', 'btn btn-main', 'ابعت');
     const sent = el('div', 'remote-sent');
+    const sugs = el('div', 'remote-sugs');
     const row = el('div', 'remote-row'); row.append(inp, mic);
-    f.append(row, go, sent);
+    f.append(row, sugs, go, sent);
+    // اقتراحات فورية وإنت عم تكتب (من جوجل/يوتيوب) — كبسة عليها بتبعتها
+    let sugT = 0, sugQ = '';
+    inp.addEventListener('input', () => {
+      clearTimeout(sugT);
+      const q = inp.value.trim(); sugQ = q;
+      if (!q) { sugs.replaceChildren(); return; }
+      sugT = setTimeout(() => {
+        if (typeof googleSuggest !== 'function') return;
+        googleSuggest(q).then(list => {
+          if (sugQ !== q) return;
+          sugs.replaceChildren(...list.slice(0, 8).map(s => { const b = el('button', 'remote-sug', s); b.type = 'button'; b.dir = 'auto'; b.onclick = () => { sugs.replaceChildren(); send(s); }; return b; }));
+        }).catch(() => {});
+      }, 120);
+    });
     const send = async q => {
       q = (q || '').trim(); if (!q) return;
       go.disabled = true;
-      try { await accApi('/pair/send', { method: 'POST', body: { code, q }, token: '' }); sent.prepend(el('div', 'remote-item', `✓ ${q}`)); inp.value = ''; note('انبعت للشاشة ✓'); }
+      try { await accApi('/pair/send', { method: 'POST', body: { code, q }, token: '' }); sent.prepend(el('div', 'remote-item', `✓ ${q}`)); inp.value = ''; sugs.replaceChildren(); note('انبعت للشاشة ✓'); }
       catch (e) { note(e.message || 'ما انبعت'); }
       go.disabled = false;
     };
@@ -480,19 +496,34 @@ async function openScanner() {
   let stream = null, alive = true;
   o.ov.onclose = () => { alive = false; if (stream) stream.getTracks().forEach(t => t.stop()); };
   manual.onclick = () => { o.close(); askText('اكتب الكود اللي عالشاشة التانية', 'مثلاً ABCD 2345').then(v => { if (v) location.hash = '#/pair?c=' + encodeURIComponent(v.trim()); }); };
-  try {
-    [stream] = await Promise.all([navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }), loadLib(SCAN_LIB)]);
-  } catch { if (alive) { o.box.replaceChildren(el('p', 'muted', 'ما في إذن للكاميرا — اكتب الكود بإيدك')); } return; }
+  const fail = m => { if (alive) o.box.replaceChildren(el('p', 'qr-err', m)); };
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fail('هالمتصفح ما بيسمح بالكاميرا هون — اكتب الكود بإيدك');
+  // الكاميرا أول (جوّا كبستك)، والقارئ بيتحمّل بنفس الوقت
+  const libP = 'BarcodeDetector' in window ? Promise.resolve() : loadLib(SCAN_LIB);
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }); }
+  catch (e) { return fail(e && e.name === 'NotAllowedError' ? 'ما في إذن للكاميرا — اسمحلها من إعدادات المتصفح، أو اكتب الكود بإيدك' : 'ما قدرت افتح الكاميرا — اكتب الكود بإيدك'); }
   if (!alive) { stream.getTracks().forEach(t => t.stop()); return; }
-  vid.srcObject = stream; await vid.play().catch(() => {});
-  const cv = document.createElement('canvas'); const cx = cv.getContext('2d', { willReadFrequently: true });
-  const tick = () => {
-    if (!alive) return;
-    if (vid.readyState >= 2) {
+  vid.setAttribute('autoplay', ''); vid.srcObject = stream;
+  await vid.play().catch(() => {});
+  let detect = null;
+  if ('BarcodeDetector' in window) { try { const bd = new BarcodeDetector({ formats: ['qr_code'] }); detect = async () => { const r = await bd.detect(vid); return r && r[0] && r[0].rawValue; }; } catch { /* */ } }
+  if (!detect) {
+    try { await libP; } catch { /* */ }
+    if (!window.jsQR) { try { await loadLib(SCAN_LIB2); } catch { /* */ } }
+    if (!window.jsQR) return fail('ما قدرت حمّل قارئ الكود — اكتب الكود بإيدك');
+    const cv = document.createElement('canvas'); const cx = cv.getContext('2d', { willReadFrequently: true });
+    detect = async () => {
       const w = 480, h = Math.round(480 * vid.videoHeight / vid.videoWidth) || 360;
       cv.width = w; cv.height = h; cx.drawImage(vid, 0, 0, w, h);
-      const r = window.jsQR && jsQR(cx.getImageData(0, 0, w, h).data, w, h);
-      const m = r && /[#?&]c=([A-Z0-9]{8})/i.exec(r.data);
+      const r = jsQR(cx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
+      return r && r.data;
+    };
+  }
+  const tick = async () => {
+    if (!alive) return;
+    if (vid.readyState >= 2 && vid.videoWidth) {
+      let text = null; try { text = await detect(); } catch { /* */ }
+      const m = text && /[#?&]c=([A-Z0-9]{8})/i.exec(text);
       if (m) { o.close(); location.hash = '#/pair?c=' + m[1]; return; }
     }
     setTimeout(tick, 200);
@@ -533,4 +564,58 @@ async function accCmdLoop() {
     } catch (e) { if (e.status === 401) break; await new Promise(z => setTimeout(z, 5000)); }
   }
   cmdLoopOn = false;
+}
+
+/* «أجهزتي»: أجهزتك اللي فاتحة Nuvio بحسابك، وبتبعتلها فيديو (اللي عم يشتغل هلّق أو من سجلك) */
+let devTimer = 0;
+async function renderDevices() {
+  document.title = 'أجهزتي — Nuvio';
+  const box = el('div', 'devices-page');
+  box.append(sectionHead('أجهزتي', null, 'laptop'));
+  const me = accUser();
+  if (!me) {
+    box.append(el('p', 'muted', 'سجّل دخول بنفس الحساب على تلفونك وكمبيوترك وتلفزيونك، وبتشوفهن هون وبتبعتلهن فيديوهات.'));
+    const a = el('a', 'btn btn-main', 'سجّل دخول'); a.href = '#/login';
+    const q = el('button', 'btn', 'دخول بـ QR'); q.onclick = showQrLogin;
+    const acts = el('div', 'pair-acts'); acts.append(a, q); box.append(acts);
+    view.replaceChildren(box); return;
+  }
+  const list = el('div', 'dev-list'); list.append(el('div', 'muted', 'عم جيب أجهزتك…'));
+  const add = el('button', 'btn dev-add', '+ سجّل دخول جهاز تاني'); add.onclick = openScanner;
+  box.append(list, add, el('p', 'muted dev-hint', 'الأجهزة الخضر فاتحة Nuvio هلّق. لتبعت لتلفزيون أو كمبيوتر، افتح Nuvio عليه وسجّل دخول بنفس الحساب (أسهل شي بكود QR).'));
+  view.replaceChildren(box);
+  const draw = async () => {
+    if (!list.isConnected) { clearInterval(devTimer); return; }
+    let devs = [];
+    try { devs = (await accApi('/devices')).devices; } catch (e) { list.replaceChildren(el('div', 'muted', e.message || 'ما قدرت جيب أجهزتك')); return; }
+    const mine = accDid();
+    if (!devs.some(d => d.did === mine)) devs.unshift({ did: mine, name: deviceName(), online: true, kind: matchMedia('(pointer: coarse)').matches ? 'mobile' : 'desktop', page: '/devices' });
+    list.replaceChildren(...devs.map(d => {
+      const r = el('div', 'dev-row' + (d.online ? ' on' : ''));
+      const ic = el('span', 'dev-ico'); ic.innerHTML = window.ico ? window.ico(d.tv || /تلفزيون/.test(d.name) ? 'subs' : d.kind === 'mobile' ? 'phones' : 'laptop') : '';
+      const tx = el('div', 'dev-tx');
+      tx.append(el('b', null, d.name + (d.did === mine ? ' (هالجهاز)' : '')),
+        el('span', 'muted', d.online ? (d.playing ? 'عم يشغّل هلّق' : `أونلاين · ${pageAr(d.page || '/')}`) : `آخر مرة ${agoAr(d.at)}`));
+      r.append(el('span', 'dev-dot'), ic, tx);
+      if (d.did !== mine && d.online) {
+        const b = el('button', 'btn btn-main dev-send', 'ابعتلو فيديو');
+        b.onclick = () => sendToDevice(d);
+        r.append(b);
+      }
+      return r;
+    }));
+  };
+  await draw();
+  clearInterval(devTimer); devTimer = setInterval(() => { if (!document.hidden) draw(); }, 8000);
+}
+// شو بدك تبعت: اللي عم يشتغل هلّق، أو من آخر اللي شفتو
+function sendToDevice(d) {
+  const items = [];
+  const cur = typeof active !== 'undefined' && active && active.id ? active : null;
+  const go = (id, title, t) => accApi('/cast', { method: 'POST', body: { did: d.did, id, t: Math.floor(t || 0), title, from: deviceName() } })
+    .then(r => note(r.listening ? `انبعت لـ«${d.name}» ✓` : `انبعت — رح يبلّش أول ما «${d.name}» يكون فاتح`)).catch(e => note(e.message || 'ما انبعت'));
+  if (cur) { const np = cur.np && cur.np(); items.push(['play', `اللي عم يشتغل: ${cur.title().slice(0, 40)}`, () => go(cur.id, cur.title(), np && np.video ? np.video.currentTime : 0)]); }
+  lib.list('hist').filter(v => !cur || v.id !== cur.id).slice(0, 10).forEach(v => items.push(['clock', (v.title || v.id).slice(0, 60), () => go(v.id, v.title || '', 0)]));
+  if (!items.length) { note('ما في فيديوهات بسجلك — افتح فيديو وابعتو من ⋮'); return; }
+  openSheet(`ابعت لـ«${d.name}»:`, items);
 }

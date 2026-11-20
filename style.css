@@ -1472,3 +1472,37 @@ html.tv .qr-card { width: min(640px, 90vw); } html.tv .qr-box { width: 40vh; } h
 .tv-phone { white-space: nowrap; }
 .search .qr-search { flex-shrink: 0; width: 40px; border: 0; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
 .search .qr-search svg { width: 20px; height: 20px; fill: currentColor; }
+
+/* الشورتس بلا أزرار (زوم بإصبعين) */
+body.shorts-clean .short-info, body.shorts-clean .short-side, body.shorts-clean .shorts-top, body.shorts-clean .shorts-back,
+body.shorts-clean .shorts-mute, body.shorts-clean .shorts-nav, body.shorts-clean .bnav { opacity: 0 !important; pointer-events: none !important; transition: opacity .25s; }
+body.shorts-clean .short-bar { opacity: .35; }
+
+/* الكمبيوتر بشاشة كبيرة: الفيديو أكبر (متل يوتيوب) — عرض الصفحة كلو، والفيديو بيضل كلّو ظاهر بالطول */
+@media (min-width: 1300px) {
+  body.watching main { max-width: 2600px; padding-inline: 24px; }
+  body.watching .watch { grid-template-columns: minmax(0, 1fr) clamp(360px, 24vw, 460px); gap: 24px; }
+  body.watching .watch-main .player-box { width: min(100%, calc((100vh - 150px) * 16 / 9)); margin-inline: auto; }
+  body.watching .watch-main .info { max-width: min(100%, calc((100vh - 150px) * 16 / 9)); margin-inline: auto; }
+}
+
+/* بحث التلفون: اقتراحات */
+.remote-sugs { display: flex; flex-wrap: wrap; gap: 8px; }
+.remote-sugs:empty { display: none; }
+.remote-sug { border: 1px solid var(--line); background: var(--bg2); color: var(--text); font: inherit; font-size: .92rem; padding: 8px 12px; border-radius: 999px; cursor: pointer; }
+.qr-err { color: #f87171; padding: 10px; font-size: .92rem; line-height: 1.5; }
+
+/* «أجهزتي» */
+.devices-page { max-width: 720px; margin: 0 auto; }
+.dev-list { display: grid; gap: 10px; }
+.dev-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 16px; background: var(--bg2); border: 1px solid var(--line); }
+.dev-dot { width: 10px; height: 10px; border-radius: 50%; background: #64748b; flex-shrink: 0; }
+.dev-row.on .dev-dot { background: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,.18); }
+.dev-ico { width: 26px; height: 26px; flex-shrink: 0; color: var(--muted); }
+.dev-ico svg { width: 26px; height: 26px; }
+.dev-tx { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.dev-tx b { font-size: .98rem; }
+.dev-tx .muted { font-size: .82rem; }
+.dev-send { white-space: nowrap; padding: 8px 14px; }
+.dev-add { margin-top: 14px; width: 100%; }
+.dev-hint { margin-top: 10px; font-size: .85rem; line-height: 1.6; }
