@@ -34,7 +34,8 @@ const PROBE_VIDEO = 'jNQXAC9IVRw'; // فيديو قصير ثابت منفحص ف
 
 const storeVer = {}; // نسخة كل مفتاح: بتزيد مع كل تغيير
 const store = {
-  get(k, d) { try { const v = localStorage.getItem('nuvio:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  // قيمة فاضية (null) = متل ما في شي → منرجّع الافتراضي (كانت تكسّر الصفحات بعد المزامنة)
+  get(k, d) { try { const v = localStorage.getItem('nuvio:' + k); if (v == null) return d; const x = JSON.parse(v); return x == null ? d : x; } catch { return d; } },
   set(k, v) {
     try { localStorage.setItem('nuvio:' + k, JSON.stringify(v)); } catch { /* ignore */ }
     storeVer[k] = (storeVer[k] || 0) + 1;
@@ -2299,7 +2300,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120175157';
+const APP_VERSION = '20261120175356';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

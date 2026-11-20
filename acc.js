@@ -25,14 +25,15 @@ function accApply(data, merge) {
   accState.applying = true;
   try {
     if (merge) mergeBackup({ app: 'nuvio', data }); // أول دخول: بيانات الضيف + الحساب سوا
-    else for (const k of ACC_KEYS) if (k in data) store.set(k, data[k]); // الحساب هو المرجع
+    else for (const k of ACC_KEYS) if (data[k] != null) store.set(k, data[k]); // الحساب هو المرجع (بلا القيم الفاضية)
     if (data.prefs && data.prefs.theme) applyTheme(data.prefs.theme);
   } finally { accState.applying = false; }
 }
 function accPush(keys) {
   if (!accToken()) return Promise.resolve();
   const body = {};
-  for (const k of keys) body[k] = store.get(k, null);
+  for (const k of keys) { const v = store.get(k, null); if (v != null) body[k] = v; } // ما منرفع قيم فاضية
+  if (!Object.keys(body).length) return Promise.resolve();
   return accApi('/data', { method: 'PUT', body }).catch(() => { keys.forEach(k => accState.dirty.add(k)); });
 }
 function accFlush() {
