@@ -632,8 +632,12 @@ const mfOnce = (url, ms = 8000) => cached('mf:' + url, 4 * 60e3, async () => {
   } finally { clearTimeout(tm); }
 });
 async function shortManifest(id) {
+  // من جهازك (إضافة Nuvio Direct) — بلا سيرفرنا أبداً: إذا ما زبط، مشغّل يوتيوب مباشرة
+  if (extUsable()) {
+    try { return await extManifest(id); } catch (e) { if (window.YtMedia) throw e; }
+  }
   // مصدرنا الخاص (سريع). إذا ما زبط ومشغّل يوتيوب متوفر، منروح عليه فوراً (بلا ما نلفّ عالسيرفرات العامة)
-  if (svUsable()) {
+  else if (svUsable()) {
     try { return await mfOnce(ownMpd(id), 4000); } catch (e) { if (window.YtMedia) throw e; }
   }
   if (window.YtMedia) throw new Error('يوتيوب');

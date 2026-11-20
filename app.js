@@ -375,7 +375,11 @@ const YTI = 'https://tube.glanzstar.de/yti/youtubei/v1/';
 const YTI_INST = { url: YTI, type: 'yti' };
 const YTI_CLIENT = { clientName: 'WEB', clientVersion: '2.20251118.01.00', hl: 'ar', gl: 'DE' };
 let ytiDown = 0;
-const ytiUsable = () => Date.now() - ytiDown > 120e3; // إذا فشل، منرتاح منو دقيقتين
+// إضافة «Nuvio Direct» (شوف تحت «من جهازك»): إذا موجودة، كل طلبات يوتيوب بتروح من جهازك ليوتيوب مباشرة، ولا شي عبر سيرفرنا
+const extOn = () => document.documentElement.hasAttribute('data-nuvio-ext');
+let extDown = 0; // الإضافة موجودة بس الطلب ما وصل (إذن ناقص؟): منرتاح منها دقيقتين
+const extUsable = () => extOn() && Date.now() - extDown > 2 * 60e3;
+const ytiUsable = () => extUsable() || Date.now() - ytiDown > 120e3; // إذا فشل، منرتاح منو دقيقتين
 /* ---- ردود يوتيوب بتنحفظ على الجهاز (مضغوطة) ----
    لمّا تسكّر الموقع وترجع: البحث والقنوات وصفحات الفيديو بتبيّن فوراً من التخزين،
    وإذا صارت قديمة منحدّثها بالخلفية (للمرة الجاية). بلا نت؟ منعرض آخر شي محفوظ. */
@@ -428,6 +432,8 @@ async function yti(ep, body, ms = 6000) {
   } catch (e) { if (hit) return hit.data; throw e; } // بلا نت: آخر شي محفوظ
 }
 async function ytiNet(ep, body, ms = 6000) {
+  // مع الإضافة: من جهازك ليوتيوب مباشرة (بلا وسيطنا أبداً). إذا فشل، withFallback بيروح للسيرفرات العامة
+  if (extUsable()) return ytDirect(ep, { context: { client: YTI_CLIENT }, ...body }, ms);
   if (!ytiUsable()) throw new Error('الوسيط مرتاح');
   const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), ms);
   try {
@@ -689,6 +695,125 @@ function svCheck() { // إذا فشل، منشوف إذا الخدمة نفسه�
   fetch(`${SV}/health`, { cache: 'no-store' }).then(r => { if (!r.ok) svDown = Date.now(); }).catch(() => { svDown = Date.now(); });
 }
 
+/* ================= من جهازك: إضافة «Nuvio Direct» (مجلّد nuvio-ext) =================
+   إذا الإضافة مركّبة (بتحط data-nuvio-ext على <html>)، منطلب روابط الفيديو من يوتيوب مباشرة من شبكتك
+   (عميل VISIONOS: بلا PO token وما بينقطع بالنص)، ومنبني ملف DASH هون، والفيديو بينزل من googlevideo لعندك
+   بلا سيرفرنا. الإضافة بس بتشيل «Origin» عن طلبات يوتيوب وبتسمح للصفحة تقرا الجواب (CORS).
+   مع الإضافة ما في ولا طلب لسيرفرنا (لا فيديو ولا بحث): إذا ما زبط من جهازك، مشغّل يوتيوب مباشرة.
+   بلا الإضافة ما بيتغيّر شي: سيرفرنا، وبعدين مشغّل يوتيوب. (extOn/extUsable فوق، جنب YTI) */
+const XCLIENT = { clientName: 'VISIONOS', clientVersion: '1.02', deviceMake: 'Apple', deviceModel: 'RealityDevice17,1', osName: 'visionOS', osVersion: '26.5.23O471', hl: 'en' };
+async function ytDirect(ep, body, ms = 8000) {
+  const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), ms);
+  try {
+    let r;
+    try {
+      r = await fetch(`https://www.youtube.com/youtubei/v1/${ep}?prettyPrint=false`, {
+        method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer', signal: ctl.signal,
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, // طلب بسيط: بلا طلب استئذان (preflight)
+        body: JSON.stringify(body),
+      });
+    } catch (e) { if (e && e.name !== 'AbortError') extDown = Date.now(); throw e; } // انرفض (CORS): الإضافة مش شغّالة متل ما لازم
+    if (!r.ok) { if (r.status === 403) extDown = Date.now(); throw new Error('HTTP ' + r.status); } // 403 = «Origin» لسّا موجود
+    return await r.json();
+  } finally { clearTimeout(tm); }
+}
+// «رقم زائر» من يوتيوب (بلاه بيقول «بوت»): بينحفظ يوم على الجهاز
+let xvd = null, xvdP = null;
+function extVisitor(fresh) {
+  if (!fresh) {
+    if (xvd && Date.now() - xvd.at < 24 * 3600e3) return Promise.resolve(xvd.v);
+    try { const s = JSON.parse(localStorage.getItem('nuvio:xvd') || 'null'); if (s && s.v && Date.now() - s.at < 24 * 3600e3) { xvd = s; return Promise.resolve(s.v); } } catch { /* */ }
+    if (xvdP) return xvdP;
+  }
+  xvdP = ytDirect('visitor_id', { context: { client: XCLIENT } }, 5000).then(j => {
+    const v = (j.responseContext || {}).visitorData;
+    if (!v) throw new Error('ما في رقم زائر');
+    xvd = { v, at: Date.now() };
+    try { localStorage.setItem('nuvio:xvd', JSON.stringify(xvd)); } catch { /* */ }
+    return v;
+  }).finally(() => { xvdP = null; });
+  return xvdP;
+}
+async function extPlayer(id) {
+  for (let k = 0; k < 2; k++) {
+    const visitorData = await extVisitor(k > 0);
+    const j = await ytDirect('player', { context: { client: { ...XCLIENT, visitorData } }, videoId: id, contentCheckOk: true, racyCheckOk: true });
+    const st = (j.playabilityStatus || {}).status;
+    if (st === 'OK' && ((j.streamingData || {}).adaptiveFormats || []).some(f => f.url)) return j;
+    if (st !== 'LOGIN_REQUIRED' || k) throw new Error(st || 'NO_STREAMS'); // «بوت»؟ رقم زائر جديد ومرة كمان
+  }
+}
+// نفس فلترة سيرفرنا (nuvio-stream/server.mjs): avc1/vp9 + صوت m4a عادي، بلا AV1 ولا DRC ولا HE-AAC
+function extParse(id, j) {
+  const vd = j.videoDetails || {};
+  const dur = +vd.lengthSeconds || 0;
+  const fmts = new Map();
+  for (const f of j.streamingData.adaptiveFormats || []) {
+    if (!f.url || !f.initRange || !f.indexRange || f.isDrc) continue;
+    if (/av01/.test(f.mimeType) || /^audio\/webm/.test(f.mimeType) || /mp4a\.40\.(5|29)/.test(f.mimeType)) continue;
+    const track = f.audioTrack ? f.audioTrack.id : '';
+    const key = f.itag + (track ? '~' + track : '');
+    if (!fmts.has(key)) fmts.set(key, { ...f, key, track });
+  }
+  const caps = ((j.captions || {}).playerCaptionsTracklistRenderer || {}).captionTracks || [];
+  return {
+    id, title: vd.title || '', duration: dur, live: !!vd.isLiveContent && !dur, fmts,
+    captions: caps.filter(c => c.baseUrl).map(c => {
+      const label = (c.name && (c.name.simpleText || (c.name.runs || []).map(r => r.text).join(''))) || c.languageCode;
+      const auto = c.kind === 'asr';
+      return { lang: c.languageCode, label: label + (auto && !/auto/i.test(label) ? ' (تلقائي)' : ''), url: c.baseUrl + '&fmt=vtt', auto };
+    }),
+  };
+}
+const xEsc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// ملف DASH (نفس mpd() تبع السيرفر)، بس الروابط لـ googlevideo مباشرة
+function extMpd(d) {
+  const dur = d.duration || Math.round(Math.max(...[...d.fmts.values()].map(f => +f.approxDurationMs || 0)) / 1000);
+  const groups = new Map(); // mime|track -> []
+  for (const f of d.fmts.values()) {
+    const g = f.mimeType.split(';')[0] + '|' + (f.track || '');
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(f);
+  }
+  let i = 0;
+  const sets = [];
+  for (const [g, list] of groups) {
+    const [mime, track] = g.split('|');
+    const audio = mime.startsWith('audio');
+    const f0 = list[0];
+    const lang = track ? track.split('.')[0] : (audio ? 'und' : '');
+    const isDefault = !f0.audioTrack || f0.audioTrack.audioIsDefault;
+    const reps = list.map(f => {
+      const codecs = (f.mimeType.match(/codecs="([^"]+)"/) || [])[1] || '';
+      const attrs = audio ? `audioSamplingRate="${f.audioSampleRate || 44100}"` : `width="${f.width || 0}" height="${f.height || 0}" frameRate="${f.fps || 30}"`;
+      return `      <Representation id="${xEsc(f.key)}" codecs="${xEsc(codecs)}" bandwidth="${f.bitrate || f.averageBitrate || 0}" ${attrs}>
+${audio ? `        <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="${f.audioChannels || 2}"/>\n` : ''}        <BaseURL>${xEsc(f.url)}</BaseURL>
+        <SegmentBase indexRange="${f.indexRange.start}-${f.indexRange.end}"><Initialization range="${f.initRange.start}-${f.initRange.end}"/></SegmentBase>
+      </Representation>`;
+    }).join('\n');
+    const label = audio && f0.audioTrack ? ` label="${xEsc(f0.audioTrack.displayName || lang)}"` : '';
+    const role = audio && track ? `\n      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="${isDefault ? 'main' : 'alternate'}"/>` : '';
+    sets.push(`    <AdaptationSet id="${i++}" contentType="${audio ? 'audio' : 'video'}" mimeType="${mime}" subsegmentAlignment="true"${lang ? ` lang="${xEsc(lang)}"` : ''}${label}>${role}
+${reps}
+    </AdaptationSet>`);
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011" type="static" mediaPresentationDuration="PT${dur}S" minBufferTime="PT1.5S">
+  <Period duration="PT${dur}S">
+${sets.join('\n')}
+  </Period>
+</MPD>`;
+}
+// ملف DASH من جهازك: { text, final, data } — بينحفظ 4 دقايق (الروابط مربوطة بشبكتك، فإذا علّق منجيب جديد)
+const extManifest = id => cached('xmf:' + id, 4 * 60e3, async () => {
+  const d = extParse(id, await extPlayer(id));
+  const kinds = new Set([...d.fmts.values()].map(f => f.mimeType.split('/')[0]));
+  if (d.live || !kinds.has('video') || !kinds.has('audio')) throw new Error('مباشر أو ما في مصادر');
+  return { text: extMpd(d), final: 'nuvioext://direct/' + id, data: d };
+});
+// صوت الفيديو لحالو (للتشغيل بالخلفية): m4a العادي
+const extAudio = d => { const l = [...d.fmts.values()]; const a = l.find(f => f.itag === 140 && (!f.audioTrack || f.audioTrack.audioIsDefault)) || l.find(f => /^audio\/mp4/.test(f.mimeType)); return a ? a.url : ''; };
+
 const apiFor = inst => (inst.type === 'yti' ? YtApi : inst.type === 'piped' ? Piped : Invidious);
 
 /* ================= أدوات ================= */
@@ -774,6 +899,7 @@ function relatedFeed(seedIds, seen) {
 const preview = new Map();
 const chPreview = new Map();
 function prefetchVideo(id, deep) {
+  if (extUsable()) { if (deep) extManifest(id).catch(() => {}); return; } // من جهازك: بلا سيرفرنا
   if (svUsable()) { if (deep) manifestText(ownMpd(id)).catch(() => {}); return; } // كمان بيصحّي «الكامل» عالسيرفر
   const p = getVideo(id);
   if (deep) p.then(({ res }) => { const d = res.sources.find(s => s.kind === 'dash'); if (d) manifestText(d.url).catch(() => {}); }).catch(() => {});
@@ -1642,6 +1768,7 @@ function altHost(h) {
 }
 async function fixUrl(u) {
   let url; try { url = new URL(u); } catch { return u; }
+  if (url.host.endsWith('.googlevideo.com')) return u; // من جهازك مباشرة: ما في شي نصلّحو
   if (!/\d\./.test(url.host) || await hostWorks(url.host)) return u;
   const alt = await altHost(url.host);
   if (alt) { url.host = alt; return url.toString(); }
@@ -2015,7 +2142,7 @@ async function renderWatch(id, startTime) {
       }, { once: true });
     } catch { /* */ }
   });
-  if (svUsable()) np.setBgAudio(`${SV}/vp/${encodeURIComponent(id)}/140`);
+  if (svUsable() && !extUsable()) np.setBgAudio(`${SV}/vp/${encodeURIComponent(id)}/140`); // مع الإضافة: الصوت من جهازك (extExtras)
   window.__nuvioNp = np;
   box.classList.add('loading');
 
@@ -2063,6 +2190,7 @@ async function renderWatch(id, startTime) {
       if (box.querySelector('iframe')) return 'embed';
       const c = srcList[srcIdx];
       if (!c) return 'other';
+      if (c.kind === 'ext') return 'ext';
       if (c.url.startsWith(SV)) return c.kind === 'mp4' ? 'mp4' : 'own';
       if (c.url.startsWith(COMP)) return 'comp';
       return curInst && curInst.type === 'piped' ? 'piped' : 'inv';
@@ -2177,7 +2305,7 @@ async function renderWatch(id, startTime) {
     window.__nuvioNp = np;
     np.video.poster = ytThumb(id, 'hqdefault');
     qoe.attach(np.video);
-    if (svUsable()) np.setBgAudio(`${SV}/vp/${encodeURIComponent(id)}/140`);
+    if (svUsable() && !extUsable()) np.setBgAudio(`${SV}/vp/${encodeURIComponent(id)}/140`);
     setChip('مشغّل احتياطي', 'warn');
     // كل شي مربوط بالمشغّل (حفظ المكان، تخطّي الدعايات جوّا الفيديو، الجاي…)
     const ex = extras = watchExtras({ id, getNp: () => np, box, music, related: () => (shown && shown.related) || (current && current.data.related) || [] });
@@ -2323,8 +2451,8 @@ async function renderWatch(id, startTime) {
         } catch { /* */ }
         if (player === me && ev.detail && ev.detail.severity === 2) recover(np.video.currentTime);
       });
-      // ملف DASH من الذاكرة (أو بينجاب مرة وحدة) — بلا طلب تاني
-      const mf = s.kind === 'dash' ? await manifestText(s.url).catch(() => null) : null;
+      // ملف DASH من الذاكرة (أو بينجاب مرة وحدة) — بلا طلب تاني. «ext»: من جهازك (إذا فشل، المصدر اللي بعدو)
+      const mf = s.kind === 'ext' ? await extManifest(s.id) : s.kind === 'dash' ? await manifestText(s.url).catch(() => null) : null;
       if (mf) await player.load(toDataUri(mf.text, 'application/dash+xml'), startAt || null, 'application/dash+xml');
       else await player.load(await resolveUrl(s.url), startAt || null);
       np.setShaka(player);
@@ -2375,6 +2503,7 @@ async function renderWatch(id, startTime) {
       const cur = srcList[srcIdx];
       if (reloads <= (cur && cur.url && cur.url.startsWith(COMP) ? 1 : 3) && cur) {
         if (cur.kind === 'dash') memo.delete('mf:' + cur.url); // ملف جديد بروابط جديدة
+        if (cur.kind === 'ext') memo.delete('xmf:' + cur.id);
         try { await loadSource(cur, t); np.autoplay(); goodSince = Date.now(); return; } catch { /* المصدر اللي بعدو */ }
       }
       // مصدر تاني من نفس القائمة (مثلاً من الـ companion لمصدرنا القديم) قبل السيرفرات العامة
@@ -2399,6 +2528,17 @@ async function renderWatch(id, startTime) {
       if (!j || !np) return;
       if (j.captions && j.captions.length) np.setCaptions(j.captions);
       np.setBgAudio(j.audio || `${SV}/vp/${encodeURIComponent(id)}/140`);
+    }).catch(() => {});
+    if (ytInfo) ytInfo.then(d => { if (!d) infoFromPublic(); }); else infoFromPublic();
+  }
+  // من جهازك: الترجمة والصوت بالخلفية من نفس جواب يوتيوب (محفوظ) — ولا طلب لسيرفرنا
+  function extExtras() {
+    setChip('بلا إعلانات ✓', 'ok');
+    extManifest(id).then(({ data: d }) => {
+      if (!np) return;
+      if (d.captions.length) np.setCaptions(d.captions);
+      const a = extAudio(d);
+      if (a) np.setBgAudio(a);
     }).catch(() => {});
     if (ytInfo) ytInfo.then(d => { if (!d) infoFromPublic(); }); else infoFromPublic();
   }
@@ -2430,6 +2570,7 @@ async function renderWatch(id, startTime) {
     // «تلقائي»: مصدرنا إذا زبط، وإلا (يوتيوب حاظر السيرفر أو واقف) مشغّل يوتيوب بواجهتنا فوراً — بلا لفّة عالسيرفرات العامة
     if (early) {
       const how = await early.catch(() => false); early = null;
+      if (how === 'ext') { extExtras(); armStart(startAt); return; }
       if (how === 'own') { ownExtras(); armStart(startAt); return; }
     }
     if (!box.isConnected || embedOn) return;
@@ -2537,10 +2678,14 @@ async function renderWatch(id, startTime) {
   // تشغيل مبكر: رابط ملف DASH معروف مسبقاً، فمنبلّش الفيديو فوراً بنفس الوقت اللي عم تنجاب فيه معلوماتو
   // (معلومات الفيديو أحياناً بتاخد ٢-٤ ثواني عند السيرفر العام)
   let early = null;
-  if (svUsable()) {
-    early = playSources(OWN_INST, [{ kind: 'dash', url: ownMpd(id) }], startTime).then(ok => {
-      if (ok) return 'own';
-      svCheck();
+  // من جهازك (إذا الإضافة مركّبة) — وبس هو: إذا ما زبط، مشغّل يوتيوب مباشرة، بلا سيرفرنا. بلا الإضافة: سيرفرنا
+  const firstSrcs = [];
+  if (extUsable()) firstSrcs.push({ kind: 'ext', id, url: 'nuvioext://direct/' + id });
+  else if (svUsable()) firstSrcs.push({ kind: 'dash', url: ownMpd(id) });
+  if (firstSrcs.length) {
+    early = playSources(OWN_INST, firstSrcs, startTime).then(ok => {
+      if (ok) return (srcList[srcIdx] || {}).kind === 'ext' ? 'ext' : 'own';
+      if (firstSrcs.some(s => s.kind === 'dash')) svCheck();
       return false;
     });
   }
@@ -3053,7 +3198,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120221122';
+const APP_VERSION = '20261120224012';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
