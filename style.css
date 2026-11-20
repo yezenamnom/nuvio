@@ -1431,3 +1431,11 @@ html.np-fakefs .bnav, html.np-fakefs .topbar, html.np-fakefs .fab-wrap { display
 /* الخط التالت بشريط التقدّم: لوين وصلت النسخة الخفيفة (144p) من كل الفيديو */
 .np-low { position: absolute; left: 0; height: 4px; border-radius: 4px; background: rgba(167, 139, 250, .38); pointer-events: none; transition: height .15s, width .4s; width: 0; }
 .np-bar:hover .np-low, .np.drag .np-low { height: 6px; }
+
+/* التحميل المتدرّج: كل ما الجودة أعلى، اللون أقوى */
+.np-tiers { position: absolute; left: 0; right: 0; height: 4px; pointer-events: none; transition: height .15s; }
+.np-tier { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+.np-tier.q1 { background: rgba(167, 139, 250, .55); }
+.np-tier.q2 { background: rgba(167, 139, 250, .72); }
+.np-tier.q3 { background: rgba(196, 181, 253, .92); }
+.np-bar:hover .np-tiers, .np.drag .np-tiers { height: 6px; }

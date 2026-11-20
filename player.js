@@ -75,7 +75,8 @@
       this.bar = mk('div', 'np-bar');
       this.buf = mk('div', 'np-buf'); this.fill = mk('div', 'np-fill'); this.knob = mk('div', 'np-knob'); this.tip = mk('div', 'np-tip');
       this.low = mk('div', 'np-low'); // الطبقة الخفيفة (144p) — لوين وصل تحميل كل الفيديو
-      this.bar.append(this.low, this.buf, this.fill, this.knob, this.tip);
+      this.tiersEl = mk('div', 'np-tiers'); // التحميل المتدرّج (720 / 480 / 360)
+      this.bar.append(this.low, this.tiersEl, this.buf, this.fill, this.knob, this.tip);
 
       const row = mk('div', 'np-row');
       this.bPlay = mk('button', 'np-btn', ICON.play); this.bPlay.setAttribute('aria-label', 'تشغيل/إيقاف');
@@ -147,6 +148,13 @@
         this.marks.append(m);
       }
       for (const c of this.chapters.slice(1)) { const g = mk('i', 'np-gap'); g.style.left = `${(c.t / d) * 100}%`; this.marks.append(g); }
+    }
+    setTiers(list) {
+      this.tiersEl.replaceChildren(...(list || []).map(r => {
+        const d = mk('i', 'np-tier q' + (r.h >= 720 ? 3 : r.h >= 480 ? 2 : 1));
+        d.style.left = `${r.from * 100}%`; d.style.width = `${Math.max(0.3, (r.to - r.from) * 100)}%`;
+        return d;
+      }));
     }
     setLowLayer(f) { this.low.style.width = `${Math.max(0, Math.min(1, f || 0)) * 100}%`; }
     message(t) { this.msgEl.textContent = t || ''; this.msgEl.classList.toggle('on', !!t); }
@@ -258,7 +266,7 @@
         this.box.dispatchEvent(new CustomEvent('npbg', { detail: this.bg }));
       }
       // منجهّز أول الصوت مسبقاً (بلا تشغيل)، لحتى لمّا تسكّر الشاشة ينتقل فوراً بلا سكتة
-      if (!DESKTOP) { clearTimeout(this._preT); this._preT = setTimeout(() => { const bg = this.bg; if (!this.dead && bg && this.bgUrl && bg.src !== this.bgUrl && bg.paused) { bg.preload = 'metadata'; bg.src = this.bgUrl; } }, 4000); }
+      if (!DESKTOP) { clearTimeout(this._preT); this._preT = setTimeout(() => this._preload(), 4000); }
       if (!this._unlockAny) {
         this._unlockAny = () => { this._unlock(); if (this.unlocked || this.dead) document.removeEventListener('pointerup', this._unlockAny, true); };
         document.addEventListener('pointerup', this._unlockAny, true);
@@ -275,11 +283,21 @@
     }
     /* لازم نشغّل الصوت مرة وحدة جوّا كبسة منك، لحتى الآيفون يسمحلنا نشغّلو لاحقاً بالخلفية */
     _unlock() {
-      if (this.unlocked || !this.bg || !this.bgUrl) return;
-      if (this.bg.src !== this.bgUrl) this.bg.src = this.bgUrl;
-      this.bg.muted = true;
-      const p = this.bg.play();
-      if (p) p.then(() => { this.bg.pause(); this.bg.muted = false; this.unlocked = true; }).catch(() => { this.bg.muted = false; });
+      // الآيفون بيسمح لعنصر صوت يشتغل لاحقاً إذا انطلب منو «شغّل» جوّا كبسة منك.
+      // منطلب ومنوقّف بنفس اللحظة (وبلا ما يكون فيه ملف) — هيك ما بيطلع صوت وما بياخد الصوت من الفيديو
+      if (this.unlocked || !this.bg) return;
+      const bg = this.bg;
+      if (bg.src && !bg.paused) return;
+      this.unlocked = true;
+      try { bg.muted = true; const p = bg.play(); if (p && p.catch) p.catch(() => {}); bg.pause(); } catch { /* */ }
+      setTimeout(() => { try { if (!this.bgOn) bg.pause(); bg.muted = false; } catch { /* */ } }, 0);
+      this._preload();
+    }
+    // منجهّز أول الصوت مسبقاً (بلا تشغيل) — بس بعد «الفتح»، لحتى ما يتعارض مع صوت الفيديو
+    _preload() {
+      const bg = this.bg;
+      if (DESKTOP || this.dead || !bg || !this.bgUrl || !this.unlocked || bg.src === this.bgUrl || !bg.paused) return;
+      bg.preload = 'metadata'; bg.src = this.bgUrl;
     }
     _toBg() {
       const v = this.video, bg = this.bg;
