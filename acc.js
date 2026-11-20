@@ -247,7 +247,37 @@ async function renderAdmin() {
       r.append(el('span', 'adm-av guest', '!'), tx);
       er.append(r);
     });
-    body.replaceChildren(cards, charts, onl, us, er);
+    // جودة التشغيل عند المستخدمين (آخر 24 ساعة) + مصادر الفيديو عالسيرفر
+    const qp = el('div', 'adm-panel');
+    qp.append(el('h2', null, 'جودة التشغيل — آخر 24 ساعة'));
+    const qa = (s.qoe && s.qoe.all) || null;
+    if (!qa || !qa.sessions) qp.append(el('div', 'muted', 'لسّا ما في قياسات — بتبيّن أول ما حدا يتفرّج.'));
+    else {
+      const sec = ms => `${(ms / 1000).toFixed(1)} ث`;
+      const qc = el('div', 'adm-cards');
+      qc.append(
+        card('وقفات بكل ساعة مشاهدة', qa.perHour == null ? '—' : nf.format(qa.perHour), `${nf.format(qa.stalls)} وقفة · ${nf.format(qa.stallSec)} ثانية انتظار`, qa.perHour > 2 ? 'hot' : ''),
+        card('نسبة الانتظار', `${qa.stallPct}%`, 'من وقت المشاهدة'),
+        card('لحتى يبلّش الفيديو', qa.startMed ? sec(qa.startMed) : '—', 'النص (median)'),
+        card('القفز بالفيديو', qa.seekAvg ? sec(qa.seekAvg) : '—', 'متوسّط'),
+        card('جلسات مشاهدة', nf.format(qa.sessions), `${nf.format(qa.watchedMin)} دقيقة · ${nf.format(qa.failed)} ما اشتغلت`),
+      );
+      qp.append(qc);
+      const SRC_AR = { own: 'مصدرنا', comp: 'Companion', mp4: 'احتياط 360p', inv: 'سيرفر عام', piped: 'Piped', embed: 'مشغّل احتياطي', other: 'غيرو' };
+      Object.entries(s.qoe.src || {}).sort((a, b) => b[1].sessions - a[1].sessions).forEach(([k, x]) => {
+        const r = el('div', 'adm-row');
+        const tx = el('div', 'adm-tx');
+        tx.append(el('b', null, SRC_AR[k] || k), el('span', 'muted', `${nf.format(x.sessions)} جلسة · ${nf.format(x.watchedMin)} دقيقة · ${x.perHour == null ? '—' : nf.format(x.perHour)} وقفة/ساعة · بيبلّش ${x.startMed ? sec(x.startMed) : '—'} · ${nf.format(x.errs)} إعادة تحميل`));
+        r.append(el('span', 'adm-av' + (k === 'own' ? '' : ' guest'), k === 'own' ? '✓' : '↺'), tx);
+        qp.append(r);
+      });
+    }
+    const svLine = el('div', 'muted'); svLine.style.marginTop = '10px'; qp.append(svLine);
+    fetch('https://tube.glanzstar.de/sv/health', { cache: 'no-store' }).then(r => r.json()).then(h => {
+      const x = h.sources || {};
+      svLine.textContent = `السيرفر (من آخر تشغيل): قطع من «الكامل» ${nf.format(x.full || 0)} · IOS ${nf.format(x.ios || 0)} · Companion ${nf.format(x.comp || 0)}${h.compDown ? ' (واقف هلّق)' : ''} · انقطاع وكمّل ${nf.format(x.resumed || 0)} · ما جاوب ولا مصدر ${nf.format(x.none || 0)} · yt-dlp ${nf.format(x.ytdlpOk || 0)} ✓ / ${nf.format(x.ytdlpFail || 0)} ✗ (${((x.ytdlpMs || 0) / 1000).toFixed(1)} ث)`;
+    }).catch(() => { svLine.textContent = 'السيرفر: ما قدرت اقرا حالتو'; });
+    body.replaceChildren(cards, charts, qp, onl, us, er);
   };
   await draw();
   admTimer = setInterval(() => { if (!document.hidden) draw(); }, 5000);

@@ -562,7 +562,7 @@ async function shortManifest(id) {
   if (svUsable()) {
     // الشورت صغير (أقل من حد يوتيوب لمصدرنا السريع)، فمنبلّش فيه — ملفو بيجي بعشرات الميلي ثانية
     try { return await mfOnce(ownMpd(id), 5000); } catch { /* الـ companion */ }
-    try { return await mfOnce(compMpd(id), 8000); } catch { /* العامة */ }
+    try { return await mfOnce(compMpd(id), 5000); } catch { /* العامة */ }
   }
   const healthy = () => orderedInstances().filter(i => i.type === 'invidious' && health[i.url] && health[i.url].ok);
   if (!healthy().length) await Promise.race([ready, sleep(5000)]); // أول فتحة: منستنّى نعرف مين شغّال
