@@ -260,9 +260,9 @@ const Invidious = {
   async resolve(base, url) {
     return fetchJSON(`${base}/api/v1/resolveurl?url=${encodeURIComponent(url)}`, 8000);
   },
-  async channels(base, q) {
+  async channels(base, q, max = 3) {
     const d = await fetchJSON(`${base}/api/v1/search?q=${encodeURIComponent(q)}&type=channel&page=1`);
-    return (Array.isArray(d) ? d : []).filter(c => c.type === 'channel').slice(0, 3).map(c => ({
+    return (Array.isArray(d) ? d : []).filter(c => c.type === 'channel').slice(0, max).map(c => ({
       id: c.authorId, name: c.author, avatar: Invidious.pickAvatar(base, c.authorThumbnails),
       subs: c.subCount, videos: c.videoCount,
     }));
@@ -1206,6 +1206,7 @@ function renderLibrary(kind) {
 const SEARCH_SORT = [['', 'الأنسب'], ['upload_date', 'الأحدث'], ['view_count', 'الأكثر مشاهدة'], ['rating', 'الأكثر إعجاباً']];
 const SEARCH_DATE = [['today', 'اليوم'], ['week', 'هالأسبوع'], ['month', 'هالشهر'], ['year', 'هالسنة']];
 const SEARCH_DUR = [['short', 'قصير'], ['long', 'طويل']];
+const SEARCH_TYPE = [['', 'الكل'], ['channel', 'قنوات']];
 const SEARCH_FEAT = [['hd', 'HD'], ['subtitles', 'مترجم'], ['live', 'مباشر']];
 function searchFilterBar(q, f) {
   const bar = el('div', 'filter-bar');
@@ -1223,6 +1224,14 @@ function searchFilterBar(q, f) {
     });
     bar.append(el('span', 'f-sep'));
   };
+  // نوع النتائج أول شي: «الكل» أو «قنوات» بس
+  SEARCH_TYPE.forEach(([val, label]) => {
+    const b = el('button', 'f-chip' + ((f.type || '') === val ? ' on' : ''), label);
+    b.onclick = () => go(val ? { type: val } : { ...f, type: '' });
+    bar.append(b);
+  });
+  bar.append(el('span', 'f-sep'));
+  if (f.type === 'channel') { bar.lastChild.remove(); return bar; }
   group(SEARCH_SORT, 'sort', true);
   group(SEARCH_DATE, 'date');
   group(SEARCH_DUR, 'dur');
@@ -1236,16 +1245,32 @@ async function renderSearch(q, f = {}) {
   addSearch(q);
   $('#q').value = q;
   const filtered = !!(f.sort || f.date || f.dur || f.feat);
-  const chWrap = el('div', 'ch-strip');
+  // فلتر «قنوات»: القنوات بس
+  if (f.type === 'channel') {
+    const list = el('div', 'ch-strip ch-only'); list.append(skCards(4, true));
+    view.replaceChildren(searchFilterBar(q, f), list);
+    try {
+      const { res } = await cached('scc:' + q, 10 * 60e3, () => withFallback(i => apiFor(i).channels(i.url, q, 40).then(l => { if (!l.length) throw new Error('فاضي'); return l; }), { yti: true }));
+      if (!list.isConnected) return;
+      list.replaceChildren(...res.map(channelCard));
+    } catch { if (list.isConnected) list.replaceWith(el('div', 'empty', 'ما لقيت قنوات بهالاسم.')); }
+    return;
+  }
+  const chWrap = el('div', 'ch-strip in-grid'); // القنوات بتطلع بعد أول 10 فيديوهات (متل يوتيوب)
   const g = el('div', 'grid'); g.append(skCards(8));
-  view.replaceChildren(searchFilterBar(q, f), chWrap, g);
+  view.replaceChildren(searchFilterBar(q, f), g);
   try {
     const { inst, res } = await cached('s:' + q + JSON.stringify(f), 10 * 60e3, () => withFallback(i => apiFor(i).search(i.url, q, 1, null, f), filtered ? { prefer: 'invidious', yti: true } : { yti: true }));
     if (!g.isConnected) return;
     g.replaceChildren();
     if (!res.items.length) { g.replaceWith(el('div', 'empty', 'ما في نتائج.')); return; }
     if (!filtered) cached('sc:' + q, 10 * 60e3, () => withFallback(i => apiFor(i).channels(i.url, q).then(l => { if (!l.length) throw new Error('فاضي'); return l; }), { yti: true }))
-      .then(({ res }) => { if (chWrap.isConnected) res.forEach(ch => chWrap.append(channelCard(ch))); }).catch(() => {});
+      .then(({ res }) => {
+        if (!g.isConnected || !res.length) return;
+        res.forEach(ch => chWrap.append(channelCard(ch)));
+        const cards = [...g.children].filter(n => n.classList.contains('card') && !n.classList.contains('sk'));
+        g.insertBefore(chWrap, cards[10] || null);
+      }).catch(() => {});
     const seen = new Set();
     res.items.forEach(v => { seen.add(v.id); g.append(card(v)); });
     let next = res.next;
@@ -1532,6 +1557,7 @@ async function renderWatch(id, startTime) {
     },
   });
   np.video.poster = ytThumb(id, 'hqdefault');
+  if (svUsable()) np.setBgAudio(`${SV}/vp/${encodeURIComponent(id)}/140`);
   window.__nuvioNp = np;
   box.classList.add('loading');
 
@@ -1712,7 +1738,7 @@ async function renderWatch(id, startTime) {
         await loadSource(srcList[srcIdx], startAt);
         goodSince = Date.now();
         setChip('بلا إعلانات ✓', 'ok');
-        np.video.play().catch(() => { /* المتصفح ممكن يمنع التشغيل التلقائي */ });
+        np.autoplay(); // إذا المتصفح منع الصوت: بلا صوت + زر «اكبس لتشغيل الصوت»
         return true;
       } catch (e) { console.warn('[nuvio] source failed', srcList[srcIdx], e); }
     }
@@ -1731,11 +1757,11 @@ async function renderWatch(id, startTime) {
       const cur = srcList[srcIdx];
       if (reloads <= 3 && cur) {
         if (cur.kind === 'dash') memo.delete('mf:' + cur.url); // ملف جديد بروابط جديدة
-        try { await loadSource(cur, t); np.video.play().catch(() => {}); goodSince = Date.now(); return; } catch { /* المصدر اللي بعدو */ }
+        try { await loadSource(cur, t); np.autoplay(); goodSince = Date.now(); return; } catch { /* المصدر اللي بعدو */ }
       }
       // مصدر تاني من نفس القائمة (مثلاً من الـ companion لمصدرنا القديم) قبل السيرفرات العامة
       for (let k = srcIdx + 1; k < srcList.length; k++) {
-        try { await loadSource(srcList[k], t); srcIdx = k; reloads = 0; np.video.play().catch(() => {}); goodSince = Date.now(); return; } catch { /* */ }
+        try { await loadSource(srcList[k], t); srcIdx = k; reloads = 0; np.autoplay(); goodSince = Date.now(); return; } catch { /* */ }
       }
       reloads = 0;
       if (curInst) mark(curInst.url, false);
@@ -2229,6 +2255,9 @@ function minimize(nav = true) {
   if (!active || miniOn) return;
   const { box, id } = active;
   miniOn = true;
+  const mnp = active.np(); const mv0 = mnp && mnp.video; const wasPlaying = !!(mv0 && !mv0.paused && !mv0.ended);
+  if (mnp && mnp.markTransition) mnp.markTransition();
+  if (wasPlaying) setTimeout(() => { if (mv0.paused && !mnp.userPaused && mv0.isConnected) mv0.play().catch(() => {}); }, 120);
   box.style.transition = 'none'; box.style.transform = ''; box.style.opacity = '';
   const from = box.getBoundingClientRect();
   const ph = el('div', 'player-ph'); ph.id = 'player-ph';
@@ -2276,6 +2305,9 @@ function restoreMini() {
   miniOn = false;
   mini.hidden = true; document.body.classList.remove('has-mini');
   const { box, layout } = active;
+  const rnp = active.np(); const rv = rnp && rnp.video; const wasPlaying = !!(rv && !rv.paused && !rv.ended);
+  if (rnp && rnp.markTransition) rnp.markTransition();
+  if (wasPlaying) setTimeout(() => { if (rv.paused && !rnp.userPaused && rv.isConnected) rv.play().catch(() => {}); }, 120);
   box.classList.remove('in-mini');
   view.replaceChildren(layout);
   const ph = layout.querySelector('#player-ph');
@@ -2353,7 +2385,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120183053';
+const APP_VERSION = '20261120185917';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -2478,7 +2510,7 @@ async function routeInner() {
     return;
   }
   window.scrollTo(0, 0);
-  if (path === '/search' && p.get('q')) return renderSearch(p.get('q'), { sort: p.get('sort') || '', date: p.get('date') || '', dur: p.get('dur') || '', feat: p.get('feat') || '' });
+  if (path === '/search' && p.get('q')) return renderSearch(p.get('q'), { sort: p.get('sort') || '', date: p.get('date') || '', dur: p.get('dur') || '', feat: p.get('feat') || '', type: p.get('type') || '' });
   if (path === '/watch' && p.get('v')) return renderWatch(p.get('v'), +p.get('t') || 0);
   if (path === '/channel' && p.get('id')) return renderChannel(p.get('id'), p.get('tab') || 'home', p.get('sort') || '');
   if (path === '/pl' && p.get('id')) return renderPlaylist(p.get('id'));

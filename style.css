@@ -1381,3 +1381,13 @@ html.tv .tv-ri.tv-f { color: #111; background: #fff; }
 html.tv button.tv-f, html.tv .f-chip.tv-f, html.tv .lib-row.tv-f, html.tv .drawer-item.tv-f, html.tv .me-btn.tv-f, html.tv .sub-chip.tv-f, html.tv .ch-card.tv-f, html.tv .sec-more.tv-f { box-shadow: 0 0 0 4px #fff; border-radius: 14px; }
 html.tv .tv-sb.tv-f { background: #fff; color: #111; }
 html.tv .tv-sinput.tv-f { border-color: #fff; }
+
+/* زر «اكبس لتشغيل الصوت» (لمّا المتصفح يمنع الصوت بالتشغيل التلقائي) */
+.np-unmute { position: absolute; top: 12px; left: 12px; z-index: 6; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px 8px 12px; border: 0; border-radius: 999px; background: rgba(0,0,0,.72); color: #fff; font: inherit; font-size: .85rem; font-weight: 700; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+.np-unmute[hidden] { display: none; }
+.np-unmute svg { width: 18px; height: 18px; fill: currentColor; }
+.np-unmute svg .s { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.in-mini .np-unmute { display: none; }
+/* القنوات بنص نتائج البحث (بعد أول 10 فيديوهات) */
+.grid > .ch-strip.in-grid { grid-column: 1 / -1; margin: 6px 0 10px; }
+.ch-strip.ch-only { margin-top: 6px; }

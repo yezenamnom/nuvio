@@ -102,7 +102,11 @@
 
       this.menu = mk('div', 'np-menu'); this.menu.dir = 'rtl'; this.menu.hidden = true;
 
-      this.ui.append(this.spinner, this.big, this.seekL, this.seekR, this.msgEl, this.speedEl, bottom, this.menu);
+      // إذا المتصفح منع الصوت بالتشغيل التلقائي (الفيديو الجاي مثلاً): منشغّل بلا صوت، وكبسة وحدة بترجّع الصوت
+      this.unmuteEl = mk('button', 'np-unmute', ICON.mute + '<span>اكبس لتشغيل الصوت</span>'); this.unmuteEl.dir = 'rtl'; this.unmuteEl.hidden = true;
+      this.unmuteEl.onclick = e => { e.stopPropagation(); this._unmute(); };
+      ['pointerdown', 'pointerup'].forEach(n => this.unmuteEl.addEventListener(n, e => e.stopPropagation())); // الكبسة عالزر ما بتوقّف الفيديو
+      this.ui.append(this.spinner, this.big, this.seekL, this.seekR, this.msgEl, this.speedEl, this.unmuteEl, bottom, this.menu);
       box.replaceChildren(v, this.ui);
       this._bind();
       this._showUI();
@@ -145,7 +149,8 @@
     }
     message(t) { this.msgEl.textContent = t || ''; this.msgEl.classList.toggle('on', !!t); }
     destroy() {
-      this.dead = true; clearInterval(this._wd); clearTimeout(this._hideT);
+      this.dead = true; clearInterval(this._wd); clearTimeout(this._hideT); clearTimeout(this._apT);
+      if (this._orient) { window.removeEventListener('orientationchange', this._orient); try { screen.orientation.removeEventListener('change', this._orient); } catch { /* */ } }
       document.removeEventListener('keydown', this._key); document.removeEventListener('fullscreenchange', this._fsc);
       document.removeEventListener('visibilitychange', this._vis);
       if (this.bg) { this.bg.pause(); this.bg.removeAttribute('src'); this.bg.load(); }
@@ -156,6 +161,33 @@
       this.loop = !!on;
       this.video.loop = this.loop;
       if (this.bg) this.bg.loop = this.loop;
+    }
+    /* تشغيل تلقائي (أول الفيديو، الفيديو الجاي، بعد إعادة تحميل):
+       - الصفحة بالخلفية (شاشة مسكّرة): منكمّل بالصوت بس
+       - المتصفح منع الصوت: منشغّل بلا صوت + زر «اكبس لتشغيل الصوت»
+       - انقطع الطلب أو ما بلّش: منجرّب كمان مرة */
+    autoplay() {
+      const v = this.video;
+      if (this.dead || this.userPaused) return;
+      if (document.hidden && !DESKTOP && this.bg && this.bgUrl) { this._toBg(); return; }
+      const p = v.play();
+      if (p && p.catch) p.catch(e => {
+        if (this.dead || this.userPaused) return;
+        const name = (e && e.name) || '';
+        if (name === 'NotAllowedError' && !v.muted) {
+          this._autoMuted = true; v.muted = true;
+          v.play().then(() => { this.unmuteEl.hidden = false; this._showUI(); }).catch(() => {});
+          try { navigator.sendBeacon('https://tube.glanzstar.de/acc/err', JSON.stringify({ m: 'autoplay blocked → muted', s: 'player.js', l: 0, v: '', ua: navigator.userAgent.slice(0, 180), p: '/watch' })); } catch { /* */ }
+        } else if (name === 'AbortError') setTimeout(() => { if (!this.dead && v.paused && !v.ended && !this.userPaused) v.play().catch(() => {}); }, 400);
+      });
+      clearTimeout(this._apT);
+      this._apT = setTimeout(() => { if (!this.dead && v.paused && !v.ended && !this.userPaused && !this.bgOn && v.readyState >= 2 && !document.hidden) v.play().catch(() => {}); }, 2500);
+    }
+    _unmute() {
+      const v = this.video;
+      this._autoMuted = false; this.unmuteEl.hidden = true;
+      v.muted = false; if (v.volume === 0) v.volume = 0.5;
+      if (v.paused && !this.userPaused) v.play().catch(() => {});
     }
     pauseAll() {
       this.userPaused = true;
@@ -278,7 +310,7 @@
       v.addEventListener('volumechange', () => {
         this.bVol.innerHTML = v.muted || v.volume === 0 ? ICON.mute : ICON.vol;
         this.vol.value = v.muted ? 0 : v.volume;
-        ls.set('vol', v.volume); ls.set('muted', v.muted);
+        if (!this._autoMuted) { ls.set('vol', v.volume); ls.set('muted', v.muted); }
       });
       v.addEventListener('error', () => this.opts.onError && this.opts.onError(v.currentTime));
 
@@ -342,6 +374,8 @@
       let lastTap = 0, tapT;
       this.ui.addEventListener('pointerup', e => {
         this._unlock();
+        if (this._autoMuted && !e.target.closest('.np-bottom, .np-menu')) { this._unmute(); return; } // أول كبسة بترجّع الصوت بس
+        if (box.classList.contains('in-mini')) return; // بالمشغّل الصغير الكبسة بترجّع الفيديو كبير، ما بتوقّفو
         if (Date.now() - heldAt < 80) return; // كانت ضغطة مطوّلة (تسريع)، مش كبسة
         if (e.target.closest('.np-bottom, .np-menu, .np-big')) return;
         if (!this.menu.hidden) { this.menu.hidden = true; return; }
@@ -380,12 +414,28 @@
       };
       document.addEventListener('keydown', this._key);
       this._fsc = () => {
+        if (this.markTransition) this.markTransition();
         const on = document.fullscreenElement === box;
         this.bFs.innerHTML = on ? ICON.fsx : ICON.fs;
         box.classList.toggle('fs', on);
         if (!on) { try { screen.orientation.unlock(); } catch { /* */ } }
       };
       document.addEventListener('fullscreenchange', this._fsc);
+
+      // وقفة ما طلبتها (ملء الشاشة، تدوير التلفون، تكبير/تصغير المشغّل): منكمّل لحالنا
+      this._transAt = 0; this._oddPause = 0;
+      const resume = () => { if (!this.dead && v.isConnected && v.paused && !v.ended && !this.userPaused && !this.bgOn && !document.hidden) v.play().catch(() => {}); };
+      v.addEventListener('pause', () => {
+        if (this.userPaused || v.ended || this.bgOn || this.dead || document.hidden || this.held) return;
+        this._oddPause = Date.now();
+        if (Date.now() - this._transAt < 2500) setTimeout(resume, 60);
+      });
+      this.markTransition = () => { this._transAt = Date.now(); if (Date.now() - this._oddPause < 1500) setTimeout(resume, 60); };
+      this._orient = () => this.markTransition();
+      window.addEventListener('orientationchange', this._orient);
+      try { screen.orientation.addEventListener('change', this._orient); } catch { /* */ }
+      v.addEventListener('webkitbeginfullscreen', () => this.markTransition());
+      v.addEventListener('webkitendfullscreen', () => { this.markTransition(); setTimeout(resume, 350); }); // آيفون بيوقّف لمّا تطلع من ملء الشاشة
     }
 
     toggle() {
@@ -404,6 +454,7 @@
     _seekTo(f) { const v = this.video; if (isFinite(v.duration)) { v.currentTime = f * v.duration; this._progress(); } }
     async fullscreen() {
       const v = this.video, box = this.box;
+      this.markTransition();
       if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
       if (box.requestFullscreen) {
         try {
