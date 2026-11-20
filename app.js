@@ -1624,24 +1624,44 @@ async function renderWatch(id, startTime) {
 
   /* ---- قياس جودة التشغيل (بلا بيانات شخصية): وقت البداية، الوقفات، القفزات، المصدر → لوحة التحكّم ---- */
   const qoe = (() => {
-    const v = np.video, T0 = performance.now();
-    const s = { startMs: 0, stalls: 0, stallMs: 0, seeks: 0, seekMs: 0, watched: 0, h: 0, errs: 0 };
-    let waitAt = 0, seekAt = 0, lastT = null, reported = false, lastFlush = T0;
-    const on = (n, f) => v.addEventListener(n, f);
-    on('seeking', () => { seekAt = performance.now(); waitAt = 0; s.seeks++; });
-    on('seeked', () => { if (seekAt && (v.paused || v.readyState >= 3)) { if (!v.paused) s.seekMs += performance.now() - seekAt; seekAt = 0; } });
-    on('waiting', () => { if (!v.seeking && !seekAt && s.startMs) waitAt = performance.now(); });
-    on('playing', () => {
-      const t = performance.now();
-      if (!s.startMs) s.startMs = Math.round(t - T0);
-      if (seekAt) { s.seekMs += t - seekAt; seekAt = 0; }
-      if (waitAt) { const d = t - waitAt; if (d > 250) { s.stalls++; s.stallMs += d; } waitAt = 0; }
-    });
-    on('timeupdate', () => {
-      const t = v.currentTime;
-      if (lastT != null && !v.paused && !v.seeking) { const d = t - lastT; if (d > 0 && d < 2) s.watched += d / (v.playbackRate || 1); }
-      lastT = t; if (v.videoHeight > s.h) s.h = v.videoHeight;
-    });
+    const T0 = performance.now();
+    let v = np.video;
+    const s = { startMs: 0, stalls: 0, stallMs: 0, seeks: 0, seekMs: 0, watched: 0, h: 0, errs: 0, seekStuck: 0 };
+    let waitAt = 0, seekAt = 0, lastT = null, reported = false, lastFlush = T0, seekWd = 0, gen = 0;
+    const diag = m => { try { navigator.sendBeacon('https://tube.glanzstar.de/acc/err', JSON.stringify({ m, s: 'app.js', l: 0, v: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '', ua: navigator.userAgent.slice(0, 180), p: '/watch' })); } catch { /* */ } };
+    const bufStr = m => { try { const b = m.buffered, out = []; for (let i = 0; i < b.length && i < 4; i++) out.push(Math.round(b.start(i)) + '-' + Math.round(b.end(i))); return out.join(',') || '∅'; } catch { return '?'; } };
+    // بينربط بالمشغّل الحالي (وبمشغّل يوتيوب إذا انتقلنا لإلو)
+    const attach = media => {
+      const my = ++gen; v = media; lastT = null; seekAt = 0; waitAt = 0; clearTimeout(seekWd);
+      const on = (n, f) => media.addEventListener(n, e => { if (my === gen) f(e); });
+      on('seeking', () => {
+        seekAt = performance.now(); waitAt = 0; s.seeks++;
+        // قفزة علقت أكتر من 8 ثواني: منبعت تقرير مفصّل، ومنعيد تحميل المصدر من نفس الثانية
+        clearTimeout(seekWd);
+        const target = media.currentTime;
+        seekWd = setTimeout(() => {
+          if (my !== gen || !box.isConnected || !seekAt) return;
+          s.seekStuck++;
+          diag(`seek stuck 8s src=${srcName()} t=${Math.round(target)}/${Math.round(media.duration || 0)} rs=${media.readyState} ns=${media.networkState} paused=${media.paused} buf=${bufStr(media)}`);
+          if (!embedOn && !(window.YtMedia && media instanceof YtMedia)) recover(target);
+        }, 8000);
+      });
+      on('seeked', () => { if (seekAt && (media.paused || media.readyState >= 3)) { if (!media.paused) s.seekMs += performance.now() - seekAt; seekAt = 0; clearTimeout(seekWd); } });
+      on('waiting', () => { if (!media.seeking && !seekAt && s.startMs) waitAt = performance.now(); });
+      on('playing', () => {
+        const t = performance.now();
+        if (!s.startMs) s.startMs = Math.round(t - T0);
+        if (seekAt) { s.seekMs += t - seekAt; seekAt = 0; }
+        clearTimeout(seekWd);
+        if (waitAt) { const d = t - waitAt; if (d > 250) { s.stalls++; s.stallMs += d; } waitAt = 0; }
+      });
+      on('timeupdate', () => {
+        const t = media.currentTime;
+        if (lastT != null && !media.paused && !media.seeking) { const d = t - lastT; if (d > 0 && d < 2) s.watched += d / (media.playbackRate || 1); }
+        lastT = t; if (media.videoHeight > s.h) s.h = media.videoHeight;
+      });
+    };
+    attach(v);
     const srcName = () => {
       if (box.querySelector('iframe')) return 'embed';
       const c = srcList[srcIdx];
@@ -1656,9 +1676,9 @@ async function renderWatch(id, startTime) {
       if (waitAt) { const d = t - waitAt; if (d > 250) { s.stalls++; s.stallMs += d; } waitAt = t; }
       const failed = !s.startMs && t - T0 > 6000 ? 1 : 0; // طلع قبل ما يبلّش بأقل من 6 ثواني: مش فشل
       if (!s.watched && !s.stalls && !failed) return;
-      const r = { src: srcName(), part: reported ? 1 : 0, failed: reported ? 0 : failed, startMs: reported ? 0 : s.startMs, stalls: s.stalls, stallMs: Math.round(s.stallMs), seeks: s.seeks, seekMs: Math.round(s.seekMs), watched: Math.round(s.watched), h: s.h, errs: s.errs, mobile: matchMedia('(pointer: coarse)').matches ? 1 : 0 };
+      const r = { src: srcName(), part: reported ? 1 : 0, failed: reported ? 0 : failed, startMs: reported ? 0 : s.startMs, stalls: s.stalls, stallMs: Math.round(s.stallMs), seeks: s.seeks, seekMs: Math.round(s.seekMs), seekStuck: s.seekStuck, watched: Math.round(s.watched), h: s.h, errs: s.errs, mobile: matchMedia('(pointer: coarse)').matches ? 1 : 0 };
       reported = true;
-      Object.assign(s, { stalls: 0, stallMs: 0, seeks: 0, seekMs: 0, watched: 0, errs: 0 });
+      Object.assign(s, { stalls: 0, stallMs: 0, seeks: 0, seekMs: 0, watched: 0, errs: 0, seekStuck: 0 });
       try { navigator.sendBeacon(`${typeof ACC === 'string' ? ACC : 'https://tube.glanzstar.de/acc'}/qoe`, JSON.stringify(r)); } catch { /* */ }
     };
     const onVis = () => { if (document.hidden) flush(); };
@@ -1667,7 +1687,7 @@ async function renderWatch(id, startTime) {
       if (!box.isConnected) { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); flush(); return; }
       if (performance.now() - lastFlush > 300e3) flush(); // الجلسات الطويلة بتوصل للوحة كل 5 دقايق
     }, 3000);
-    return { err: () => { s.errs++; } };
+    return { err: () => { s.errs++; }, attach };
   })();
 
   const h1 = el('h1', 'v-title'); h1.dir = 'auto';
@@ -1756,6 +1776,7 @@ async function renderWatch(id, startTime) {
     np = new NuvioPlayer(box, opts);
     window.__nuvioNp = np;
     np.video.poster = ytThumb(id, 'hqdefault');
+    qoe.attach(np.video);
     setChip('مشغّل احتياطي', 'warn');
     // كل شي مربوط بالمشغّل (حفظ المكان، تخطّي الدعايات جوّا الفيديو، الجاي…)
     const ex = extras = watchExtras({ id, getNp: () => np, box, music, related: () => (shown && shown.related) || (current && current.data.related) || [] });
@@ -2549,7 +2570,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120195250';
+const APP_VERSION = '20261120195751';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

@@ -259,7 +259,7 @@ async function renderAdmin() {
         card('وقفات بكل ساعة مشاهدة', qa.perHour == null ? '—' : nf.format(qa.perHour), `${nf.format(qa.stalls)} وقفة · ${nf.format(qa.stallSec)} ثانية انتظار`, qa.perHour > 2 ? 'hot' : ''),
         card('نسبة الانتظار', `${qa.stallPct}%`, 'من وقت المشاهدة'),
         card('لحتى يبلّش الفيديو', qa.startMed ? sec(qa.startMed) : '—', 'النص (median)'),
-        card('القفز بالفيديو', qa.seekAvg ? sec(qa.seekAvg) : '—', 'متوسّط'),
+        card('القفز بالفيديو', qa.seekAvg ? sec(qa.seekAvg) : '—', `متوسّط · ${nf.format(qa.seekStuck || 0)} قفزة علقت`, qa.seekStuck ? 'hot' : ''),
         card('جلسات مشاهدة', nf.format(qa.sessions), `${nf.format(qa.watchedMin)} دقيقة · ${nf.format(qa.failed)} ما اشتغلت`),
       );
       qp.append(qc);
