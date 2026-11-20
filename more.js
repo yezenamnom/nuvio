@@ -8,12 +8,74 @@
 ['gesturestart', 'gesturechange'].forEach(n => document.addEventListener(n, e => e.preventDefault(), { passive: false }));
 
 /* ================= الإعدادات ================= */
-const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto' };
+const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto', theme: 'nuvio', holdSpeed: true, holdRate: 2, shortsAuto: false, shortsRate: 1 };
 const prefs = {
   get: k => { const p = store.get('prefs', {}); return k in p ? p[k] : PREF_DEFAULTS[k]; },
   set: (k, v) => { const p = store.get('prefs', {}); p[k] = v; store.set('prefs', p); },
 };
 window.nuvioPref = prefs;
+/* ================= الثيم: Nuvio / نهاري / يوتيوب ================= */
+const THEMES = [['nuvio', 'Nuvio', '#0b1220'], ['light', 'نهاري', '#ffffff'], ['yt', 'يوتيوب', '#0f0f0f']];
+function applyTheme(k) {
+  const th = THEMES.find(x => x[0] === k) || THEMES[0];
+  if (th[0] === 'nuvio') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = th[0];
+  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = th[2];
+}
+const HOLD_RATES = [1.5, 2, 3];
+const SPEEDS_S = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+/* قائمة إعدادات من تحت: مفاتيح تشغيل/إيقاف، اختيارات، وأوامر */
+function openPrefSheet(title, rows) {
+  const ov = el('div', 'np-sheet-ov sheet-ov');
+  const sh = el('div', 'np-sheet'); sh.dir = 'rtl';
+  ov.append(sh);
+  const close = () => {
+    if (!ov.isConnected) return;
+    ov.classList.remove('open');
+    if (window.nuvioLockScroll) window.nuvioLockScroll(false);
+    setTimeout(() => ov.remove(), 260);
+  };
+  const icon = k => { const s = el('span', 'np-row-ico'); s.innerHTML = window.ico ? window.ico(k) : ''; return s; };
+  const main = () => {
+    sh.replaceChildren(el('div', 'np-grip'));
+    if (title) sh.append(el('div', 'sheet-title', title));
+    rows.filter(Boolean).forEach(r => {
+      const b = el('button', 'np-row');
+      b.append(icon(r.icon), el('span', 'np-row-l', r.label));
+      if (r.type === 'toggle') {
+        const s = el('span', 'np-sw' + (r.get() ? ' on' : '')); s.append(el('span'));
+        b.append(s);
+        b.onclick = e => { e.stopPropagation(); r.set(!r.get()); s.classList.toggle('on', !!r.get()); };
+      } else if (r.type === 'choice') {
+        const cur = r.options.find(o => o[0] === r.get());
+        b.append(el('span', 'np-row-v', cur ? cur[1] : ''), el('span', 'np-row-c', '‹'));
+        b.onclick = e => {
+          e.stopPropagation();
+          sh.replaceChildren(el('div', 'np-grip'));
+          const h = el('button', 'np-sub-h', '› ' + r.label); h.onclick = ev => { ev.stopPropagation(); main(); };
+          sh.append(h);
+          r.options.forEach(([val, label]) => {
+            const o = el('button', 'np-opt' + (val === r.get() ? ' on' : ''), label);
+            o.onclick = ev => { ev.stopPropagation(); r.set(val); main(); };
+            sh.append(o);
+          });
+        };
+      } else {
+        b.onclick = e => { e.stopPropagation(); close(); r.fn(); };
+      }
+      sh.append(b);
+    });
+  };
+  main();
+  ov.onclick = e => { if (e.target === ov) close(); };
+  ov.addEventListener('touchmove', e => { if (!e.target.closest('.np-sheet')) e.preventDefault(); }, { passive: false });
+  document.body.append(ov);
+  if (window.nuvioLockScroll) window.nuvioLockScroll(true);
+  requestAnimationFrame(() => ov.classList.add('open'));
+  return close;
+}
+
 const fmtT = s => {
   s = Math.max(0, Math.floor(s || 0));
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = String(s % 60).padStart(2, '0');
@@ -420,8 +482,30 @@ function drawerSettings(d, sep, closeDrawerFn) {
     if (typeof player !== 'undefined' && player) try { player.configure(saverCfg()); } catch { /* */ }
   };
   const hidden = store.get('nope', []).length + store.get('nopeCh', []).length;
+  // المظهر: 3 ثيمات
+  const themeRow = el('div', 'drawer-item theme-row');
+  const tic = el('span', 'drawer-ico'); tic.innerHTML = window.ico ? window.ico('sun') : '';
+  themeRow.append(tic, el('span', null, 'المظهر'));
+  const seg = el('div', 'theme-seg');
+  THEMES.forEach(([k, label]) => {
+    const b = el('button', prefs.get('theme') === k ? 'on' : '');
+    b.append(el('span', 'theme-dot ' + k), el('span', null, label));
+    b.onclick = () => { prefs.set('theme', k); applyTheme(k); seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); };
+    seg.append(b);
+  });
+  themeRow.append(seg);
+  // سرعة الضغط المطوّل (بتتبدّل بكل كبسة)
+  const rateBtn = el('button', 'drawer-item');
+  const ric = el('span', 'drawer-ico'); ric.innerHTML = window.ico ? window.ico('bolt') : '';
+  const rval = el('span', 'drawer-count', `${prefs.get('holdRate')}×`);
+  const rtx = el('span', 'drawer-tx'); rtx.append(el('span', null, 'سرعة الضغط المطوّل'), el('small', 'muted', 'قدّيش بيسرّع الفيديو والشورتس'));
+  rateBtn.append(ric, rtx, rval);
+  rateBtn.onclick = () => { const i = HOLD_RATES.indexOf(+prefs.get('holdRate')); const nx = HOLD_RATES[(i + 1) % HOLD_RATES.length]; prefs.set('holdRate', nx); rval.textContent = `${nx}×`; };
   const rows = [
+    themeRow,
     sep('الإعدادات'),
+    sw('bolt', 'ضغطة مطوّلة = تسريع', () => prefs.get('holdSpeed'), v => prefs.set('holdSpeed', v), 'اضغط على الفيديو وضلّك ضاغط'),
+    rateBtn,
     sw('play', 'تشغيل تلقائي', () => prefs.get('autoplay'), v => prefs.set('autoplay', v), 'لمّا يخلص الفيديو بيبلّش اللي بعدو'),
     sw('skip', 'تخطّي الدعايات جوّا الفيديو', () => prefs.get('sb'), v => prefs.set('sb', v), 'بخدمة SponsorBlock المجانية'),
     sw('eye', 'خبّي اللي شفتو من المقترحات', () => prefs.get('hideWatched'), v => prefs.set('hideWatched', v)),
@@ -528,6 +612,21 @@ function homeShortsRow() {
   return wrap;
 }
 
+function shortsMenu(v, sl) {
+  const st = shortsState; if (!st) return;
+  const video = st.video;
+  openPrefSheet(v.title || 'شورتس', [
+    { type: 'toggle', icon: 'play', label: 'تشغيل تلقائي (للشورت الجاي)', get: () => prefs.get('shortsAuto'), set: x => { prefs.set('shortsAuto', x); video.loop = !x; } },
+    { type: 'choice', icon: 'spark', label: 'سرعة التشغيل', options: SPEEDS_S.map(r => [r, r === 1 ? 'عادي' : `${r}×`]), get: () => +prefs.get('shortsRate') || 1, set: x => { prefs.set('shortsRate', x); video.playbackRate = x; } },
+    { type: 'toggle', icon: 'bolt', label: 'ضغطة مطوّلة = تسريع', get: () => prefs.get('holdSpeed'), set: x => prefs.set('holdSpeed', x) },
+    { type: 'choice', icon: 'bolt', label: 'سرعة الضغط المطوّل', options: HOLD_RATES.map(r => [r, `${r}×`]), get: () => +prefs.get('holdRate') || 2, set: x => prefs.set('holdRate', x) },
+    { type: 'toggle', icon: 'music', label: 'كتم الصوت', get: () => video.muted, set: x => { video.muted = x; if (!x) video.play().catch(() => {}); } },
+    { type: 'choice', icon: 'wifi', label: 'توفير الإنترنت', options: [['auto', 'تلقائي'], ['on', 'دايماً (480p)'], ['off', 'أبداً']], get: () => prefs.get('saver'), set: x => { prefs.set('saver', x); if (st.sp) try { st.sp.configure(saverCfg()); } catch { /* */ } } },
+    { type: 'action', icon: 'later', label: queue.has(v.id) ? 'شيل من «شغّل بعدين»' : 'شغّل بعدين', fn: () => note(queue.toggle(v) ? 'انضاف لـ«شغّل بعدين» ✓' : 'انشال من «شغّل بعدين»') },
+    { type: 'action', icon: 'ban', label: 'مش مهتم', fn: () => { addNope('nope', v.id); note('تمام، ما رح نقترحلك ياه'); st.wrap.scrollBy({ top: st.wrap.clientHeight, behavior: 'smooth' }); } },
+  ]);
+}
+
 async function renderShorts(startId, ch) {
   shortsExit();
   if (typeof miniOn !== 'undefined' && miniOn && active) { const n = active.np(); if (n) n.pauseAll(); }
@@ -590,6 +689,11 @@ async function renderShorts(startId, ch) {
       sideBtn('later', 'بعدين', queue.has(v.id), () => queue.toggle(v)),
       sideBtn('share', 'مشاركة', false, () => shareVideo(v)),
     );
+    const moreB = el('button', 'short-btn short-more'); moreB.setAttribute('aria-label', 'إعدادات');
+    const mi = el('span', 'short-ico'); mi.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="5.5" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="12" cy="18.5" r="1.9"/></svg>';
+    moreB.append(mi);
+    moreB.onclick = e => { e.stopPropagation(); shortsMenu(v, sl); };
+    side.append(moreB);
     // شريط تقدّم بتقدر تسحبو
     const bar = el('div', 'short-bar'); bar.dir = 'ltr'; const fill = el('i'); bar.append(fill);
     const seek = e => { const r = bar.getBoundingClientRect(); const f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); if (s.cur === sl && video.duration) video.currentTime = f * video.duration; };
@@ -597,7 +701,7 @@ async function renderShorts(startId, ch) {
     bar.addEventListener('pointermove', e => { if (bar.classList.contains('drag')) seek(e); });
     bar.addEventListener('pointerup', e => { e.stopPropagation(); bar.classList.remove('drag'); });
     const pp = el('div', 'short-pp');
-    const fast = el('div', 'short-fast', '2× ⏩');
+    const fast = el('div', 'short-fast', `${prefs.get('holdRate')}× ⏩`);
     const fail = el('div', 'short-fail');
     const retry = el('button', null, 'جرّب مرة تانية'); retry.onclick = e => { e.stopPropagation(); sl.classList.remove('fail'); load(v, sl); };
     fail.append(el('div', null, 'ما قدرت شغّل هالفيديو هلّق'), retry);
@@ -607,9 +711,14 @@ async function renderShorts(startId, ch) {
     sl.addEventListener('pointerdown', e => {
       if (e.target.closest('a, button, .short-bar') || s.cur !== sl) return;
       clearTimeout(holdT);
-      holdT = setTimeout(() => { held = true; video.playbackRate = 2; sl.classList.add('fast'); if (video.paused) video.play().catch(() => {}); }, 450);
+      if (!prefs.get('holdSpeed')) return;
+      holdT = setTimeout(() => {
+        held = true; const r = +prefs.get('holdRate') || 2;
+        fast.textContent = `${r}× ⏩`; video.playbackRate = r;
+        sl.classList.add('fast'); if (video.paused) video.play().catch(() => {});
+      }, 450);
     });
-    const endHold = () => { clearTimeout(holdT); if (held) { held = false; video.playbackRate = 1; sl.classList.remove('fast'); return true; } return false; };
+    const endHold = () => { clearTimeout(holdT); if (held) { held = false; video.playbackRate = +prefs.get('shortsRate') || 1; sl.classList.remove('fast'); return true; } return false; };
     sl.addEventListener('pointercancel', endHold);
     sl.addEventListener('pointerleave', endHold);
     sl.addEventListener('pointerup', e => {
@@ -655,6 +764,8 @@ async function renderShorts(startId, ch) {
         await s.sp.load(await fixUrl(mp4.url), 0, 'video/mp4');
       }
       if (my !== s.seq) return;
+      video.loop = !prefs.get('shortsAuto');
+      video.playbackRate = +prefs.get('shortsRate') || 1;
       try { await video.play(); } catch {
         // الآيفون ما بيسمح بالصوت بلا كبسة: منشغّل بلا صوت، وكبسة وحدة بترجّعو
         video.muted = true; video.play().catch(() => {});
@@ -685,6 +796,10 @@ async function renderShorts(startId, ch) {
     if (b && video.duration) b.style.width = `${(video.currentTime / video.duration) * 100}%`;
   });
   // الصورة بتضل لحد ما يبلّش الفيديو فعلاً (بدل شاشة سودا)
+  video.addEventListener('ended', () => {
+    if (!prefs.get('shortsAuto') || !s.cur) return;
+    wrap.scrollBy({ top: wrap.clientHeight, behavior: 'smooth' });
+  });
   video.addEventListener('playing', () => { if (s.cur) { s.cur.classList.add('ready'); s.cur.classList.remove('loading', 'paused'); } });
   video.addEventListener('waiting', () => { if (s.cur) s.cur.classList.add('loading'); });
   video.addEventListener('pause', () => { if (s.cur && !video.ended && s.cur.classList.contains('ready')) s.cur.classList.add('paused'); });

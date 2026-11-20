@@ -2255,13 +2255,14 @@ function enableSwipeDown(box) {
     dy = e.touches[0].clientY - y0;
     const dx = Math.abs(e.touches[0].clientX - x0);
     if (dy > 10 && dy > dx) {
+      if (e.cancelable) e.preventDefault(); // السحبة للفيديو بس — الصفحة ورا ما بتتحرّك معها
       const d = Math.min(dy, 320);
       box.style.transition = 'none';
       box.style.transformOrigin = 'bottom center';
       box.style.transform = `translateY(${d * 0.85}px) scale(${1 - d / 900})`;
       box.style.opacity = String(1 - d / 900);
     }
-  }, { passive: true });
+  }, { passive: false });
   box.addEventListener('touchend', () => {
     if (y0 == null) return;
     if (dy > 80) { y0 = null; minimize(); return; }
@@ -2273,7 +2274,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120162440';
+const APP_VERSION = '20261120163129';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

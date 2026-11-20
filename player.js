@@ -310,11 +310,15 @@
         if (e.button > 0 || e.target.closest('.np-bottom, .np-menu, .np-big')) return;
         hx = e.clientX; hy = e.clientY;
         clearTimeout(holdT);
+        const P = window.nuvioPref;
+        if (P && P.get('holdSpeed') === false) return;
+        const rate = (P && +P.get('holdRate')) || 2;
         holdT = setTimeout(() => {
           if (this.dead || v.ended || !this.menu.hidden) return;
           this.held = true;
           this._holdRate = v.playbackRate; this._holdPaused = v.paused;
-          v.playbackRate = 2;
+          v.playbackRate = rate;
+          const b = this.speedEl.querySelector('b'); if (b) b.textContent = `${rate}×`;
           if (v.paused) v.play().catch(() => {});
           box.classList.add('fast'); this._hideUI();
           try { if (navigator.vibrate) navigator.vibrate(10); } catch { /* */ }
