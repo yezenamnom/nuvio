@@ -968,3 +968,7 @@ body.shorts-mode .topbar, body.shorts-mode .fab, body.shorts-mode .mini, body.sh
 /* الفيديو بيبيّن بس لمّا يبلّش فعلاً — قبلها بتضل الصورة (بلا شاشة سودا) */
 .short .short-video { background: transparent; opacity: 0; transition: opacity .25s; }
 .short.ready .short-video { opacity: 1; }
+/* رف الشورتس جوّا الشبكة: ما لازم يمطّ عرض الأعمدة (كان يكبّر كل البطاقات عالتلفون) */
+.grid > * { min-width: 0; }
+.grid > .shorts-row { min-width: 0; max-width: 100%; overflow: hidden; }
+.grid > .shorts-row .short-strip { max-width: 100%; }
