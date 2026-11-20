@@ -2549,7 +2549,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120194925';
+const APP_VERSION = '20261120195250';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -2561,11 +2561,12 @@ async function checkUpdate() {
     const t = prev && typeof prev === 'object' ? prev : { v: prev, n: 1, at: 0 };
     if (t.v === v && (t.n >= 3 || Date.now() - t.at < 60e3)) return;
     if (active && active.np() && !active.np().video.paused) return; // ما منقطع فيديو شغّال
-    // النسخة الجديدة بتنحمّل بالخلفية وبتشتغل بالفتحة الجاية — ما منعيد تحميل صفحة إنت عم تستعملها.
-    // بس إذا كانت الصفحة متروكة أكتر من ساعة (يعني فتحة جديدة عملياً) منحدّث هلّق.
+    // منحدّث بس بلحظة ما بتفرق معك: أول ما يفتح الموقع (أول 6 ثواني)، أو لمّا ترجعلو بعد دقيقتين أو أكتر.
+    // غير هيك النسخة الجديدة بتنحمّل بالخلفية وبتشتغل بالفتحة الجاية — ما منقطع شي إنت عم تعملو.
     const regNow = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
     if (regNow) regNow.update().catch(() => {});
-    if (!(hiddenAt && Date.now() - hiddenAt > 3600e3) && regNow) return;
+    const fresh = performance.now() < 6000, back = hiddenAt && Date.now() - hiddenAt > 120e3;
+    if (!fresh && !back && regNow) return;
     store.set('reloadedFor', { v, n: t.v === v ? t.n + 1 : 1, at: Date.now() });
     const reload = () => location.replace(`${location.pathname}?v=${encodeURIComponent(v)}${location.hash}`);
     // مع التخزين المؤقت: منطلب النسخة الجديدة، ومنستنّاها تتركّب، وبعدين منعيد التحميل
