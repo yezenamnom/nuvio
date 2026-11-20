@@ -907,12 +907,14 @@ function buildBottomNav() {
   document.body.classList.add('has-bnav');
   updateBottomNav();
 }
-window.addEventListener('nuvio:store', e => { if (['chTop', 'chSeen', 'subs'].includes(e.detail)) updateBottomNav(); });
+window.addEventListener('nuvio:store', e => { if (['chTop', 'chSeen', 'subs', 'me'].includes(e.detail)) updateBottomNav(); });
 function updateBottomNav() {
   const nav = document.querySelector('.bnav'); if (!nav) return;
   const path = (location.hash.slice(1) || '/').split('?')[0];
-  const sec = path.startsWith('/music') ? '/music' : ['/history', '/likes', '/favs', '/later', '/searches', '/lists', '/list', '/lib', '/plist', '/settings'].includes(path) ? '/me' : path;
+  const sec = path.startsWith('/music') ? '/music' : ['/history', '/likes', '/favs', '/later', '/searches', '/lists', '/list', '/lib', '/plist', '/settings', '/login', '/admin'].includes(path) ? '/me' : path;
   nav.querySelectorAll('.bnav-i').forEach(a => a.classList.toggle('on', a.dataset.path === sec));
+  const meIc = nav.querySelector('.bnav-me');
+  if (meIc) { const u = accUser(); meIc.textContent = u ? (u.name || u.email).trim().charAt(0).toUpperCase() : 'N'; }
   const subsBtn = nav.querySelector('[data-path="/subs"]');
   if (subsBtn) subsBtn.classList.toggle('dot', subs.list().some(c => chNew.has(c.id)));
 }
@@ -1151,16 +1153,24 @@ function mePlaylistsSection() {
 function renderMe() {
   document.title = 'أنا — Nuvio';
   const head = el('div', 'me-head');
-  const av = el('div', 'me-av', 'N');
+  const me = accUser();
+  const av = el('div', 'me-av', me ? (me.name || me.email).trim().charAt(0).toUpperCase() : 'N');
   const nm = el('div', 'me-name');
-  nm.append(el('b', null, 'ضيف Nuvio'), el('span', 'muted', 'كل شي محفوظ على جهازك بس'));
+  if (me) { const n = el('b', null, me.name || me.email); n.dir = 'auto'; const e = el('span', 'muted', me.email); e.dir = 'ltr'; nm.append(n, e); }
+  else nm.append(el('b', null, 'ضيف Nuvio'), el('span', 'muted', 'بياناتك على هالجهاز بس — سجّل دخول لتنحفظ بحسابك'));
   const gear = el('a', 'me-gear'); gear.href = '#/settings'; gear.setAttribute('aria-label', 'الإعدادات');
   gear.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.5 7.5 0 0 0 7 6.5l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 2.6-1.5l2.4 1 2-3.4z"/></svg>';
   head.append(av, nm, gear);
   const acts = el('div', 'me-acts');
-  const login = el('button', 'me-btn soon', 'تسجيل دخول · قريباً'); login.disabled = true;
-  const set = el('a', 'me-btn', 'الإعدادات'); set.href = '#/settings';
-  acts.append(login, set);
+  if (me) {
+    if (me.admin) { const adm = el('a', 'me-btn soon', 'لوحة التحكّم'); adm.href = '#/admin'; acts.append(adm); }
+    const out = el('button', 'me-btn', 'تسجيل خروج'); out.onclick = confirmLogout;
+    acts.append(out);
+  } else {
+    const login = el('a', 'me-btn soon', 'تسجيل الدخول'); login.href = '#/login';
+    const reg = el('a', 'me-btn', 'حساب جديد'); reg.href = '#/login?m=register';
+    acts.append(login, reg);
+  }
   const body = liveSection(['hist', 'likes', 'favs', 'later', 'mhist', 'artists', 'subs', 'ytlists', 'playlists', 'searches', 'pos'], () => {
     const rows = el('div', 'lib-rows');
     rows.append(

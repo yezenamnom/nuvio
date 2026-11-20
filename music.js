@@ -289,6 +289,9 @@ function openDrawer() {
     item('mic', 'بودكاست', '#/music/podcast'),
   );
   d.append(sep('Nuvio'), item('later', 'الإعدادات', '#/settings'));
+  const me = typeof accUser === 'function' && accUser();
+  if (me && me.admin) d.append(item('fire', 'لوحة التحكّم', '#/admin'));
+  if (!me) d.append(item('folder', 'تسجيل الدخول', '#/login'));
   if (!ov.classList.contains('open') && window.nuvioLockScroll) window.nuvioLockScroll(true);
   requestAnimationFrame(() => ov.classList.add('open'));
 }
