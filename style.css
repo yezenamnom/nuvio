@@ -411,10 +411,46 @@ div.ch-avatar.sk { border-radius: 50%; }
 .topbar { max-width: 100vw; }
 .search { min-width: 0; }
 .search input { width: 100%; min-width: 0; }
-html, body { overflow-x: hidden; }
+html, body { overflow-x: clip; }
 @media (max-width: 600px) {
   .topbar { gap: 6px; padding: 8px 10px; }
   .logo { width: 30px; height: 30px; }
   .search button { padding: 0 10px; }
   .search input { padding: 8px 10px; font-size: 16px; } /* 16px لحتى الآيفون ما يكبّر الصفحة لمّا تكبس */
 }
+
+/* ---------- صفحة الفيديو عالتلفون: بلا شريط فوق، والفيديو ثابت فوق ---------- */
+@media (max-width: 600px) {
+  body.watching .topbar { display: none; }
+  body.watching main { padding-top: 0; }
+  .watch { display: flex; flex-direction: column; }
+  .watch-main { display: contents; }
+  .watch-main .player-box {
+    position: sticky; top: 0; z-index: 15; margin-inline: -12px; border-radius: 0;
+    padding-top: env(safe-area-inset-top); background: #000; box-sizing: content-box;
+  }
+  .watch-main .info { padding-inline: 0; }
+}
+.player-ph { display: none; }
+
+/* ---------- المشغّل الصغير تحت ---------- */
+.mini {
+  position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 40;
+  display: flex; align-items: center; gap: 10px; height: 64px; padding-inline-end: 6px;
+  background: rgba(19, 24, 42, .97); backdrop-filter: blur(12px); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.55); overflow: hidden; direction: rtl; animation: mini-in .22s ease-out;
+}
+@keyframes mini-in { from { transform: translateY(90px); opacity: 0; } to { transform: none; opacity: 1; } }
+.mini-vid { width: 114px; height: 64px; flex-shrink: 0; background: #000; cursor: pointer; }
+.mini-vid .player-box { width: 100%; height: 100%; aspect-ratio: auto; border-radius: 0; margin: 0; position: static; padding: 0; transform: none !important; opacity: 1 !important; }
+.player-box.in-mini .np-ui, .player-box.in-mini .fab-wrap { display: none; }
+.mini-info { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; border: 0; background: none; color: var(--text); font: inherit; text-align: right; cursor: pointer; padding: 0; }
+.mini-title { font-weight: 700; font-size: .9rem; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-author { color: var(--muted); font-size: .8rem; }
+.mini-btn { width: 40px; height: 40px; border: 0; background: none; color: var(--text); border-radius: 50%; display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
+.mini-btn:hover { background: var(--card); }
+.mini-btn svg { width: 24px; height: 24px; fill: currentColor; stroke: currentColor; stroke-width: 0; }
+.mini-btn:last-child svg { fill: none; stroke-width: 2.2; stroke-linecap: round; }
+body.has-mini main { padding-bottom: 90px; }
+body.has-mini .fab-wrap { bottom: calc(86px + env(safe-area-inset-bottom)); }
+@media (min-width: 601px) { .mini { left: auto; right: 16px; width: 420px; bottom: 16px; } }

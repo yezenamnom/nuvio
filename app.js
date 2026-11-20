@@ -726,6 +726,8 @@ async function renderWatch(id, startTime) {
   const info = el('div', 'info');
   const side = el('aside', 'related');
   main.append(box, info); layout.append(main, side);
+  active = { id, box, layout, main, title: () => (current && current.data.title) || (pv && pv.title) || '', author: () => (current && current.data.author) || (pv && pv.author) || '', np: () => np };
+  enableSwipeDown(box);
 
   const setChip = () => {};
 
@@ -830,7 +832,7 @@ async function renderWatch(id, startTime) {
   /* إذا علّق أو صار خطأ: أول شي منعيد تحميل نفس المصدر من نفس الثانية، بعدين منبدّل سيرفر لحالنا */
   let recovering = false;
   async function recover(t) {
-    if (recovering || !layout.isConnected || !np) return;
+    if (recovering || !box.isConnected || !np) return;
     recovering = true;
     try {
       reloads++;
@@ -848,7 +850,7 @@ async function renderWatch(id, startTime) {
       const { inst, res } = tried.length
         ? await withFallback(i => apiFor(i).video(i.url, id), { skip: tried })
         : await getVideo(id);
-      if (!layout.isConnected) return;
+      if (!box.isConnected) return;
       tried.push(inst.url);
       if (!current) fillInfo(res);
       current = { inst, data: res };
@@ -859,7 +861,7 @@ async function renderWatch(id, startTime) {
       mark(inst.url, false);
       return tryNext(startAt);
     } catch (e) {
-      if (!layout.isConnected) return;
+      if (!box.isConnected) return;
       // دورة تانية على كل السيرفرات قبل المشغّل الاحتياطي (الخلل عندهن غالباً مؤقت)
       if (!secondRound && tried.length) { secondRound = true; tried.length = 0; memo.delete('v:' + id); return tryNext(startAt); }
       if (!current) { h1.textContent = 'ما قدرت جيب معلومات الفيديو'; metaRow.replaceChildren(); descSk.remove(); }
@@ -1190,6 +1192,107 @@ $('#searchForm').addEventListener('submit', e => {
   if (q) { $('#q').blur(); openQuery(q); }
 });
 
+/* ================= المشغّل الصغير (اسحب الفيديو لتحت) ================= */
+let active = null;          // الفيديو اللي عم يشتغل هلّق
+let miniOn = false;
+let lastPage = '#/';
+const mini = el('div', 'mini'); mini.hidden = true;
+document.body.append(mini);
+
+function minimize() {
+  if (!active || miniOn) return;
+  const { box, id } = active;
+  miniOn = true;
+  const ph = el('div', 'player-ph'); ph.id = 'player-ph';
+  box.replaceWith(ph);                 // منحط مكانو علامة لحتى نرجّعو
+  box.classList.add('in-mini');
+  mini.replaceChildren();
+  const info = el('button', 'mini-info');
+  const tt = el('span', 'mini-title', active.title()); tt.dir = 'auto';
+  info.append(tt, el('span', 'mini-author', active.author()));
+  info.onclick = () => { location.hash = `#/watch?v=${encodeURIComponent(id)}`; };
+  const pp = el('button', 'mini-btn'); pp.setAttribute('aria-label', 'تشغيل/إيقاف');
+  const v = active.np() && active.np().video;
+  const drawPP = () => { pp.innerHTML = v && !v.paused ? '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'; };
+  drawPP();
+  if (v) { v.addEventListener('play', drawPP); v.addEventListener('pause', drawPP); }
+  pp.onclick = e => { e.stopPropagation(); const n = active && active.np(); if (n) n.toggle(); };
+  const x = el('button', 'mini-btn'); x.setAttribute('aria-label', 'سكّر');
+  x.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  x.onclick = e => { e.stopPropagation(); closeMini(); };
+  const vid = el('div', 'mini-vid'); vid.append(box);
+  vid.onclick = () => info.click();
+  mini.append(vid, info, pp, x);
+  mini.hidden = false;
+  document.body.classList.add('has-mini');
+  // ارجع لآخر صفحة كنت فيها غير الفيديو (مثلاً البحث)
+  location.hash = lastPage || '#/';
+}
+function restoreMini() {
+  if (!miniOn || !active) return false;
+  miniOn = false;
+  mini.hidden = true; document.body.classList.remove('has-mini');
+  const { box, layout } = active;
+  box.classList.remove('in-mini');
+  view.replaceChildren(layout);
+  const ph = layout.querySelector('#player-ph');
+  if (ph) ph.replaceWith(box); else active.main.prepend(box);
+  mini.replaceChildren();
+  return true;
+}
+async function closeMini() {
+  if (!active) return;
+  const n = active.np();
+  if (n) { n.pauseAll(); n.destroy(); }
+  await destroyPlayer();
+  active.box.remove();
+  active = null; miniOn = false;
+  mini.hidden = true; mini.replaceChildren(); document.body.classList.remove('has-mini');
+}
+
+/* سحب الفيديو لتحت بالإصبع (تلفون) */
+function enableSwipeDown(box) {
+  let y0 = null, x0 = 0, dy = 0;
+  box.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1 || e.target.closest('.np-bottom, .np-menu') || document.fullscreenElement) { y0 = null; return; }
+    y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0;
+  }, { passive: true });
+  box.addEventListener('touchmove', e => {
+    if (y0 == null) return;
+    dy = e.touches[0].clientY - y0;
+    const dx = Math.abs(e.touches[0].clientX - x0);
+    if (dy > 10 && dy > dx) {
+      box.style.transition = 'none';
+      box.style.transform = `translateY(${Math.min(dy, 260) * 0.6}px) scale(${1 - Math.min(dy, 260) / 1200})`;
+      box.style.opacity = String(1 - Math.min(dy, 260) / 700);
+    }
+  }, { passive: true });
+  box.addEventListener('touchend', () => {
+    if (y0 == null) return;
+    box.style.transition = 'transform .2s, opacity .2s';
+    box.style.transform = ''; box.style.opacity = '';
+    if (dy > 90) minimize();
+    y0 = null;
+  });
+}
+
+/* ================= تحديث تلقائي للنسخة =================
+   التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
+const APP_VERSION = '20261120041420';
+async function checkUpdate() {
+  try {
+    const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) return;
+    const v = (await r.text()).trim();
+    if (v && v !== APP_VERSION && store.get('reloadedFor', '') !== v) {
+      store.set('reloadedFor', v);
+      if (active && active.np() && !active.np().video.paused) return; // ما منقطع فيديو شغّال
+      location.replace(`${location.pathname}?v=${encodeURIComponent(v)}${location.hash}`);
+    }
+  } catch { /* بلا نت */ }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
+
 /* ================= التنقّل ================= */
 async function route() {
   const hash = location.hash.slice(1) || '/';
@@ -1197,7 +1300,13 @@ async function route() {
   const p = new URLSearchParams(qs || '');
   hideSug();
   document.querySelectorAll('.top-nav a').forEach(x => x.classList.toggle('on', x.getAttribute('href') === '#' + path));
-  if (path !== '/watch') await destroyPlayer();
+  document.body.classList.toggle('watching', path === '/watch');
+  if (path !== '/watch') lastPage = '#' + hash;
+  if (path === '/watch' && active && miniOn && p.get('v') === active.id) { restoreMini(); window.scrollTo(0, 0); return; }
+  if (path === '/watch' && miniOn) await closeMini();
+  if (path === '/watch' && active && !miniOn && active.id !== p.get('v')) { const n = active.np(); if (n) n.destroy(); active = null; }
+  // إذا طلعت من الفيديو وهو مش مصغّر، منوقّفو
+  if (path !== '/watch' && !miniOn) { await destroyPlayer(); if (active) { const n = active.np(); if (n) { n.pauseAll(); n.destroy(); } active = null; } }
   window.scrollTo(0, 0);
   if (path === '/search' && p.get('q')) return renderSearch(p.get('q'));
   if (path === '/watch' && p.get('v')) return renderWatch(p.get('v'), +p.get('t') || 0);
@@ -1214,5 +1323,6 @@ window.addEventListener('hashchange', route);
 if (window.shaka) shaka.polyfill.installAll();
 probeAll();
 discover();
+checkUpdate();
 setInterval(() => probeAll(), 10 * 60e3);
 route();
