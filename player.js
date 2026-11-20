@@ -84,7 +84,79 @@
       this._updQ();
     }
     message(t) { this.msgEl.textContent = t || ''; this.msgEl.classList.toggle('on', !!t); }
-    destroy() { this.dead = true; clearInterval(this._wd); clearTimeout(this._hideT); document.removeEventListener('keydown', this._key); document.removeEventListener('fullscreenchange', this._fsc); }
+    destroy() {
+      this.dead = true; clearInterval(this._wd); clearTimeout(this._hideT);
+      document.removeEventListener('keydown', this._key); document.removeEventListener('fullscreenchange', this._fsc);
+      document.removeEventListener('visibilitychange', this._vis);
+      if (this.bg) { this.bg.pause(); this.bg.removeAttribute('src'); this.bg.load(); }
+    }
+
+    /* ---------- شاشة القفل ومركز التحكّم ---------- */
+    setMeta(m) {
+      this.meta = m;
+      if (!('mediaSession' in navigator)) return;
+      const ms = navigator.mediaSession;
+      try {
+        ms.metadata = new MediaMetadata({ title: m.title || '', artist: m.artist || '', album: 'Nuvio', artwork: m.art ? [{ src: m.art, sizes: '480x360', type: 'image/jpeg' }] : [] });
+      } catch { /* */ }
+      const cur = () => (this.bgOn ? this.bg : this.video);
+      const set = (a, fn) => { try { ms.setActionHandler(a, fn); } catch { /* مش مدعوم */ } };
+      set('play', () => { this.userPaused = false; cur().play().catch(() => {}); });
+      set('pause', () => { this.userPaused = true; cur().pause(); });
+      set('seekbackward', d => { const x = cur(); x.currentTime = Math.max(0, x.currentTime - (d.seekOffset || 10)); });
+      set('seekforward', d => { const x = cur(); x.currentTime = x.currentTime + (d.seekOffset || 10); });
+      set('seekto', d => { cur().currentTime = d.seekTime; });
+      set('nexttrack', this.opts.onNext || null);
+    }
+
+    /* ---------- تشغيل بالخلفية ----------
+       لمّا تطلع من الصفحة أو تسكّر الشاشة، الآيفون بيوقّف الفيديو. فمنحوّل لحالنا لملف الصوت
+       من نفس الثانية، ولمّا ترجع منرجع للفيديو من وين وصل الصوت. */
+    setBgAudio(url) {
+      this.bgUrl = url;
+      if (!this.bg) {
+        this.bg = new Audio();
+        this.bg.preload = 'auto';
+        this.bg.setAttribute('playsinline', '');
+        this.bg.addEventListener('ended', () => { this.bgOn = false; });
+      }
+      if (!this._vis) {
+        this._vis = () => {
+          if (document.hidden) { if (!this.video.paused && !this.video.ended) this._toBg(); }
+          else this._fromBg();
+        };
+        document.addEventListener('visibilitychange', this._vis);
+        this.video.addEventListener('pause', () => { if (document.hidden && !this.userPaused && !this.bgOn) this._toBg(); });
+      }
+    }
+    /* لازم نشغّل الصوت مرة وحدة جوّا كبسة منك، لحتى الآيفون يسمحلنا نشغّلو لاحقاً بالخلفية */
+    _unlock() {
+      if (this.unlocked || !this.bg || !this.bgUrl) return;
+      if (this.bg.src !== this.bgUrl) this.bg.src = this.bgUrl;
+      this.bg.muted = true;
+      const p = this.bg.play();
+      if (p) p.then(() => { this.bg.pause(); this.bg.muted = false; this.unlocked = true; }).catch(() => { this.bg.muted = false; });
+    }
+    _toBg() {
+      const v = this.video, bg = this.bg;
+      if (this.bgOn || this.dead) return;
+      if (!bg || !this.bgUrl) { v.play().catch(() => {}); return; } // بلا ملف صوت: منحاول نكمّل الفيديو نفسو
+      if (bg.src !== this.bgUrl) bg.src = this.bgUrl;
+      const t = v.currentTime;
+      const go = () => { try { bg.currentTime = t; } catch { /* */ } };
+      if (bg.readyState > 0) go(); else bg.addEventListener('loadedmetadata', go, { once: true });
+      bg.playbackRate = v.playbackRate; bg.muted = false; bg.volume = v.muted ? 0 : v.volume;
+      bg.play().then(() => { this.bgOn = true; if (!v.paused) v.pause(); }).catch(() => { v.play().catch(() => {}); });
+    }
+    _fromBg() {
+      if (!this.bgOn) return;
+      const v = this.video, bg = this.bg;
+      this.bgOn = false;
+      const t = bg.currentTime, wasPlaying = !bg.paused;
+      bg.pause();
+      try { v.currentTime = t; } catch { /* */ }
+      if (wasPlaying) v.play().catch(() => {});
+    }
 
     /* ---------- الأحداث ---------- */
     _bind() {
@@ -132,6 +204,7 @@
       // الضغط على الفيديو: كمبيوتر = تشغيل/إيقاف، موبايل = إظهار الأزرار، ضغطتين = تقديم/ترجيع 10 ثواني
       let lastTap = 0, tapT;
       this.ui.addEventListener('pointerup', e => {
+        this._unlock();
         if (e.target.closest('.np-bottom, .np-menu, .np-big')) return;
         if (!this.menu.hidden) { this.menu.hidden = true; return; }
         const touch = e.pointerType === 'touch';
@@ -177,7 +250,12 @@
       document.addEventListener('fullscreenchange', this._fsc);
     }
 
-    toggle() { const v = this.video; if (v.paused || v.ended) v.play().catch(() => {}); else v.pause(); }
+    toggle() {
+      const v = this.video;
+      this._unlock();
+      if (v.paused || v.ended) { this.userPaused = false; v.play().catch(() => {}); }
+      else { this.userPaused = true; v.pause(); }
+    }
     skip(s) {
       const v = this.video;
       v.currentTime = Math.max(0, Math.min((v.duration || 0) - 0.2, v.currentTime + s));

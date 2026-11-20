@@ -292,3 +292,32 @@ main { padding: 16px; max-width: 1500px; margin: 0 auto; }
   .np-time { font-size: 12px; }
   .np-big { width: 64px; height: 64px; margin: -32px 0 0 -32px; }
 }
+
+/* ---------- Skeleton (تحميل تدريجي) ---------- */
+.sk { background: linear-gradient(90deg, var(--card) 0%, #1d2a45 40%, var(--card) 80%); background-size: 300% 100%; animation: sk 1.3s ease-in-out infinite; border-radius: 8px; }
+@keyframes sk { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+.sk-line { display: block; height: 12px; margin: 8px 0; width: 90%; }
+.sk-line.short { width: 55%; }
+.v-title .sk-line { height: 20px; width: 70%; }
+.sk-card .thumb { border-radius: var(--radius); }
+.sk-desc { cursor: default; }
+span.author-avatar.sk { display: inline-block; }
+.ch-banner.sk { aspect-ratio: 6 / 1; }
+div.ch-avatar.sk { border-radius: 50%; }
+.ch-title .sk-line { height: 22px; width: 200px; }
+.related-list { display: grid; gap: 12px; align-content: start; }
+.sentinel { height: 1px; }
+
+/* ---------- اقتراحات البحث ---------- */
+.search { position: relative; overflow: visible; }
+.search input { border-radius: 999px; }
+.suggest {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 40;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; padding: 6px 0;
+  box-shadow: 0 12px 30px rgba(0,0,0,.45); max-height: 60vh; overflow: auto;
+}
+.sug-item {
+  display: block; width: 100%; text-align: start; border: 0; background: none; color: var(--text);
+  padding: 8px 18px; font: inherit; font-size: .95rem; cursor: pointer;
+}
+.sug-item:hover, .sug-item.on { background: var(--card); }
