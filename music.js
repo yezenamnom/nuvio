@@ -83,11 +83,13 @@ function toggleArtist(a) {
 function musicSearch(q, o = {}, page = 1) {
   const key = 'ms:' + q + JSON.stringify(o) + ':' + page;
   return cached(key, 30 * 60e3, () => withFallback(i => {
+    // أول صفحة من يوتيوب مباشرة (أسرع بكتير)، والصفحات اللي بعدها من السيرفرات العامة
+    if (i.type === 'yti') return YtApi.search(i.url, q, 1, null, { sort: o.sort_by || o.sort, date: o.date, dur: o.duration, feat: o.features }).then(r => r.items);
     if (i.type !== 'invidious') return page === 1 ? apiFor(i).search(i.url, q, 1).then(r => r.items) : Promise.resolve([]);
     const extra = Object.entries(o).map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join('');
     return fetchJSON(`${i.url}/api/v1/search?q=${encodeURIComponent(q)}&type=video&page=${page}${extra}`)
       .then(d => (Array.isArray(d) ? d : []).filter(v => v.type === 'video').map(v => Invidious.item(i.url, v)));
-  })).then(r => r.res);
+  }, { yti: page === 1 })).then(r => r.res);
 }
 
 const MUSIC_SHELVES = [
@@ -114,9 +116,11 @@ const TOP_ARTISTS = ['فيروز', 'أم كلثوم', 'عمرو دياب', 'نا
    وإلا أكبر قناة موثّقة مش «فاميلي/عائلة/معجبين» */
 function officialArtist(list) {
   const bad = /فاميلي|family|عائلة|عيلة|kids|أطفال|fans|معجبين|fan club|vlog/i;
-  const norm = s => (s || '').replace(/ - Topic$/, '').trim().toLowerCase();
-  const good = list.filter(c => !bad.test(c.name) && !/ - Topic$/.test(c.name));
-  const topics = list.filter(c => / - Topic$/.test(c.name)).map(c => norm(c.name));
+  // قنوات «Topic» (أغاني بس): بالإنجليزي «X - Topic» وبالعربي «الموضوع - X»
+  const TOPIC = / - Topic$|^الموضوع - /;
+  const norm = s => (s || '').replace(/ - Topic$/, '').replace(/^الموضوع - /, '').trim().toLowerCase();
+  const good = list.filter(c => !bad.test(c.name) && !TOPIC.test(c.name));
+  const topics = list.filter(c => TOPIC.test(c.name)).map(c => norm(c.name));
   // ١) قناة موثّقة إلها نسخة «Topic» بنفس الاسم = المطرب الرسمي
   const official = good.filter(c => c.verified && topics.includes(norm(c.name))).sort((a, b) => (b.subs || 0) - (a.subs || 0))[0];
   if (official) return official;
@@ -124,8 +128,8 @@ function officialArtist(list) {
   const big = good.filter(c => c.verified).sort((a, b) => (b.subs || 0) - (a.subs || 0))[0];
   if (big) return big;
   // ٣) قناة Topic (أغاني بس) — بدون كلمة Topic بالاسم
-  const tp = list.find(c => / - Topic$/.test(c.name));
-  if (tp) return { ...tp, name: norm(tp.name) ? tp.name.replace(/ - Topic$/, '') : tp.name };
+  const tp = list.find(c => TOPIC.test(c.name));
+  if (tp) return { ...tp, name: norm(tp.name) ? tp.name.replace(/ - Topic$/, '').replace(/^الموضوع - /, '') : tp.name };
   return good[0] || null;
 }
 
@@ -216,8 +220,8 @@ async function renderMusic(path, params) {
   (async () => {
     for (const name of TOP_ARTISTS) {
       try {
-        const { res } = await cached('ma3:' + name, 24 * 3600e3, () => withFallback(i => fetchJSON(`${i.url}/api/v1/search?q=${encodeURIComponent(name)}&type=channel&page=1`)
-          .then(d => (Array.isArray(d) ? d : []).filter(c => c.type === 'channel').map(c => ({ id: c.authorId, name: c.author, avatar: Invidious.pickAvatar(i.url, c.authorThumbnails), subs: c.subCount, verified: c.authorVerified })))));
+        const { res } = await cached('ma3:' + name, 24 * 3600e3, () => withFallback(i => i.type === 'yti' ? YtApi.channels(i.url, name, 8) : fetchJSON(`${i.url}/api/v1/search?q=${encodeURIComponent(name)}&type=channel&page=1`)
+          .then(d => (Array.isArray(d) ? d : []).filter(c => c.type === 'channel').map(c => ({ id: c.authorId, name: c.author, avatar: Invidious.pickAvatar(i.url, c.authorThumbnails), subs: c.subCount, verified: c.authorVerified }))), { yti: true }));
         const c = officialArtist(res || []);
         if (c && top.isConnected) top.append(channelBubble({ id: c.id, name: c.name, avatar: c.avatar }));
       } catch { /* */ }

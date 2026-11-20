@@ -124,7 +124,21 @@ async function discover() {
 }
 
 /* تبديل تلقائي سريع: منبلّش بالأقوى، إذا تأخّر منبلّش بالتاني بنفس الوقت، وإذا وقع منروح عالي بعدو فوراً */
-async function withFallback(op, { skip = [], stagger = 2000, prefer = null } = {}) {
+async function withFallback(op, opts = {}) {
+  if (!opts.yti || !ytiUsable()) return withFallbackPublic(op, opts);
+  const p = op(YTI_INST).then(res => ({ inst: YTI_INST, res }));
+  // منعطي يوتيوب المباشر شوية وقت؛ إذا ما جاوب منبلّش بالسيرفرات العامة بنفس الوقت، وأول واحد بيربح
+  const first = await Promise.race([p.then(x => ({ x }), e => ({ e })), sleep(1500).then(() => null)]);
+  if (first && first.x) return first.x;
+  if (first && first.e) return withFallbackPublic(op, opts);
+  return new Promise((resolve, reject) => {
+    let fails = 0;
+    const fail = e => { if (++fails === 2) reject(e); };
+    p.then(resolve, fail);
+    withFallbackPublic(op, opts).then(resolve, fail);
+  });
+}
+async function withFallbackPublic(op, { skip = [], stagger = 2000, prefer = null } = {}) {
   if (!hasFreshOk()) await Promise.race([ready, sleep(5000)]); // أول فتحة: منستنّى نتيجة الفحص لحتى ما نبلّش بسيرفر مضروب
   const list = orderedInstances().filter(i => !skip.includes(i.url));
   if (prefer) list.sort((a, b) => (b.type === prefer) - (a.type === prefer)); // للفيديو: Invidious أول (جودة أعلى بـ DASH)
@@ -199,7 +213,7 @@ function cached(key, ttl, fn) {
   return p;
 }
 const getVideo = id => cached('v:' + id, 20 * 60e3, () => withFallback(i => apiFor(i).video(i.url, id), { prefer: 'invidious' }));
-const getChannel = id => cached('c:' + id, 10 * 60e3, () => withFallback(i => apiFor(i).channel(i.url, id)));
+const getChannel = id => cached('c:' + id, 10 * 60e3, () => withFallback(i => apiFor(i).channel(i.url, id), { yti: true }));
 
 /* ================= محوّلات الـ API ================= */
 const abs = (base, u) => (!u ? '' : u.startsWith('//') ? 'https:' + u : u.startsWith('/') ? base + u : u);
@@ -353,7 +367,214 @@ const Piped = {
     };
   },
 };
-const apiFor = inst => (inst.type === 'piped' ? Piped : Invidious);
+/* ================= يوتيوب مباشرة (عبر وسيطنا الصغير على tube.glanzstar.de) =================
+   البحث والقنوات والمشابه من يوتيوب نفسو: أسرع وأثبت من السيرفرات العامة.
+   الوسيط ما بيحفظ شي وما بيبعت IP تبعك ليوتيوب. إذا ما جاوب، منرجع للسيرفرات العامة متل قبل. */
+const YTI = 'https://tube.glanzstar.de/yti/youtubei/v1/';
+const YTI_INST = { url: YTI, type: 'yti' };
+const YTI_CLIENT = { clientName: 'WEB', clientVersion: '2.20251118.01.00', hl: 'ar', gl: 'DE' };
+let ytiDown = 0;
+const ytiUsable = () => Date.now() - ytiDown > 120e3; // إذا فشل، منرتاح منو دقيقتين
+async function yti(ep, body, ms = 6000) {
+  if (!ytiUsable()) throw new Error('الوسيط مرتاح');
+  const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(YTI + ep, {
+      method: 'POST', signal: ctl.signal, referrerPolicy: 'no-referrer',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, // طلب بسيط: بلا طلب استئذان إضافي
+      body: JSON.stringify({ context: { client: YTI_CLIENT }, ...body }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } catch (e) { ytiDown = Date.now(); throw e; } finally { clearTimeout(tm); }
+}
+function walk(o, key, out = []) {
+  if (Array.isArray(o)) { for (const x of o) walk(x, key, out); }
+  else if (o && typeof o === 'object') {
+    for (const k in o) { const v = o[k]; if (k === key) out.push(v); else if (v && typeof v === 'object') walk(v, key, out); }
+  }
+  return out;
+}
+const ytTxt = o => (!o ? '' : typeof o === 'string' ? o : o.simpleText || o.content || (o.runs || []).map(r => r.text).join(''));
+const latinDigits = s => String(s || '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/٫/g, '.');
+function parseCount(s) {
+  if (!s) return null;
+  s = latinDigits(s).replace(/[,٬\s](?=\d{3}\b)/g, '');
+  const m = s.match(/(\d+(?:\.\d+)?)\s*(ألف|آلاف|مليون|ملايين|مليار|K|M|B)?/i);
+  if (!m) return /لا توجد|no views/i.test(s) ? 0 : null;
+  const mul = { 'ألف': 1e3, 'آلاف': 1e3, 'مليون': 1e6, 'ملايين': 1e6, 'مليار': 1e9, k: 1e3, m: 1e6, b: 1e9 }[(m[2] || '').toLowerCase()] || 1;
+  return Math.round(parseFloat(m[1]) * mul);
+}
+// «قبل شهرين» ← وقت تقريبي (للترتيب والفلترة)
+const AGO_UNITS = [[/ثاني|second/i, 1], [/دقيق|دقائق|minute/i, 60], [/ساع|hour/i, 3600], [/يوم|أيام|day/i, 86400],
+  [/أسبوع|أسابيع|week/i, 604800], [/شهر|أشهر|شهور|month/i, 2592000], [/سن(ة|وات|تين)|عام|أعوام|year/i, 31536000]];
+function agoTs(s) {
+  if (!s) return 0;
+  s = latinDigits(s);
+  const u = AGO_UNITS.find(([re]) => re.test(s)); if (!u) return 0;
+  const n0 = s.match(/\d+/);
+  const n = n0 ? +n0[0] : /(ين|تين)(\s|$)/.test(s) ? 2 : 1; // شهرين، يومين، ساعتين…
+  return Math.floor(Date.now() / 1000) - n * u[1];
+}
+const durSec = s => { const p = latinDigits(s).trim().split(':').map(Number); return p.length > 1 && p.every(n => !isNaN(n)) ? p.reduce((a, n) => a * 60 + n, 0) : 0; };
+const httpsUrl = u => (u && u.startsWith('//') ? 'https:' + u : u || '');
+const lastThumb = o => { const l = (o && o.thumbnails) || []; return l.length ? l[l.length - 1].url : ''; };
+const uniqById = list => { const s = new Set(); return list.filter(v => v && v.id && !s.has(v.id) && s.add(v.id)); };
+function ytContToken(d) {
+  // منفتّش بس بالقائمة نفسها (مش بقسم «حول القناة» أو التعليقات)
+  const roots = [];
+  const sel = walk(d.contents || {}, 'tabRenderer').find(x => x.selected);
+  if (sel) roots.push(sel.content);
+  const ps = ((d.contents || {}).twoColumnSearchResultsRenderer || {}).primaryContents;
+  if (ps) roots.push(ps);
+  for (const k of ['onResponseReceivedActions', 'onResponseReceivedCommands']) if (d[k]) roots.push(d[k]);
+  const c = walk(roots.length ? roots : d, 'continuationItemRenderer');
+  for (let i = c.length - 1; i >= 0; i--) { const tk = (walk(c[i], 'continuationCommand')[0] || {}).token; if (tk) return tk; }
+  return null;
+}
+// فيديو بشكل videoRenderer / compactVideoRenderer (البحث)
+function fromVR(v) {
+  const by = ((v.longBylineText || v.ownerText || v.shortBylineText || {}).runs || [])[0] || {};
+  const live = (v.badges || []).some(b => /LIVE/.test((b.metadataBadgeRenderer || {}).style || ''))
+    || (v.thumbnailOverlays || []).some(o => (o.thumbnailOverlayTimeStatusRenderer || {}).style === 'LIVE');
+  const vt = ytTxt(v.viewCountText), pt = ytTxt(v.publishedTimeText);
+  return { id: v.videoId, title: ytTxt(v.title), author: by.text || '', authorId: ((by.navigationEndpoint || {}).browseEndpoint || {}).browseId || '',
+    duration: live ? 0 : durSec(ytTxt(v.lengthText)), views: parseCount(vt), viewsText: vt, published: pt, ts: agoTs(pt), thumb: ytThumb(v.videoId), live };
+}
+// فيديو بشكل lockupViewModel (القنوات والمشابه)
+function fromLockup(l, ch) {
+  if (!l || l.contentType !== 'LOCKUP_CONTENT_TYPE_VIDEO' || !l.contentId) return null;
+  const md = (l.metadata || {}).lockupMetadataViewModel || {};
+  const rows = (((md.metadata || {}).contentMetadataViewModel || {}).metadataRows || [])
+    .map(r => (r.metadataParts || []).map(x => ({ t: (x.text || {}).content || '', a: x.accessibilityLabel || '' }))).filter(r => r.length);
+  let author = (ch && ch.name) || '', authorId = (ch && ch.id) || '';
+  let stat = rows;
+  if (!ch) {
+    if (rows[0] && rows[0].length === 1 && !/مشاهد|view|يشاهد|watching/i.test(rows[0][0].a + rows[0][0].t)) { author = rows[0][0].t; stat = rows.slice(1); }
+    authorId = (walk(md.image || {}, 'browseEndpoint')[0] || walk(md.metadata || {}, 'browseEndpoint')[0] || {}).browseId || '';
+  }
+  const flat = stat.flat();
+  const vp = flat.find(x => /مشاهد|view|يشاهد|watching/i.test(x.a || x.t)) || flat[0];
+  const tp = flat.find(x => x !== vp && /قبل|ago|منذ|بث|stream/i.test(x.a || x.t));
+  const badges = walk(l.contentImage || {}, 'thumbnailBadgeViewModel');
+  const bt = badges.map(b => b.text || '').find(Boolean) || '';
+  const live = badges.some(b => /LIVE/.test(b.badgeStyle || '')) || /مباشر|LIVE/i.test(bt);
+  const vt = vp ? vp.a || vp.t : '', pt = tp ? tp.t : '';
+  return { id: l.contentId, title: (md.title || {}).content || '', author, authorId,
+    duration: live ? 0 : durSec(bt), views: parseCount(vt), viewsText: vt, published: pt, ts: agoTs(pt), thumb: ytThumb(l.contentId), live };
+}
+function fromShort(s, ch) {
+  const id = ((((s.onTap || {}).innertubeCommand || {}).reelWatchEndpoint) || {}).videoId || String(s.entityId || '').replace(/^shorts-shelf-item-/, '');
+  if (!id) return null;
+  const om = s.overlayMetadata || {}, vt = (om.secondaryText || {}).content || '';
+  return { id, title: (om.primaryText || {}).content || s.accessibilityText || '', author: (ch && ch.name) || '', authorId: (ch && ch.id) || '',
+    duration: 0, views: parseCount(vt), viewsText: vt, published: '', ts: 0, thumb: ytThumb(id), live: false };
+}
+function fromPlLockup(l) {
+  if (!l || l.contentType !== 'LOCKUP_CONTENT_TYPE_PLAYLIST' || !l.contentId) return null;
+  const md = (l.metadata || {}).lockupMetadataViewModel || {};
+  const src = (walk(l.contentImage || {}, 'sources')[0] || [])[0] || {};
+  const bt = walk(l.contentImage || {}, 'thumbnailBadgeViewModel').map(b => b.text).find(Boolean) || '';
+  return { id: l.contentId, title: (md.title || {}).content || '', count: parseCount(bt), thumb: src.url || '' };
+}
+// فلاتر البحث بصيغة يوتيوب (protobuf صغير)
+function ytSearchParams(f = {}, type = 1) {
+  const sort = { rating: 1, upload_date: 2, view_count: 3 }[f.sort] || 0;
+  const flt = [];
+  const date = { hour: 1, today: 2, week: 3, month: 4, year: 5 }[f.date]; if (date) flt.push(0x08, date);
+  flt.push(0x10, type); // 1 فيديو، 2 قناة
+  const dur = { short: 1, long: 2, medium: 3 }[f.dur]; if (dur) flt.push(0x18, dur);
+  const feat = { hd: 0x20, subtitles: 0x28, live: 0x40 }[f.feat]; if (feat) flt.push(feat, 1);
+  const bytes = (sort ? [0x08, sort] : []).concat([0x12, flt.length], flt);
+  return btoa(String.fromCharCode(...bytes));
+}
+const YT_TABS = { videos: 'EgZ2aWRlb3PyBgQKAjoA', shorts: 'EgZzaG9ydHPyBgUKA5oBAA==', live: 'EgdzdHJlYW1z8gYECgJ6AA==', playlists: 'EglwbGF5bGlzdHPyBgQKAkIA' };
+function ytChannelInfo(d, id) {
+  const md = (d.metadata || {}).channelMetadataRenderer || {};
+  const ph = (((d.header || {}).pageHeaderRenderer || {}).content || {}).pageHeaderViewModel || {};
+  const src = l => ((l || [])[(l || []).length - 1] || {}).url || '';
+  const parts = walk(ph.metadata || {}, 'metadataParts').flat().map(x => (x.text || {}).content || '');
+  return {
+    id, name: md.title || ytTxt((((ph.title || {}).dynamicTextViewModel) || {}).text) || '',
+    avatar: httpsUrl(lastThumb(md.avatar) || src((walk(ph.image || {}, 'sources')[0]))),
+    banner: httpsUrl(src(walk(ph.banner || {}, 'sources')[0])),
+    subs: parseCount(parts.find(x => /مشترك|subscriber/i.test(x))), description: md.description || '',
+  };
+}
+function ytTabItems(d, tab, ch) {
+  if (tab === 'playlists') return { lists: walk(d, 'lockupViewModel').map(fromPlLockup).filter(Boolean), next: ytContToken(d) };
+  const items = tab === 'shorts'
+    ? walk(d, 'shortsLockupViewModel').map(s => fromShort(s, ch))
+    : walk(d, 'lockupViewModel').map(l => fromLockup(l, ch)).concat(walk(d, 'videoRenderer').map(v => ({ ...fromVR(v), author: ch.name, authorId: ch.id })));
+  return { items: uniqById(items), next: ytContToken(d) };
+}
+const YtApi = {
+  async search(base, q, page, cont, f = {}) {
+    const d = await yti('search', cont ? { continuation: cont } : { query: q, params: ytSearchParams(f || {}) });
+    const items = uniqById(walk(d, 'videoRenderer').map(fromVR));
+    if (!cont && !items.length) throw new Error('فاضي');
+    return { items, next: items.length ? ytContToken(d) : null };
+  },
+  async channels(base, q, max = 3) {
+    const d = await yti('search', { query: q, params: ytSearchParams({}, 2) });
+    return walk(d, 'channelRenderer').slice(0, max).map(c => {
+      const st = [ytTxt(c.videoCountText), ytTxt(c.subscriberCountText)].find(x => /مشترك|subscriber/i.test(x));
+      const verified = (c.ownerBadges || []).some(b => /VERIFIED/.test((b.metadataBadgeRenderer || {}).style || ''));
+      return { id: c.channelId, name: ytTxt(c.title), avatar: httpsUrl(lastThumb(c.thumbnail)), subs: parseCount(st), videos: null, verified };
+    });
+  },
+  async channel(base, id, cont) {
+    if (cont) { const d = await yti('browse', { continuation: cont }); const ch = chPreview.get(id) || {}; return ytTabItems(d, 'videos', { id, name: ch.name || '' }); }
+    const d = await yti('browse', { browseId: id, params: YT_TABS.videos });
+    const info = ytChannelInfo(d, id);
+    if (!info.name) throw new Error('قناة مش موجودة');
+    const { items, next } = ytTabItems(d, 'videos', info);
+    return { info, items, next };
+  },
+  // تبويب قناة: فيديوهات (الأحدث/الرائجة/الأقدم)، شورتس، مباشر، قوائم
+  async tab(id, tab, sort, cont) {
+    const ch = { id, name: (chPreview.get(id) || {}).name || '' };
+    const mark = o => { if (o.next) o.next = 'yt:' + o.next; return o; }; // منعلّم الصفحة الجاية إنها من يوتيوب المباشر
+    if (cont) {
+      if (!cont.startsWith('yt:')) throw new Error('صفحة من سيرفر عام');
+      return mark(ytTabItems(await yti('browse', { continuation: cont.slice(3) }), tab, ch));
+    }
+    const d = await yti('browse', { browseId: id, params: YT_TABS[tab] || YT_TABS.videos });
+    ch.name = ytChannelInfo(d, id).name || ch.name;
+    const k = tab === 'videos' ? { popular: 1, oldest: 2 }[sort] : 0;
+    if (k) {
+      const chip = walk(d, 'chipViewModel')[k];
+      const tk = chip && (walk(chip, 'continuationCommand')[0] || {}).token;
+      if (!tk) throw new Error('ما في ترتيب');
+      return mark(ytTabItems(await yti('browse', { continuation: tk }), tab, ch));
+    }
+    // القناة ما فيها هالتبويب؟ يوتيوب بيرجّع تبويب تاني — منقول «ما في شي» بدل ما نعرض غلط
+    const sel = walk(d, 'tabRenderer').find(x => x.selected);
+    const selUrl = (((((sel || {}).endpoint || {}).commandMetadata || {}).webCommandMetadata || {}).url) || '';
+    const want = { videos: '/videos', shorts: '/shorts', live: '/streams', playlists: '/playlists' }[tab] || '/videos';
+    const empty = tab === 'playlists' ? { lists: [], next: null } : { items: [], next: null };
+    if (selUrl && !selUrl.endsWith(want)) return empty;
+    const r = ytTabItems(d, tab, ch);
+    if (!(r.items || r.lists).length) {
+      if (walk(d, 'richItemRenderer').length || walk(d, 'gridRenderer').length) throw new Error('شكل جديد من يوتيوب'); // خلّي السيرفرات العامة تجرّب
+      return empty;
+    }
+    return mark(r);
+  },
+  async related(id) {
+    const d = await yti('next', { videoId: id });
+    const sec = ((d.contents || {}).twoColumnWatchNextResults || {}).secondaryResults || d;
+    const list = uniqById(walk(sec, 'lockupViewModel').map(l => fromLockup(l)).concat(walk(sec, 'compactVideoRenderer').map(fromVR)))
+      .filter(v => v.id !== id);
+    if (!list.length) throw new Error('فاضي');
+    return list;
+  },
+};
+// فيديوهات مشابهة: من يوتيوب مباشرة، والسيرفرات العامة احتياط
+const relatedOf = id => cached('rel:' + id, 20 * 60e3, () => (ytiUsable() ? YtApi.related(id) : Promise.reject(new Error('x')))
+  .catch(() => getVideo(id).then(r => r.res.related)));
+
+const apiFor = inst => (inst.type === 'yti' ? YtApi : inst.type === 'piped' ? Piped : Invidious);
 
 /* ================= أدوات ================= */
 const $ = s => document.querySelector(s);
@@ -424,8 +645,8 @@ function relatedFeed(seedIds, seen) {
     while (queue.length) {
       const id = queue.shift();
       try {
-        const { res } = await getVideo(id);
-        const fresh = res.related.filter(v => v.id && !seen.has(v.id));
+        const related = await relatedOf(id);
+        const fresh = related.filter(v => v.id && !seen.has(v.id));
         fresh.forEach(v => { seen.add(v.id); queue.push(v.id); });
         if (fresh.length) return fresh;
       } catch { /* جرّب اللي بعدو */ }
@@ -532,8 +753,8 @@ function makeHomeFeed(seen) {
   const searches = store.get('searches', []).slice(0, 6);
   const seeds = [];
   for (let i = 0; i < 10; i++) for (const v of [hist[i], likes[i], favs[i]]) if (v && !seeds.some(s => s.id === v.id)) seeds.push(v);
-  const searchSrc = q => () => cached('s:' + q, 10 * 60e3, () => withFallback(x => apiFor(x).search(x.url, q, 1))).then(r => r.res.items);
-  const relSrc = id => () => getVideo(id).then(r => r.res.related);
+  const searchSrc = q => () => cached('s:' + q, 10 * 60e3, () => withFallback(x => apiFor(x).search(x.url, q, 1), { yti: true })).then(r => r.res.items);
+  const relSrc = id => () => relatedOf(id);
   const sources = [
     ...seeds.map(v => relSrc(v.id)),
     ...searches.map(searchSrc),
@@ -918,7 +1139,7 @@ async function renderSearch(q, f = {}) {
   const g = el('div', 'grid'); g.append(skCards(8));
   view.replaceChildren(searchFilterBar(q, f), chWrap, g);
   try {
-    const { inst, res } = await cached('s:' + q + JSON.stringify(f), 10 * 60e3, () => withFallback(i => apiFor(i).search(i.url, q, 1, null, f), filtered ? { prefer: 'invidious' } : {}));
+    const { inst, res } = await cached('s:' + q + JSON.stringify(f), 10 * 60e3, () => withFallback(i => apiFor(i).search(i.url, q, 1, null, f), filtered ? { prefer: 'invidious', yti: true } : { yti: true }));
     if (!g.isConnected) return;
     g.replaceChildren();
     if (!res.items.length) { g.replaceWith(el('div', 'empty', 'ما في نتائج.')); return; }
@@ -945,6 +1166,8 @@ async function renderSearch(q, f = {}) {
 /* ---- القناة: تبويبات (الرئيسية، الفيديوهات، الشورتس، المباشر، قوائم التشغيل) + ترتيب ---- */
 function channelTab(id, tab, sort, cont) {
   const run = () => withFallback(i => {
+    if (i.type === 'yti') return YtApi.tab(id, tab, sort, cont);
+    if (cont && cont.startsWith('yt:')) return Promise.reject(new Error('صفحة من يوتيوب المباشر'));
     if (i.type !== 'invidious') {
       if (tab !== 'videos' || cont) return Promise.reject(new Error('مش مدعوم'));
       return apiFor(i).channel(i.url, id).then(r => ({ items: r.items, next: null }));
@@ -956,7 +1179,7 @@ function channelTab(id, tab, sort, cont) {
     return fetchJSON(`${i.url}/api/v1/channels/${id}/${ep}${q.toString() ? '?' + q : ''}`, 15000).then(d => ep === 'playlists'
       ? { lists: (d.playlists || []).map(p => ({ id: p.playlistId, title: p.title, count: p.videoCount, thumb: abs(i.url, p.playlistThumbnail || '') })), next: d.continuation || null }
       : { items: (d.videos || []).map(v => Invidious.item(i.url, v)), next: d.continuation || null });
-  }, { prefer: 'invidious' }).then(r => r.res);
+  }, { prefer: 'invidious', yti: true }).then(r => r.res);
   return cont ? run() : cached(`ct:${id}:${tab}:${sort || ''}`, 10 * 60e3, run);
 }
 function plCard(l) {
@@ -1224,6 +1447,17 @@ async function renderWatch(id, startTime) {
   }).catch(() => {});
   const sideList = el('div', 'related-list'); sideList.append(skCards(8, true));
   side.append(el('h2', 'section-title', 'فيديوهات مشابهة'), sideList);
+  let relShown = false;
+  const fillRelated = list => {
+    if (relShown || !list || !list.length) return;
+    relShown = true;
+    sideList.replaceChildren();
+    const seen = new Set([id]);
+    list.forEach(v => { if (!seen.has(v.id)) { seen.add(v.id); sideList.append(card(v, { row: true })); } });
+    const feed = relatedFeed(list.map(v => v.id), seen);
+    infinite(sideList, async () => { const more = await feed(); more.forEach(v => sideList.append(card(v, { row: true }))); return more.length > 0; }, { row: true });
+  };
+  if (ytiUsable()) relatedOf(id).then(fillRelated).catch(() => {});
   view.replaceChildren(layout);
   layout.append(buildFab(() => np, id, () => (current && current.data.title) || (pv && pv.title) || '', async () => {
     if (!np) return;
@@ -1442,11 +1676,7 @@ async function renderWatch(id, startTime) {
     descSk.replaceWith(desc);
 
     // المشابهة + تحميل لا نهائي
-    sideList.replaceChildren();
-    const seen = new Set([id]);
-    d.related.forEach(v => { if (!seen.has(v.id)) { seen.add(v.id); sideList.append(card(v, { row: true })); } });
-    const feed = relatedFeed(d.related.map(v => v.id), seen);
-    infinite(sideList, async () => { const more = await feed(); more.forEach(v => sideList.append(card(v, { row: true }))); return more.length > 0; }, { row: true });
+    fillRelated(d.related);
     // أول فيديو مشابه منجيب معلوماتو مسبقاً (غالباً رح تكبس عليه)
     if (d.related[0]) setTimeout(() => prefetchVideo(d.related[0].id), 4000);
   }
@@ -1905,7 +2135,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120060909';
+const APP_VERSION = '20261120062251';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
