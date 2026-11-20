@@ -642,3 +642,41 @@ body.music-mode .logo circle { fill: #f43f5e; }
 .np-opt.on { font-weight: 800; }
 .np-menu { display: none !important; }
 .np-sheet svg .s { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- القائمة الجانبية من اليسار (جهة الزر) ---------- */
+.drawer { right: auto; left: 0; transform: translateX(-100%); border-inline-start: 0; border-inline-end: 1px solid var(--line); }
+.drawer-ov.open .drawer { transform: none; }
+
+/* ---------- زر الاشتراك على أقصى اليسار ---------- */
+.au-wrap { flex: 1; width: 100%; }
+.au-wrap .sub-btn { margin-inline-start: auto; }
+.ch-txt { flex: 1; min-width: 0; }
+
+/* ---------- اللوغو: N / NM، والاسم الكامل بحركة ---------- */
+.brand-name { display: inline-block; white-space: nowrap; overflow: hidden; transition: max-width .32s ease, opacity .32s ease; max-width: 160px; }
+@media (max-width: 600px) { .brand-name { display: inline-block; } }
+.brand-name.intro { animation: brand-in .55s cubic-bezier(.2,.8,.2,1); }
+.brand-name.shrink { max-width: 0; opacity: 0; }
+@keyframes brand-in { from { opacity: 0; transform: translateX(14px) scale(.9); letter-spacing: .3em; } to { opacity: 1; transform: none; letter-spacing: normal; } }
+.logo.pulse { animation: logo-pulse 1.1s ease-in-out 2; }
+@keyframes logo-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.18) rotate(-8deg); } }
+
+/* ---------- صف فلاتر/تبويبات بخط واحد ---------- */
+.filter-bar { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px; margin-bottom: 8px; scrollbar-width: none; align-items: center; }
+.filter-bar::-webkit-scrollbar { display: none; }
+.f-chip { flex-shrink: 0; border: 1px solid var(--line); background: var(--bg2); color: var(--text); border-radius: 10px; padding: 6px 13px; font: inherit; font-size: .88rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.f-chip.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+.f-sep { width: 1px; height: 22px; background: var(--line); flex-shrink: 0; }
+.filter-bar.tabs { border-bottom: 1px solid var(--line); padding-bottom: 0; gap: 0; margin-bottom: 14px; }
+.filter-bar.tabs .f-chip { border: 0; border-radius: 0; background: none; padding: 10px 14px; border-bottom: 3px solid transparent; }
+.filter-bar.tabs .f-chip.on { color: var(--text); border-bottom-color: var(--accent); }
+
+/* ---------- قائمة الإعدادات: أكبر، والتمرير جوّاها بس ---------- */
+.np-sheet { max-height: 86vh; min-height: 46vh; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; border-radius: 20px 20px 0 0; }
+.np-sheet-ov.in-fs .np-sheet { max-height: 90%; min-height: 0; }
+.np-row, .np-opt, .np-sub-h { font-size: 1.05rem; padding: 16px 14px; min-height: 56px; }
+.np-row-ico svg { width: 26px; height: 26px; }
+.np-row-v { font-size: .95rem; }
+.np-opt { font-size: 1.08rem; }
+.np-grip { width: 44px; height: 5px; margin: 8px auto 10px; }
+.drawer { overscroll-behavior: contain; }

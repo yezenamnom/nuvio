@@ -30,6 +30,21 @@
     get(k, d) { try { const v = localStorage.getItem('nuvio:p:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem('nuvio:p:' + k, JSON.stringify(v)); } catch { /* */ } },
   };
+  /* قفل تمرير الصفحة (مع حفظ المكان) وقت تكون قائمة فوقها مفتوحة */
+  let lockY = 0, locks = 0;
+  function lockScroll(on) {
+    const b = document.body;
+    if (on) {
+      if (locks++) return;
+      lockY = window.scrollY;
+      Object.assign(b.style, { position: 'fixed', top: `-${lockY}px`, left: '0', right: '0', overflow: 'hidden' });
+    } else {
+      if (!locks || --locks) return;
+      Object.assign(b.style, { position: '', top: '', left: '', right: '', overflow: '' });
+      window.scrollTo(0, lockY);
+    }
+  }
+  window.nuvioLockScroll = lockScroll;
   const mk = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 
   class NuvioPlayer {
@@ -41,7 +56,7 @@
       v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto'; v.autoplay = true;
       v.setAttribute('x-webkit-airplay', 'allow'); v.disableRemotePlayback = false;
       v.volume = ls.get('vol', 1); v.muted = ls.get('muted', false);
-      this.rate = ls.get('rate', 1);
+      this.rate = 1; // السرعة ما بتنحفظ: كل فيديو جديد بيبلّش عادي
 
       // ---- الواجهة ----
       this.ui = mk('div', 'np-ui');
@@ -390,6 +405,9 @@
       ov.addEventListener('click', e => { if (e.target === ov) this._closeSheet(); });
       (fs ? this.box : document.body).append(ov);
       this._sheet = ov;
+      lockScroll(true);
+      // اللمس برّا القائمة ما بيحرّك الصفحة ورا
+      ov.addEventListener('touchmove', e => { if (!e.target.closest('.np-sheet')) e.preventDefault(); }, { passive: false });
       this._showUI(true);
       const I = {
         q: '<path class="s" d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle class="s" cx="15" cy="7" r="2.2"/><circle class="s" cx="9" cy="17" r="2.2"/>',
@@ -439,7 +457,7 @@
         }
         // السرعة
         sh.append(row('sp', 'سرعة التشغيل', v.playbackRate === 1 ? 'عادي' : `${v.playbackRate}×`, () => sub('سرعة التشغيل',
-          SPEEDS.map(s => [s === 1 ? 'عادي' : `${s}×`, v.playbackRate === s, () => { v.playbackRate = s; this.rate = s; ls.set('rate', s); }]))));
+          SPEEDS.map(s => [s === 1 ? 'عادي' : `${s}×`, v.playbackRate === s, () => { v.playbackRate = s; this.rate = s; }]))));
         // الترجمة (إذا في)
         if (this.captions && this.captions.length) {
           sh.append(row('cc', 'الترجمة والشرح', this.capSel || 'إيقاف', () => sub('الترجمة والشرح', [
@@ -472,6 +490,7 @@
     _closeSheet() {
       const ov = this._sheet; if (!ov) return;
       this._sheet = null;
+      lockScroll(false);
       ov.classList.remove('open');
       setTimeout(() => ov.remove(), 260);
       this._showUI();

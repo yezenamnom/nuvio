@@ -192,8 +192,9 @@ const Invidious = {
       live: !!v.liveNow,
     };
   },
-  async search(base, q, page) {
-    const d = await fetchJSON(`${base}/api/v1/search?q=${encodeURIComponent(q)}&type=video&page=${page}`);
+  async search(base, q, page, _tok, f = {}) {
+    const ex = (f.sort ? `&sort_by=${f.sort}` : '') + (f.date ? `&date=${f.date}` : '') + (f.dur ? `&duration=${f.dur}` : '') + (f.feat ? `&features=${f.feat}` : '');
+    const d = await fetchJSON(`${base}/api/v1/search?q=${encodeURIComponent(q)}&type=video&page=${page}${ex}`);
     if (!Array.isArray(d)) throw new Error('رد غريب');
     return { items: d.filter(v => v.type === 'video').map(v => Invidious.item(base, v)), next: d.length ? page + 1 : null };
   },
@@ -674,25 +675,46 @@ function renderSearches() {
 }
 
 /* ---- القنوات المشترك فيها + آخر فيديوهاتها ---- */
-async function renderSubs() {
+async function renderSubs(mode = 'new') {
   document.title = 'القنوات — Nuvio';
   const list = subs.list();
   view.replaceChildren(sectionHead(`القنوات المشترك فيها (${list.length})`));
   if (!list.length) { view.append(el('div', 'empty', 'ما في اشتراكات لسّا. اكبس «اشتراك» بصفحة أي قناة أو تحت أي فيديو.')); return; }
-  const grid = el('div', 'sub-grid');
-  list.forEach(c => grid.append(channelBubble(c)));
-  view.append(grid, sectionHead('آخر الفيديوهات'));
-  const g = el('div', 'grid'); g.append(skCards(8)); view.append(g);
-  const order = shuffle(list);
-  let i = 0, first = true;
+  const strip = el('div', 'sub-strip');
+  list.forEach(c => strip.append(channelBubble(c)));
+  // فلترة بخط واحد (على الفيديوهات اللي إجت)
+  const MODES = [['new', 'الأحدث'], ['views', 'الأكثر مشاهدة'], ['old', 'الأقدم'], ['today', 'اليوم'], ['week', 'هالأسبوع'], ['month', 'هالشهر'], ['short', 'قصير'], ['long', 'طويل']];
+  const bar = chipBar(MODES, mode, m => { location.hash = m === 'new' ? '#/subs' : `#/subs?f=${m}`; });
+  const g = el('div', 'grid'); g.append(skCards(8));
+  view.append(strip, bar, g);
+  const all = [];
+  const now = Date.now() / 1000;
+  const keepIt = v => {
+    const age = v.ts ? now - v.ts : Infinity;
+    if (mode === 'today') return age < 86400;
+    if (mode === 'week') return age < 7 * 86400;
+    if (mode === 'month') return age < 31 * 86400;
+    if (mode === 'short') return v.duration > 0 && v.duration < 240;
+    if (mode === 'long') return v.duration >= 1200;
+    return true;
+  };
+  const order = (a, b) => mode === 'views' ? (b.views || 0) - (a.views || 0) : mode === 'old' ? (a.ts || 0) - (b.ts || 0) : (b.ts || 0) - (a.ts || 0);
+  const draw = () => {
+    g.replaceChildren();
+    const shown = all.filter(keepIt).sort(order);
+    if (!shown.length) g.append(el('div', 'empty', 'ما في فيديوهات بهالفلتر لهلّق.'));
+    shown.forEach(v => g.append(card(v)));
+  };
+  const queue = shuffle(list);
+  let i = 0;
   const load = async () => {
-    const batch = order.slice(i, i + 6); i += 6;
+    const batch = queue.slice(i, i + 8); i += 8;
     if (!batch.length) return false;
-    const res = await Promise.all(batch.map(c => getChannel(c.id).then(r => r.res.items.slice(0, 4)).catch(() => [])));
-    const items = res.flat().sort((a, b) => (b.ts || 0) - (a.ts || 0));
-    if (first) { g.replaceChildren(); first = false; }
-    items.forEach(v => g.append(card(v)));
-    return i < order.length;
+    const res = await Promise.all(batch.map(c => getChannel(c.id).then(r => r.res.items.slice(0, 6)).catch(() => [])));
+    const ids = new Set(all.map(v => v.id));
+    res.flat().forEach(v => { if (!ids.has(v.id)) { ids.add(v.id); all.push(v); } });
+    draw();
+    return i < queue.length;
   };
   try { await load(); if (g.isConnected) infinite(g, load); } catch { /* */ }
 }
@@ -753,57 +775,131 @@ function renderLibrary(kind) {
   view.append(g);
 }
 
-async function renderSearch(q) {
+/* فلاتر البحث (بخط واحد): ترتيب، تاريخ، مدة، ميزات */
+const SEARCH_SORT = [['', 'الأنسب'], ['upload_date', 'الأحدث'], ['view_count', 'الأكثر مشاهدة'], ['rating', 'الأكثر إعجاباً']];
+const SEARCH_DATE = [['today', 'اليوم'], ['week', 'هالأسبوع'], ['month', 'هالشهر'], ['year', 'هالسنة']];
+const SEARCH_DUR = [['short', 'قصير'], ['long', 'طويل']];
+const SEARCH_FEAT = [['hd', 'HD'], ['subtitles', 'مترجم'], ['live', 'مباشر']];
+function searchFilterBar(q, f) {
+  const bar = el('div', 'filter-bar');
+  const go = nf2 => {
+    const ps = new URLSearchParams({ q });
+    for (const [k, v] of Object.entries(nf2)) if (v) ps.set(k, v);
+    location.hash = '#/search?' + ps.toString();
+  };
+  const group = (list, key, exclusive) => {
+    list.forEach(([val, label]) => {
+      const on = (f[key] || '') === val;
+      const b = el('button', 'f-chip' + (on ? ' on' : ''), label);
+      b.onclick = () => go({ ...f, [key]: on && !exclusive ? '' : val });
+      bar.append(b);
+    });
+    bar.append(el('span', 'f-sep'));
+  };
+  group(SEARCH_SORT, 'sort', true);
+  group(SEARCH_DATE, 'date');
+  group(SEARCH_DUR, 'dur');
+  group(SEARCH_FEAT, 'feat');
+  bar.lastChild.remove();
+  return bar;
+}
+
+async function renderSearch(q, f = {}) {
   document.title = `${q} — Nuvio`;
   addSearch(q);
   $('#q').value = q;
+  const filtered = !!(f.sort || f.date || f.dur || f.feat);
   const chWrap = el('div', 'ch-strip');
-  const g = el('div', 'grid'); g.append(skCards(12));
-  view.replaceChildren(el('h2', 'section-title', `نتائج: ${q}`), chWrap, g);
+  const g = el('div', 'grid'); g.append(skCards(8));
+  view.replaceChildren(searchFilterBar(q, f), chWrap, g);
   try {
-    const { inst, res } = await cached('s:' + q, 10 * 60e3, () => withFallback(i => apiFor(i).search(i.url, q, 1)));
+    const { inst, res } = await cached('s:' + q + JSON.stringify(f), 10 * 60e3, () => withFallback(i => apiFor(i).search(i.url, q, 1, null, f), filtered ? { prefer: 'invidious' } : {}));
     if (!g.isConnected) return;
     g.replaceChildren();
     if (!res.items.length) { g.replaceWith(el('div', 'empty', 'ما في نتائج.')); return; }
-    apiFor(inst).channels(inst.url, q).then(list => list.forEach(ch => chWrap.append(channelCard(ch)))).catch(() => {});
+    if (!filtered) apiFor(inst).channels(inst.url, q).then(list => list.forEach(ch => chWrap.append(channelCard(ch)))).catch(() => {});
     const seen = new Set();
     res.items.forEach(v => { seen.add(v.id); g.append(card(v)); });
     let next = res.next;
     const feed = relatedFeed(res.items.slice(0, 5).map(v => v.id), seen);
     infinite(g, async () => {
       if (next != null) {
-        const r = await apiFor(inst).search(inst.url, q, typeof next === 'number' ? next : 0, typeof next === 'string' ? next : null);
+        const r = await apiFor(inst).search(inst.url, q, typeof next === 'number' ? next : 0, typeof next === 'string' ? next : null, f);
         const fresh = r.items.filter(v => !seen.has(v.id));
         fresh.forEach(v => { seen.add(v.id); g.append(card(v)); });
         next = r.items.length ? r.next : null;
         if (fresh.length) return true;
       }
+      if (filtered) return false;
       // خلصت نتائج البحث؟ منكمّل بفيديوهات مشابهة
       const more = await feed(); more.forEach(v => g.append(card(v))); return more.length > 0;
     });
-  } catch (e) { showError(e, () => renderSearch(q)); }
+  } catch (e) { showError(e, () => renderSearch(q, f)); }
 }
 
-async function renderChannel(id) {
+/* ---- القناة: تبويبات (الرئيسية، الفيديوهات، الشورتس، المباشر، قوائم التشغيل) + ترتيب ---- */
+function channelTab(id, tab, sort, cont) {
+  const run = () => withFallback(i => {
+    if (i.type !== 'invidious') {
+      if (tab !== 'videos' || cont) return Promise.reject(new Error('مش مدعوم'));
+      return apiFor(i).channel(i.url, id).then(r => ({ items: r.items, next: null }));
+    }
+    const ep = { shorts: 'shorts', live: 'streams', playlists: 'playlists' }[tab] || 'videos';
+    const q = new URLSearchParams();
+    if (ep === 'videos' && sort) q.set('sort_by', sort);
+    if (cont) q.set('continuation', cont);
+    return fetchJSON(`${i.url}/api/v1/channels/${id}/${ep}${q.toString() ? '?' + q : ''}`, 15000).then(d => ep === 'playlists'
+      ? { lists: (d.playlists || []).map(p => ({ id: p.playlistId, title: p.title, count: p.videoCount, thumb: abs(i.url, p.playlistThumbnail || '') })), next: d.continuation || null }
+      : { items: (d.videos || []).map(v => Invidious.item(i.url, v)), next: d.continuation || null });
+  }, { prefer: 'invidious' }).then(r => r.res);
+  return cont ? run() : cached(`ct:${id}:${tab}:${sort || ''}`, 10 * 60e3, run);
+}
+function plCard(l) {
+  const a = el('a', 'card list-card'); a.href = `#/pl?id=${encodeURIComponent(l.id)}`;
+  const th = el('div', 'thumb');
+  const img = el('img'); img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
+  img.src = l.thumb || 'icon-192.png';
+  img.onerror = () => { img.src = 'icon-192.png'; };
+  th.append(img, el('span', 'list-count', `${l.count ? nf.format(l.count) : ''} ▶`));
+  const meta = el('div', 'meta'); const tt = el('h3', 'title', l.title); tt.dir = 'auto'; meta.append(tt);
+  a.append(th, meta);
+  return a;
+}
+/* صف تبويبات/فلاتر بخط واحد (بيتحرّك يمين ويسار إذا ما وسع) */
+function chipBar(items, active, onPick, cls = '') {
+  const bar = el('div', 'filter-bar ' + cls);
+  items.forEach(([key, label]) => {
+    const b = el('button', 'f-chip' + (key === active ? ' on' : ''), label);
+    b.onclick = () => onPick(key);
+    bar.append(b);
+  });
+  return bar;
+}
+
+async function renderChannel(id, tab = 'home', sort = '') {
   const pv = chPreview.get(id) || {};
   const head = el('div', 'ch-head');
   const bannerSlot = el('div', 'ch-banner sk');
   const row = el('div', 'ch-row');
   const av = el('div', 'ch-avatar sk');
-  const txt = el('div');
+  const txt = el('div', 'ch-txt');
   const h = el('h1', 'ch-title', pv.name || ''); h.dir = 'auto';
   if (!pv.name) h.append(el('span', 'sk sk-line'));
-  const subs = el('div', 'sub', fmtSubs(pv.subs));
-  txt.append(h, subs); row.append(av, txt); head.append(bannerSlot, row);
-  const g = el('div', 'grid'); g.append(skCards(12));
-  view.replaceChildren(head, el('h2', 'section-title', 'الفيديوهات'), g);
+  const subsEl = el('div', 'sub', fmtSubs(pv.subs));
+  txt.append(h, subsEl); row.append(av, txt); head.append(bannerSlot, row);
+  const go = (t, s) => { location.hash = `#/channel?id=${encodeURIComponent(id)}${t && t !== 'home' ? `&tab=${t}` : ''}${s ? `&sort=${s}` : ''}`; };
+  const tabs = chipBar([['home', 'الرئيسية'], ['videos', 'الفيديوهات'], ['shorts', 'الشورتس'], ['live', 'المباشر'], ['playlists', 'قوائم التشغيل']], tab, t => go(t), 'tabs');
+  const body = el('div', 'ch-body');
+  view.replaceChildren(head, tabs, body);
   if (pv.name) document.title = `${pv.name} — Nuvio`;
-  try {
-    const { inst, res } = await getChannel(id);
-    if (!g.isConnected) return;
+
+  // معلومات القناة (الراس) — بنفس الوقت مع المحتوى
+  getChannel(id).then(({ res }) => {
+    if (!head.isConnected) return;
     const { info } = res;
     document.title = `${info.name} — Nuvio`;
-    h.textContent = info.name; subs.textContent = fmtSubs(info.subs);
+    h.textContent = info.name; subsEl.textContent = fmtSubs(info.subs);
+    chPreview.set(id, { name: info.name, subs: info.subs });
     if (info.banner) { const b = el('img', 'ch-banner'); b.alt = ''; setImg(b, info.banner); bannerSlot.replaceWith(b); } else bannerSlot.remove();
     const avImg = el('img', 'ch-avatar'); avImg.alt = ''; setImg(avImg, info.avatar); av.replaceWith(avImg);
     row.append(subButton({ id, name: info.name, avatar: info.avatar }));
@@ -812,17 +908,64 @@ async function renderChannel(id) {
       d.onclick = () => d.classList.toggle('open');
       head.append(d);
     }
+  }).catch(() => { bannerSlot.remove(); });
+
+  const grid = (items) => { const g = el('div', 'grid'); items.forEach(v => g.append(card(v, { noAuthorLink: true }))); return g; };
+
+  if (tab === 'home') {
+    body.append(
+      lazyShelf('🆕 الأحدث', () => channelTab(id, 'videos', 'newest').then(r => r.items), `#/channel?id=${encodeURIComponent(id)}&tab=videos`),
+      lazyShelf('🔥 الأكثر مشاهدة', () => channelTab(id, 'videos', 'popular').then(r => r.items), `#/channel?id=${encodeURIComponent(id)}&tab=videos&sort=popular`),
+      lazyShelf('⚡ الشورتس', () => channelTab(id, 'shorts').then(r => r.items), `#/channel?id=${encodeURIComponent(id)}&tab=shorts`),
+    );
+    return;
+  }
+  if (tab === 'playlists') {
+    const g = el('div', 'grid'); g.append(skCards(6)); body.append(g);
+    try {
+      const r = await channelTab(id, 'playlists');
+      g.replaceChildren();
+      if (!r.lists.length) { g.replaceWith(el('div', 'empty', 'ما في قوائم تشغيل.')); return; }
+      r.lists.forEach(l => g.append(plCard(l)));
+    } catch (e) { g.replaceWith(el('div', 'empty', 'ما قدرت جيب القوائم هلّق.')); }
+    return;
+  }
+  // الفيديوهات / الشورتس / المباشر
+  if (tab === 'videos') body.append(chipBar([['newest', 'الأحدث'], ['popular', 'الرائج'], ['oldest', 'الأقدم']], sort || 'newest', s => go('videos', s === 'newest' ? '' : s)));
+  const g = el('div', 'grid'); g.append(skCards(8)); body.append(g);
+  try {
+    const r = await channelTab(id, tab, tab === 'videos' ? (sort || 'newest') : '');
+    if (!g.isConnected) return;
     g.replaceChildren();
-    if (!res.items.length) { g.replaceWith(el('div', 'empty', 'ما في فيديوهات.')); return; }
-    res.items.forEach(v => g.append(card(v, { noAuthorLink: true })));
-    let next = res.next;
+    if (!r.items.length) { g.replaceWith(el('div', 'empty', 'ما في شي هون.')); return; }
+    r.items.forEach(v => g.append(card(v, { noAuthorLink: true })));
+    let next = r.next;
     if (next) infinite(g, async () => {
-      const r = await apiFor(inst).channel(inst.url, id, next);
-      r.items.forEach(v => g.append(card(v, { noAuthorLink: true })));
-      next = r.next;
-      return !!next && r.items.length > 0;
+      const n = await channelTab(id, tab, tab === 'videos' ? (sort || 'newest') : '', next);
+      n.items.forEach(v => g.append(card(v, { noAuthorLink: true })));
+      next = n.next;
+      return !!next && n.items.length > 0;
     });
-  } catch (e) { showError(e, () => renderChannel(id)); }
+  } catch (e) { g.replaceWith(el('div', 'empty', 'ما قدرت جيب الفيديوهات هلّق. جرّب بعد شوي.')); }
+}
+
+/* ---- قائمة تشغيل عامة (من صفحة قناة) ---- */
+async function renderPlaylist(plid) {
+  const head = sectionHead('…');
+  const g = el('div', 'grid'); g.append(skCards(8));
+  view.replaceChildren(head, g);
+  try {
+    let page = 1;
+    const load = p => withFallback(i => i.type === 'invidious'
+      ? fetchJSON(`${i.url}/api/v1/playlists/${plid}?page=${p}`, 15000).then(d => ({ title: d.title, author: d.author, count: d.videoCount, items: (d.videos || []).map(v => Invidious.item(i.url, v)) }))
+      : Promise.reject(new Error('x')), { prefer: 'invidious' }).then(r => r.res);
+    const r = await load(1);
+    document.title = `${r.title} — Nuvio`;
+    const t = head.querySelector('.section-title'); t.textContent = `${r.title} (${nf.format(r.count || r.items.length)})`; t.dir = 'auto';
+    g.replaceChildren();
+    r.items.forEach(v => g.append(card(v)));
+    infinite(g, async () => { page++; const n = await load(page); n.items.forEach(v => g.append(card(v))); return n.items.length > 0; });
+  } catch (e) { g.replaceWith(el('div', 'empty', 'ما قدرت جيب القائمة.')); }
 }
 
 /* ---- تصليح لسيرفرات البث الفرعية المعطوبة ----
@@ -1611,7 +1754,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120052729';
+const APP_VERSION = '20261120054013';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
@@ -1638,7 +1781,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) chec
    الرئيسية ما بتتحدّث إلا إذا سحبت سحبة طويلة من فوق لتحت. */
 const pageCache = new Map();
 let shownKey = null;
-const CACHEABLE = k => /^\/($|search\?|subs$|channel\?|lists$|music$|music\/podcast$|music\/fav$)/.test(k);
+const CACHEABLE = k => /^\/($|search\?|subs$|subs\?|channel\?|lists$|music$|music\/podcast$|music\/fav$)/.test(k);
 function savePage() {
   if (!shownKey || !CACHEABLE(shownKey) || !view.childNodes.length) return;
   if (view.querySelector('.grid > .sk-card:first-child')) return; // لسا عم تحمّل أول مرة
@@ -1707,15 +1850,16 @@ async function route() {
     return;
   }
   window.scrollTo(0, 0);
-  if (path === '/search' && p.get('q')) return renderSearch(p.get('q'));
+  if (path === '/search' && p.get('q')) return renderSearch(p.get('q'), { sort: p.get('sort') || '', date: p.get('date') || '', dur: p.get('dur') || '', feat: p.get('feat') || '' });
   if (path === '/watch' && p.get('v')) return renderWatch(p.get('v'), +p.get('t') || 0);
-  if (path === '/channel' && p.get('id')) return renderChannel(p.get('id'));
+  if (path === '/channel' && p.get('id')) return renderChannel(p.get('id'), p.get('tab') || 'home', p.get('sort') || '');
+  if (path === '/pl' && p.get('id')) return renderPlaylist(p.get('id'));
   if (path === '/history') return renderLibrary('hist');
   if (path === '/likes') return renderLibrary('likes');
   if (path === '/favs') return renderLibrary('favs');
   if (path === '/searches') return renderSearches();
   if (path.startsWith('/music')) return renderMusic(path);
-  if (path === '/subs') return renderSubs();
+  if (path === '/subs') return renderSubs(p.get('f') || 'new');
   if (path === '/lists') return renderLists();
   if (path === '/list' && p.get('id')) return renderList(p.get('id'));
   $('#q').value = '';

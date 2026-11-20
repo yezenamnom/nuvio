@@ -8,11 +8,27 @@
 
 /* ================= الوضع: فيديو أو ميوزك ================= */
 const isMusic = () => { try { return JSON.parse(localStorage.getItem('nuvio:mode') || '"video"') === 'music'; } catch { return false; } };
-function setMode(m) {
+let brandTimer = null;
+function setMode(m, animate) {
+  const was = isMusic() ? 'music' : 'video';
   try { localStorage.setItem('nuvio:mode', JSON.stringify(m)); } catch { /* */ }
   document.body.classList.toggle('music-mode', m === 'music');
   const name = document.querySelector('.brand-name');
-  if (name) name.textContent = m === 'music' ? 'Nuvio Music' : 'Nuvio';
+  if (!name) return;
+  const short = m === 'music' ? 'NM' : 'N';
+  const full = m === 'music' ? 'Nuvio Music' : 'Nuvio';
+  clearTimeout(brandTimer);
+  if (animate || was !== m) {
+    // أول شي بيطلع الاسم الكامل مع اللوغو، وبعدين بيصغر لحرفين
+    name.textContent = full;
+    name.classList.remove('shrink'); void name.offsetWidth;
+    name.classList.add('intro');
+    document.querySelector('.logo')?.classList.add('pulse');
+    brandTimer = setTimeout(() => {
+      name.classList.add('shrink');
+      brandTimer = setTimeout(() => { name.textContent = short; name.classList.remove('intro', 'shrink'); document.querySelector('.logo')?.classList.remove('pulse'); }, 320);
+    }, 1700);
+  } else name.textContent = short;
 }
 
 /* ================= المطربين المفضّلين ================= */
@@ -64,6 +80,25 @@ const PODCAST_SHELVES = [
   { t: '🌍 English podcasts', q: 'podcast full episode' },
 ];
 const TOP_ARTISTS = ['فيروز', 'أم كلثوم', 'عمرو دياب', 'نانسي عجرم', 'إليسا', 'محمد عبده', 'وائل كفوري', 'ماجد المهندس', 'أصالة', 'ناصيف زيتون', 'حسين الجسمي', 'تامر حسني', 'شيرين', 'راغب علامة'];
+
+/* القناة الرسمية للمطرب: اللي إلها نسخة «- Topic» (يوتيوب بيعملها للفنانين بس)،
+   وإلا أكبر قناة موثّقة مش «فاميلي/عائلة/معجبين» */
+function officialArtist(list) {
+  const bad = /فاميلي|family|عائلة|عيلة|kids|أطفال|fans|معجبين|fan club|vlog/i;
+  const norm = s => (s || '').replace(/ - Topic$/, '').trim().toLowerCase();
+  const good = list.filter(c => !bad.test(c.name) && !/ - Topic$/.test(c.name));
+  const topics = list.filter(c => / - Topic$/.test(c.name)).map(c => norm(c.name));
+  // ١) قناة موثّقة إلها نسخة «Topic» بنفس الاسم = المطرب الرسمي
+  const official = good.filter(c => c.verified && topics.includes(norm(c.name))).sort((a, b) => (b.subs || 0) - (a.subs || 0))[0];
+  if (official) return official;
+  // ٢) أكبر قناة موثّقة مش عيلة/معجبين
+  const big = good.filter(c => c.verified).sort((a, b) => (b.subs || 0) - (a.subs || 0))[0];
+  if (big) return big;
+  // ٣) قناة Topic (أغاني بس) — بدون كلمة Topic بالاسم
+  const tp = list.find(c => / - Topic$/.test(c.name));
+  if (tp) return { ...tp, name: norm(tp.name) ? tp.name.replace(/ - Topic$/, '') : tp.name };
+  return good[0] || null;
+}
 
 /* رف أفقي بيتحمّل بس لمّا توصلو بالتمرير */
 function lazyShelf(title, loader, href) {
@@ -133,8 +168,9 @@ async function renderMusic(path) {
   (async () => {
     for (const name of TOP_ARTISTS) {
       try {
-        const { res } = await cached('ma:' + name, 24 * 3600e3, () => withFallback(i => apiFor(i).channels(i.url, name)));
-        const c = res && res[0];
+        const { res } = await cached('ma3:' + name, 24 * 3600e3, () => withFallback(i => fetchJSON(`${i.url}/api/v1/search?q=${encodeURIComponent(name)}&type=channel&page=1`)
+          .then(d => (Array.isArray(d) ? d : []).filter(c => c.type === 'channel').map(c => ({ id: c.authorId, name: c.author, avatar: Invidious.pickAvatar(i.url, c.authorThumbnails), subs: c.subCount, verified: c.authorVerified })))));
+        const c = officialArtist(res || []);
         if (c && top.isConnected) top.append(channelBubble({ id: c.id, name: c.name, avatar: c.avatar }));
       } catch { /* */ }
     }
@@ -154,7 +190,7 @@ function openDrawer() {
     // سحب لليمين بيسكّرها
     let x0 = null;
     d.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
-    d.addEventListener('touchend', e => { if (x0 != null && e.changedTouches[0].clientX - x0 > 60) closeDrawer(); x0 = null; });
+    d.addEventListener('touchend', e => { if (x0 != null && x0 - e.changedTouches[0].clientX > 60) closeDrawer(); x0 = null; });
   }
   const d = ov.querySelector('.drawer');
   d.replaceChildren();
@@ -186,9 +222,13 @@ function openDrawer() {
     item('🎧', 'السجل السماعي', '#/music/hist', lib.list('mhist').length),
     item('🎙️', 'بودكاست', '#/music/podcast'),
   );
+  if (!ov.classList.contains('open') && window.nuvioLockScroll) window.nuvioLockScroll(true);
   requestAnimationFrame(() => ov.classList.add('open'));
 }
-function closeDrawer() { const ov = document.querySelector('.drawer-ov'); if (ov) ov.classList.remove('open'); }
+function closeDrawer() {
+  const ov = document.querySelector('.drawer-ov');
+  if (ov && ov.classList.contains('open')) { ov.classList.remove('open'); if (window.nuvioLockScroll) window.nuvioLockScroll(false); }
+}
 
 /* ================= ضغطة مطوّلة على اللوغو: Nuvio أو Nuvio Music ================= */
 function openModePicker() {
@@ -206,8 +246,8 @@ function openModePicker() {
     };
     box.append(
       el('div', 'mode-title', 'شو بدّك تفتح؟'),
-      opt('v', '▶', 'Nuvio', 'فيديوهات', () => { setMode('video'); location.hash = '#/'; }),
-      opt('m', '🎵', 'Nuvio Music', 'أغاني ومطربين وبودكاست', () => { setMode('music'); location.hash = '#/music'; }),
+      opt('v', '▶', 'Nuvio', 'فيديوهات', () => { setMode('video', true); location.hash = '#/'; }),
+      opt('m', '🎵', 'Nuvio Music', 'أغاني ومطربين وبودكاست', () => { setMode('music', true); location.hash = '#/music'; }),
     );
     ov.append(box);
     ov.onclick = e => { if (e.target === ov) ov.classList.remove('open'); };
@@ -218,7 +258,9 @@ function openModePicker() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  setMode(isMusic() ? 'music' : 'video');
+  const name = document.querySelector('.brand-name');
+  if (name) name.textContent = isMusic() ? 'NM' : 'N';
+  document.body.classList.toggle('music-mode', isMusic());
   const menu = document.getElementById('menuBtn');
   if (menu) menu.onclick = openDrawer;
   const brand = document.querySelector('.brand');
