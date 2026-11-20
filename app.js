@@ -2186,15 +2186,19 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120062827';
+const APP_VERSION = '20261120063056';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
     if (!r.ok) return;
     const v = (await r.text()).trim();
-    if (!v || v === APP_VERSION || store.get('reloadedFor', '') === v) return;
+    if (!v || v === APP_VERSION) return;
+    // إذا حاولنا وضلّت النسخة القديمة (GitHub أحياناً بيتأخّر)، منعيد المحاولة بعد دقيقة، لحد 3 مرات
+    const prev = store.get('reloadedFor', null);
+    const t = prev && typeof prev === 'object' ? prev : { v: prev, n: 1, at: 0 };
+    if (t.v === v && (t.n >= 3 || Date.now() - t.at < 60e3)) return;
     if (active && active.np() && !active.np().video.paused) return; // ما منقطع فيديو شغّال
-    store.set('reloadedFor', v);
+    store.set('reloadedFor', { v, n: t.v === v ? t.n + 1 : 1, at: Date.now() });
     const reload = () => location.replace(`${location.pathname}?v=${encodeURIComponent(v)}${location.hash}`);
     // مع التخزين المؤقت: منطلب النسخة الجديدة، ومنستنّاها تتركّب، وبعدين منعيد التحميل
     const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
