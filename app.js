@@ -903,7 +903,7 @@ function skCard(row) {
   const c = el('div', 'card sk-card' + (row ? ' row' : ''));
   const th = el('div', 'thumb sk');
   const meta = el('div', 'meta');
-  meta.append(el('div', 'sk sk-line'), el('div', 'sk sk-line short'));
+  meta.append(el('div', 'sk sk-line'), el('div', 'sk sk-line half'));
   c.append(th, meta);
   return c;
 }
@@ -2353,8 +2353,8 @@ async function renderWatch(id, startTime) {
     const au = el(pv.authorId ? 'a' : 'span', 'author'); if (pv.authorId) au.href = chHref(pv.authorId);
     au.append(el('span', 'author-avatar sk'), el('span', null, pv.author));
     metaRow.append(au, el('span', null, fmtViews(pv.views, pv.viewsText)), el('span', null, pv.published || ''));
-  } else metaRow.append(el('span', 'sk sk-line short'));
-  const descSk = el('div', 'desc sk-desc'); descSk.append(el('div', 'sk sk-line'), el('div', 'sk sk-line'), el('div', 'sk sk-line short'));
+  } else metaRow.append(el('span', 'sk sk-line half'));
+  const descSk = el('div', 'desc sk-desc'); descSk.append(el('div', 'sk sk-line'), el('div', 'sk sk-line'), el('div', 'sk sk-line half'));
   // العنوان + سهم بيفتح الوصف (بيبيّن بس إذا في وصف)
   const titleRow = el('div', 'title-row');
   const chev = el('button', 'desc-chev'); chev.hidden = true; chev.setAttribute('aria-label', 'الوصف');
@@ -2369,7 +2369,7 @@ async function renderWatch(id, startTime) {
     oeInfo = o;
     h1.textContent = o.title; h1.dataset.oe = '1';
     document.title = `${o.title} — Nuvio`;
-    if (o.author && !(pv && pv.author)) metaRow.replaceChildren(el('span', 'author', o.author), el('span', 'sk sk-line short'));
+    if (o.author && !(pv && pv.author)) metaRow.replaceChildren(el('span', 'author', o.author), el('span', 'sk sk-line half'));
   }).catch(() => {});
   const sideList = el('div', 'related-list'); sideList.append(skCards(8, true));
   side.append(el('h2', 'section-title', 'فيديوهات مشابهة'), sideList);
@@ -2489,6 +2489,12 @@ async function renderWatch(id, startTime) {
       cover.hidden = false;
     };
     media.addEventListener('yterror', () => { if (tries < 2) { tries++; media.load(goodCt || at); } else fail(); });
+    // واقف (منك أو الآيفون وقّفو) أو خلص: يوتيوب بيطلّع زرّو الأحمر وشعارو واقتراحاتو — منغطّيهن بصورة الفيديو
+    // (فوق إطار يوتيوب وتحت أزرارنا، فزر التشغيل تبعنا بيضل باين)
+    const still = el('img', 'emb-still'); still.alt = ''; still.src = ytThumb(id, 'hqdefault'); still.hidden = true;
+    media.f.after(still);
+    media.addEventListener('pause', () => { if (media.revealed && !failed) still.hidden = false; });
+    media.addEventListener('playing', () => { still.hidden = true; });
     // إعلان؟ (فيديو تاني، أو مدّتو غير مدّة الفيديو). على الآيفون أحياناً ما بيوصل رقم الفيديو، فالمدّة بتكفّي
     const adLike = () => !!((media.vid && media.vid !== id) || (dur && media.curDur && Math.abs(media.curDur - dur) > 3));
     // الفيديو الحقيقي عم يمشي؟
@@ -3545,7 +3551,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261121112633';
+const APP_VERSION = '20261121164016';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

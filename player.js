@@ -492,8 +492,11 @@
       v.addEventListener('volumechange', () => {
         this.bVol.innerHTML = v.muted || v.volume === 0 ? ICON.mute : ICON.vol;
         this.vol.value = v.muted ? 0 : v.volume;
+        if (this._autoMuted && !v.muted && this.opts.media) { this._autoMuted = false; this.unmuteEl.hidden = true; } // رجع الصوت (من زر الصوت مثلاً)
         if (!this._autoMuted && !this.opts.media) { ls.set('vol', v.volume); ls.set('muted', v.muted); } // بمشغّل يوتيوب ما منحفظ (حالتو مش دايماً منّا)
       });
+      // مشغّل يوتيوب عالآيفون بلّش لحالو بلا صوت (الصوت بدّو كبسة منك): نفس زر «اكبس لتشغيل الصوت»
+      v.addEventListener('automuted', () => { if (this.dead) return; this._autoMuted = true; this.unmuteEl.hidden = false; this._showUI(); });
       v.addEventListener('error', () => this.opts.onError && this.opts.onError(v.currentTime));
 
       this.bPlay.onclick = () => this.toggle();
@@ -1092,14 +1095,20 @@
     reveal() {
       if (this.revealed) return;
       this.revealed = true;
-      this._muted = this._wantMuted;
-      this.cmd(this._wantMuted ? 'mute' : 'unMute');
+      // الآيفون: إذا رجّعنا الصوت بلا كبسة منك، بيوقّف الفيديو وبيطلّع زر يوتيوب.
+      // فمنخلّيه ماشي بلا صوت، ومشغّلنا بيبيّن «اكبس لتشغيل الصوت» (الكبسة بتوصل للإطار ومعها إذن الصوت)
+      const quiet = !this._wantMuted && YtMedia.quietStart && !this._unlocked;
+      this._muted = this._wantMuted || quiet;
+      this.cmd(this._muted ? 'mute' : 'unMute');
       this.cmd('setVolume', [Math.round(Math.max(0, Math.min(1, this._wantVol)) * 100)]);
       if (this._wantRate !== 1) this.cmd('setPlaybackRate', [this._wantRate]);
       if (!this.wantPlay) this.cmd('pauseVideo');
       this._emit('durationchange'); this._emit('loadedmetadata'); this._emit('canplay'); this._emit('volumechange');
       if (this.st === 1 && this.wantPlay) { this._emit('play'); this._emit('playing'); }
+      if (quiet) this._emit('automuted');
     }
+    // كبسة منك هلّق؟ (بتوصل مع الأمر للإطار، فالآيفون بيسمح بالصوت)
+    static gesture() { try { return !!(navigator.userActivation && navigator.userActivation.isActive); } catch { return false; } }
     hide() { this.revealed = false; this.cmd('mute'); this._emit('waiting'); }
     /* الترجمة (CC): حسب الإعداد «الترجمة» — مطفية بالأساس */
     static ccOn() { return !!(window.nuvioPref && window.nuvioPref.get('cc')); }
@@ -1127,12 +1136,12 @@
     get videoWidth() { return 1920; }
     get videoHeight() { return 1080; }
     get muted() { return this.revealed ? this._muted : this._wantMuted; }
-    set muted(m) { this._wantMuted = !!m; if (this.revealed) { this.cmd(m ? 'mute' : 'unMute'); this._muted = !!m; this._emit('volumechange'); } }
+    set muted(m) { this._wantMuted = !!m; if (!m && YtMedia.gesture()) this._unlocked = true; if (this.revealed) { this.cmd(m ? 'mute' : 'unMute'); this._muted = !!m; this._emit('volumechange'); } }
     get volume() { return this._wantVol; }
     set volume(x) { this._wantVol = +x; if (this.revealed) { this.cmd('setVolume', [Math.round(Math.max(0, Math.min(1, +x)) * 100)]); this._emit('volumechange'); } }
     get playbackRate() { return this._wantRate || 1; }
     set playbackRate(r) { this._wantRate = +r || 1; this.cmd('setPlaybackRate', [this._wantRate]); }
-    play() { if (!this.revealed && !this.wantPlay) this.loadAt = Date.now(); this.wantPlay = true; this.cmd('playVideo'); this._kick(); return Promise.resolve(); }
+    play() { if (YtMedia.gesture()) this._unlocked = true; if (!this.revealed && !this.wantPlay) this.loadAt = Date.now(); this.wantPlay = true; this.cmd('playVideo'); this._kick(); return Promise.resolve(); }
     pause() { this.wantPlay = false; this.cmd('pauseVideo'); if (this.revealed && this.st !== 2 && this.st !== 0) { this.st = 2; this._emit('pause'); } }
     // رسايل الإطار بتوصل للنافذة اللي هو فيها (الصفحة أو النافذة العايمة)
     listenOn(w) { if (!w || w === window) return; (this._wins || (this._wins = new Set())).add(w); w.addEventListener('message', this._onMsg); }
@@ -1143,6 +1152,7 @@
       try { this.f.src = 'about:blank'; } catch { /* */ }
     }
   }
+  YtMedia.quietStart = IOS; // الآيفون/الآيباد: بيبلّش بلا صوت لحد ما تكبس (للتجربة بينغيّر من برّا)
   window.YtMedia = YtMedia;
   window.NuvioPlayer = NuvioPlayer;
 })();

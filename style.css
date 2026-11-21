@@ -364,7 +364,7 @@ main { padding: 16px; max-width: 1500px; margin: 0 auto; }
 .sk { background: linear-gradient(90deg, var(--card) 0%, var(--sk-hi) 40%, var(--card) 80%); background-size: 300% 100%; animation: sk 1.3s ease-in-out infinite; border-radius: 8px; }
 @keyframes sk { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
 .sk-line { display: block; height: 12px; margin: 8px 0; width: 90%; }
-.sk-line.short { width: 55%; }
+.sk-line.half { width: 55%; } /* مش «short»: هيداك كلاس الشورتس (بطول الشاشة) */
 .v-title .sk-line { height: 20px; width: 70%; }
 .sk-card .thumb { border-radius: var(--radius); }
 .sk-desc { cursor: default; }
@@ -1399,6 +1399,7 @@ html.tv .tv-sinput.tv-f { border-color: #fff; }
 .emb-cover { position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: #000; }
 .emb-cover[hidden] { display: none; }
 .emb-cover img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: .5; }
+.emb-still { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; background: #000; } /* الفيديو واقف: صورتو بدل أزرار يوتيوب */
 .emb-spin { position: relative; width: 44px; height: 44px; border-radius: 50%; border: 3px solid rgba(255,255,255,.25); border-top-color: #fff; animation: embspin .8s linear infinite; }
 .emb-msg { position: relative; color: #fff; font-size: .9rem; font-weight: 700; text-shadow: 0 1px 6px rgba(0,0,0,.7); text-align: center; padding: 0 14px; }
 .emb-fail { background: rgba(0,0,0,.85); }
