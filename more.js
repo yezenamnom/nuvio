@@ -8,7 +8,7 @@
 ['gesturestart', 'gesturechange'].forEach(n => document.addEventListener(n, e => e.preventDefault(), { passive: false }));
 
 /* ================= الإعدادات ================= */
-const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto', theme: 'nuvio', holdSpeed: true, holdRate: 2, shortsAuto: false, shortsRate: 1, player: 'nuvio', homeSecs: null, preload: 'auto', cc: false, autoPip: true, floatScroll: true };
+const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto', theme: 'nuvio', holdSpeed: true, holdRate: 2, shortsAuto: false, shortsRate: 1, player: 'nuvio', homeSecs: null, preload: 'auto', cc: false, autoPip: true, floatScroll: true, hoverPreview: true, ambient: true, stableVol: false, voiceBoost: false };
 const DESK_PTR = !!(window.matchMedia && matchMedia('(hover: hover) and (pointer: fine)').matches); // كمبيوتر بماوس
 /* أقسام راس الرئيسية (فوق «مقترح لك»): الترتيب والتشغيل من الإعدادات */
 const HOME_SECS = [['searches', 'سجل البحث', 'search'], ['subs', 'القنوات', 'subs'], ['hist', 'آخر اللي شفتو', 'clock']];
@@ -389,18 +389,75 @@ async function refreshChannelTops(force) {
   try {
     const list = subs.list().slice(0, 40);
     const tops = chNew.tops(), seen = chNew.seen();
+    // الجرس: آخر فيديوهات القنوات (أول مرة منعتبرها قديمة، بلا ما يطلع رقم كبير)
+    const bellFirst = !store.get('bell', null);
+    const bell = new Map(store.get('bell', []).map(v => [v.id, v]));
+    let bellChanged = false;
     let changed = false;
     for (let i = 0; i < list.length; i += 3) {
       await Promise.all(list.slice(i, i + 3).map(c => getChannel(c.id).then(({ res }) => {
         const top = res && res.items && res.items[0] && res.items[0].id;
         if (!top) return;
+        const chFirst = bellFirst || !(c.id in seen);
+        for (const v of res.items.slice(0, 3)) {
+          if (!v || !v.id || v.short || bell.has(v.id)) continue;
+          bell.set(v.id, { ...slim(v), ts: v.ts || 0, ch: c.id, seenAt: chFirst ? 0 : Date.now() });
+          bellChanged = true;
+        }
         if (!tops[c.id] || tops[c.id].top !== top) { tops[c.id] = { top, at: Date.now() }; changed = true; }
         if (!(c.id in seen)) { seen[c.id] = top; changed = true; } // أول مرة: هيدا الأساس، بلا نقطة
       }).catch(() => {})));
     }
     if (changed) { store.set('chSeen', seen); store.set('chTop', tops); }
+    if (bellChanged || bellFirst) store.set('bell', [...bell.values()].sort((a, b) => (b.seenAt - a.seenAt) || ((b.ts || 0) - (a.ts || 0))).slice(0, 60));
   } finally { chRefreshing = false; ytiBypass--; }
 }
+setInterval(() => refreshChannelTops(), 31 * 60e3); // وانت فاتح الموقع: كل نص ساعة منشوف إذا في جديد
+
+/* ================= الجرس 🔔: فيديوهات جديدة من القنوات اللي مشترك فيها =================
+   (عالجهاز نفسو، بلا سيرفر: بيتحدّث لمّا تفتح الموقع وكل نص ساعة) */
+const bellNew = () => { const seenAt = store.get('bellSeen', 0); return store.get('bell', []).filter(v => v.seenAt > seenAt); };
+function bellInit() {
+  const menu = document.getElementById('menuBtn'); if (!menu || document.getElementById('bellBtn')) return;
+  const b = document.createElement('button');
+  b.id = 'bellBtn'; b.className = 'icon-btn bell-btn'; b.setAttribute('aria-label', 'الفيديوهات الجديدة'); b.title = 'الفيديوهات الجديدة من اشتراكاتك';
+  b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17V11a6 6 0 1 1 12 0v6l1.5 2h-15zM10 21h4"/></svg><span class="bell-n" hidden></span>';
+  menu.before(b);
+  const badge = b.querySelector('.bell-n');
+  const draw = () => { const n = bellNew().length; badge.hidden = !n; badge.textContent = n > 9 ? '+9' : String(n); };
+  draw();
+  window.addEventListener('nuvio:store', e => { if (e.detail === 'bell' || e.detail === 'bellSeen') draw(); });
+  b.onclick = e => { e.stopPropagation(); bellPanel(b); };
+}
+function bellPanel(btn) {
+  const old = document.querySelector('.bell-pop'); if (old) { old.remove(); return; }
+  const fresh = new Set(bellNew().map(v => v.id));
+  const pop = el('div', 'bell-pop'); pop.dir = 'rtl';
+  const head = el('div', 'bell-h');
+  const rf = el('button', 'bell-rf', 'حدّث'); rf.onclick = async e => { e.stopPropagation(); rf.disabled = true; rf.textContent = 'عم دوّر…'; await refreshChannelTops(true).catch(() => {}); pop.remove(); bellPanel(btn); };
+  head.append(el('b', null, 'الجديد من اشتراكاتك'), rf);
+  const list = el('div', 'bell-list');
+  const items = store.get('bell', []);
+  if (!subs.list().length) list.append(el('div', 'bell-empty', 'اشترك بقنوات لتوصلك فيديوهاتها الجديدة هون.'));
+  else if (!items.length) list.append(el('div', 'bell-empty', 'لسّا ما في شي جديد. اكبس «حدّث».'));
+  items.slice(0, 40).forEach(v => {
+    const a = el('a', 'bell-i' + (fresh.has(v.id) ? ' new' : '')); a.href = `#/watch?v=${encodeURIComponent(v.id)}`;
+    a.onclick = () => { preview.set(v.id, v); pop.remove(); };
+    const im = el('img'); im.alt = ''; im.loading = 'lazy'; im.src = v.thumb || ytThumb(v.id);
+    const tx = el('span', 'bell-tx'); const t = el('span', 'bell-t', v.title || ''); t.dir = 'auto';
+    tx.append(t, el('span', 'bell-s', [v.author, v.published].filter(Boolean).join(' · ')));
+    a.append(el('i', 'bell-dot'), tx, im);
+    list.append(a);
+  });
+  pop.append(head, list);
+  ['pointerdown', 'click'].forEach(n => pop.addEventListener(n, e => e.stopPropagation()));
+  document.body.append(pop);
+  const close = () => { pop.remove(); document.removeEventListener('click', close); };
+  setTimeout(() => document.addEventListener('click', close), 0);
+  store.set('bellSeen', Date.now()); // شفتهن
+}
+// بعد ما يخلص تحميل كل الملفات (store وغيرو من app.js)
+if (document.readyState === 'complete') setTimeout(bellInit, 0); else document.addEventListener('DOMContentLoaded', bellInit);
 
 /* ================= توفير الإنترنت =================
    تلقائي: إذا المتصفح بيعرف إنك على بيانات الموبايل (أندرويد/كروم). الآيفون ما بيقول، فاختار «دايماً» يدوي. */
@@ -583,6 +640,7 @@ function drawerSettings(d, sep, closeDrawerFn) {
     sw('subs', 'الترجمة (CC)', () => !!prefs.get('cc'), v => prefs.set('cc', v), 'مطفية بالأساس — بتقدر تشغّلها من إعدادات الفيديو كمان'),
     sw('eye', 'خبّي اللي شفتو من المقترحات', () => prefs.get('hideWatched'), v => prefs.set('hideWatched', v)),
     // كمبيوتر: الفيديو الصغير والنافذة العايمة
+    DESK_PTR ? sw('eye', 'معاينة لمّا تمرّق الماوس', () => prefs.get('hoverPreview') !== false, v => prefs.set('hoverPreview', v), 'الفيديو بيشتغل بلا صوت مكان الصورة') : null,
     DESK_PTR ? sw('play', 'فيديو صغير لمّا تنزل بالصفحة', () => prefs.get('floatScroll') !== false, v => prefs.set('floatScroll', v), 'بيطلع عالطرف، وبتقدر تسحبو وتكبّرو من زواياه') : null,
     DESK_PTR && window.documentPictureInPicture ? sw('later', 'نافذة عايمة لمّا تروح لتبويب تاني', () => prefs.get('autoPip') !== false, v => prefs.set('autoPip', v), 'الفيديو بيضل ظاهر فوق كل شي، حتى ببرامج تانية') : null,
     saverBtn,
@@ -1257,7 +1315,31 @@ function playList(videos, title, shuffleIt, uid) {
   goNext({ v: list[0], fromList: title });
 }
 // «&list=…» بالرابط (لحتى التحديث والمشاركة يرجّعو نفس القائمة)
-const plParam = () => (playCtx && playCtx.plid ? `&list=${encodeURIComponent(playCtx.plid)}` : playCtx && playCtx.uid ? `&list=u:${encodeURIComponent(playCtx.uid)}` : '');
+const plParam = () => (playCtx && playCtx.mix ? `&list=mix:${encodeURIComponent(playCtx.mix)}` : playCtx && playCtx.plid ? `&list=${encodeURIComponent(playCtx.plid)}` : playCtx && playCtx.uid ? `&list=u:${encodeURIComponent(playCtx.uid)}` : '');
+
+/* ===== تشكيلة (Mix) متل يوتيوب: بتبلّش من هالفيديو وبتكمّل من المشابه، بلا نهاية =====
+   (تشكيلات يوتيوب نفسها ما بتنعطى بلا حساب، فمنبنيها نحنا من «المشابه» — بنفس الفكرة) */
+const mixOk = v => v && v.id && !v.live && !v.short && (typeof wanted !== 'function' || wanted(v));
+async function mixCtx(seed) {
+  const first = { ...(preview.get(seed) || { id: seed }) };
+  if (!first.title) first.title = document.title.replace(/ — Nuvio$/, '').trim(); // عنوان الفيديو اللي فاتح
+  const rel = await relatedOf(seed);
+  const items = [first, ...rel.filter(v => mixOk(v) && v.id !== seed)].slice(0, 25);
+  if (items.length < 2) throw new Error('ما في مشابه');
+  items.forEach(v => preview.set(v.id, v));
+  playCtx = { ids: items.map(v => v.id), items, title: first.title ? `تشكيلة: ${first.title}` : 'تشكيلة', author: '', mix: seed, infinite: true, total: items.length, loop: false, shuffle: false, played: new Set() };
+}
+async function mixGrow(c) {
+  if (c._growing) return;
+  c._growing = true;
+  try {
+    const last = c.items[c.items.length - 1];
+    const rel = await relatedOf(last.id);
+    const have = new Set(c.ids);
+    rel.filter(v => mixOk(v) && !have.has(v.id)).slice(0, 15).forEach(v => { preview.set(v.id, v); c.items.push(v); c.ids.push(v.id); });
+    c.total = c.items.length;
+  } catch { /* */ } finally { c._growing = false; }
+}
 const plWatchHref = id => `#/watch?v=${encodeURIComponent(id)}${plParam()}`;
 
 /* ================= قوائم يوتيوب متل يوتيوب: لوحة جنب الفيديو، والجاي من القائمة ================= */
@@ -1276,7 +1358,7 @@ function ytPlaylistWin(plid, vid) {
     });
     if (!items.length) throw new Error('القائمة فاضية');
     const cur = ((d.currentVideoEndpoint || {}).watchEndpoint || {}).videoId || vid || items[0].id;
-    return { plid, title: ytTxt(pl.title) || ytTxt(pl.titleText), author: ytTxt(pl.ownerName) || ytTxt(pl.shortBylineText), total: +pl.totalVideos || items.length, items, cur };
+    return { plid, title: ytTxt(pl.title) || ytTxt(pl.titleText), author: ytTxt(pl.ownerName) || ytTxt(pl.shortBylineText), total: +pl.totalVideos || items.length, items, cur, infinite: !!pl.isInfinite || /^RD/.test(plid) };
   });
 }
 function plCtxFrom(w, keep) {
@@ -1286,7 +1368,7 @@ function plCtxFrom(w, keep) {
   w.items.forEach(v => map.set(v.id, v));
   const items = [...map.values()].sort((a, b) => (a.idx ?? 0) - (b.idx ?? 0));
   items.forEach(v => preview.set(v.id, v));
-  playCtx = { ids: items.map(v => v.id), items, title: w.title, author: w.author, plid: w.plid, total: w.total, loop: prev ? prev.loop : false, shuffle: prev ? prev.shuffle : false, played: prev ? prev.played : new Set() };
+  playCtx = { ids: items.map(v => v.id), items, title: w.title, author: w.author, plid: w.plid, total: w.total, infinite: w.infinite, loop: prev ? prev.loop : false, shuffle: prev ? prev.shuffle : false, played: prev ? prev.played : new Set() };
 }
 // #/watch?list=… (بلا فيديو): منبلّش من أول القائمة (أو عشوائي)
 async function startPlaylist(plid, shuffled) {
@@ -1305,20 +1387,85 @@ async function mountPlaylist(id, listParam, parts) {
   else if (listParam.startsWith('u:')) {
     const p = plists.get(listParam.slice(2));
     if (p && p.videos.length && (!playCtx || playCtx.uid !== p.id)) playCtx = { ids: p.videos.map(v => v.id), items: p.videos.slice(), title: p.title, uid: p.id, total: p.videos.length, loop: false, shuffle: false };
+  } else if (listParam.startsWith('mix:')) {
+    const seed = listParam.slice(4);
+    if (!playCtx || playCtx.mix !== seed || !playCtx.ids.includes(id)) { try { await mixCtx(seed); } catch { return; } }
   } else if (!playCtx || playCtx.plid !== listParam || !playCtx.ids.includes(id)) {
     try { const w = await ytPlaylistWin(listParam, id); if (!parts.info.isConnected && active && active.id !== id) return; plCtxFrom(w, true); } catch { return; }
   }
   const c = playCtx;
-  if (!c || !c.ids.includes(id) || !parts.info.isConnected && !(active && active.id === id)) return;
+  if (!c || !c.ids.includes(id)) { if (queue.list().some(v => v.id !== id) && (parts.info.isConnected || (active && active.id === id))) placePanel(queuePanel(id), parts); return; }
+  if (!parts.info.isConnected && !(active && active.id === id)) return;
   // قربنا من آخر الشبّاك وبالقائمة أكتر؟ منجيب الشبّاك الجاي سلفاً
   const i = c.ids.indexOf(id), last = c.items[c.items.length - 1];
-  if (c.plid && i >= c.ids.length - 3 && last && last.idx != null && last.idx + 1 < c.total) ytPlaylistWin(c.plid, last.id).then(w => { if (playCtx === c) { plCtxFrom(w, true); } }).catch(() => {});
-  const panel = playlistPanel(id);
+  if (c.plid && i >= c.ids.length - 3 && last && (c.infinite || (last.idx != null && last.idx + 1 < c.total))) ytPlaylistWin(c.plid, last.id).then(w => { if (playCtx === c) { plCtxFrom(w, true); } }).catch(() => {});
+  if (c.mix && i >= c.ids.length - 4) mixGrow(c); // التشكيلة بتكمّل لحالها
+  placePanel(playlistPanel(id), parts);
+}
+// اللوحة: عالكمبيوتر فوق المشابه، عالتلفون تحت المعلومات (مصغّرة)
+function placePanel(panel, parts) {
   const wide = matchMedia('(min-width: 1051px)');
   const place = () => { if (!panel.isConnected && panel._placed) { wide.removeEventListener('change', place); return; } panel._placed = true; if (wide.matches) parts.side.prepend(panel); else parts.info.after(panel); panel.classList.toggle('folded', !wide.matches && !panel._open); };
   place();
   wide.addEventListener('change', place);
 }
+// Shift+P: الفيديو اللي قبل (بالقائمة، وإلا رجوع)
+window.nuvioPrev = () => {
+  const cur = typeof active !== 'undefined' && active ? active.id : '';
+  if (playCtx && cur) { const i = playCtx.ids.indexOf(cur); if (i > 0) { goNext({ v: playCtx.items[i - 1], fromList: playCtx.title }); return; } }
+  history.back();
+};
+/* ===== «شغّل بعدين» جنب الفيديو متل يوتيوب: الجاي بيشتغل لحالو، وبتقدر ترتّبها وتشيل منها ===== */
+function queuePanel(curId) {
+  const p = el('section', 'pl-panel q-panel'); p.dir = 'rtl';
+  const head = el('div', 'plp-head');
+  const tb = el('div', 'plp-tb');
+  const tt = el('div', 'plp-title', 'شغّل بعدين');
+  const sub = el('div', 'plp-sub');
+  const nx = el('div', 'plp-next');
+  tb.append(tt, sub, nx);
+  const btns = el('div', 'plp-btns');
+  const mkB = (svg, label) => { const b = el('button', 'plp-b'); b.innerHTML = svg; b.title = label; b.setAttribute('aria-label', label); return b; };
+  const bClr = mkB('<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>', 'امسح الكل');
+  const bFold = mkB('<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>', 'صغّر/كبّر');
+  bClr.onclick = e => { e.stopPropagation(); if (confirm('تمسح كل «شغّل بعدين»؟')) store.set('later', []); };
+  bFold.onclick = e => { e.stopPropagation(); p._open = p.classList.contains('folded'); p.classList.toggle('folded'); };
+  head.onclick = e => { if (p.classList.contains('folded') && !e.target.closest('a, button')) { p._open = true; p.classList.remove('folded'); } };
+  btns.append(bClr, bFold);
+  head.append(tb, btns);
+  const list = el('div', 'plp-list');
+  const draw = () => {
+    const items = queue.list().filter(v => v.id !== curId);
+    if (!items.length) { p.remove(); return; }
+    sub.textContent = `${items.length.toLocaleString('ar')} فيديو · الجاي بيشتغل لحالو`;
+    nx.textContent = `الجاي: ${items[0].title || ''}`; nx.dir = 'auto';
+    list.replaceChildren();
+    items.forEach((v, k) => {
+      const a = el('a', 'plp-row'); a.href = `#/watch?v=${encodeURIComponent(v.id)}`;
+      a.onclick = e => { e.preventDefault(); goNext({ v, fromQueue: true }); };
+      const n = el('span', 'plp-n', (k + 1).toLocaleString('ar'));
+      const th = el('span', 'plp-th'); const img = el('img'); img.alt = ''; img.loading = 'lazy'; img.src = v.thumb || ytThumb(v.id); th.append(img);
+      if (v.duration) th.append(el('span', 'plp-dur', fmtT(v.duration)));
+      const meta = el('span', 'plp-meta'); const t = el('span', 'plp-t', v.title || ''); t.dir = 'auto'; meta.append(t, el('span', 'plp-a', v.author || ''));
+      const ops = el('span', 'q-ops');
+      const mv = (d, sym, label) => {
+        const b = el('button', 'q-op', sym); b.title = label; b.setAttribute('aria-label', label);
+        b.onclick = e => { e.preventDefault(); e.stopPropagation(); const all = queue.list(); const i = all.findIndex(x => x.id === v.id), j = i + d; if (i < 0 || j < 0 || j >= all.length) return; [all[i], all[j]] = [all[j], all[i]]; store.set('later', all); };
+        return b;
+      };
+      const rm = el('button', 'q-op', '✕'); rm.title = 'شيلو'; rm.setAttribute('aria-label', 'شيلو');
+      rm.onclick = e => { e.preventDefault(); e.stopPropagation(); queue.remove(v.id); };
+      ops.append(mv(-1, '▲', 'لفوق'), mv(1, '▼', 'لتحت'), rm);
+      a.append(n, th, meta, ops); list.append(a);
+    });
+  };
+  draw();
+  const onStore = e => { if (!p.isConnected && p._placed) { window.removeEventListener('nuvio:store', onStore); return; } if (e.detail === 'later') draw(); };
+  window.addEventListener('nuvio:store', onStore);
+  p.append(head, list);
+  return p;
+}
+
 function playlistPanel(curId) {
   const c = playCtx;
   const p = el('section', 'pl-panel'); p.dir = 'rtl';
@@ -1329,7 +1476,7 @@ function playlistPanel(curId) {
   const tt = el(c.plid || c.uid ? 'a' : 'div', 'plp-title', c.title || 'قائمة تشغيل'); tt.dir = 'auto';
   if (c.plid) tt.href = `#/pl?id=${encodeURIComponent(c.plid)}`; else if (c.uid) tt.href = `#/plist?id=${encodeURIComponent(c.uid)}`;
   const sub = el('div', 'plp-sub'); sub.dir = 'auto';
-  sub.textContent = `${pos.toLocaleString('ar')} / ${(c.total || c.ids.length).toLocaleString('ar')}${c.author ? ' · ' + c.author : ''}`;
+  sub.textContent = c.infinite ? 'تشكيلة · بتكمّل لحالها من المشابه' : `${pos.toLocaleString('ar')} / ${(c.total || c.ids.length).toLocaleString('ar')}${c.author ? ' · ' + c.author : ''}`;
   const nxt = c.items[i + 1] || (c.loop ? c.items[0] : null);
   const nx = el('div', 'plp-next', nxt ? `الجاي: ${nxt.title || ''}` : 'آخر فيديو بالقائمة'); nx.dir = 'auto';
   tb.append(tt, sub, nx);

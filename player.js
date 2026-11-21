@@ -13,6 +13,7 @@
     mute: svg('<path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4z"/><path class="s" d="M16 9.5l5 5M21 9.5l-5 5"/>'),
     gear: svg('<path class="s" d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle class="s" cx="15" cy="7" r="2.2"/><circle class="s" cx="9" cy="17" r="2.2"/>'),
     fs: svg('<path class="s" d="M4 9V4.8c0-.4.4-.8.8-.8H9M15 4h4.2c.4 0 .8.4.8.8V9M20 15v4.2c0 .4-.4.8-.8.8H15M9 20H4.8c-.4 0-.8-.4-.8-.8V15"/>'),
+    theater: svg('<rect class="s" x="2.5" y="6" width="19" height="12" rx="1.8"/>'),
     fsx: svg('<path class="s" d="M9 4v4.2c0 .4-.4.8-.8.8H4M20 9h-4.2c-.4 0-.8-.4-.8-.8V4M15 20v-4.2c0-.4.4-.8.8-.8H20M4 15h4.2c.4 0 .8.4.8.8V20"/>'),
     copy: svg('<rect class="s" x="8.5" y="8.5" width="11" height="11" rx="2.2"/><path class="s" d="M15.5 8.5V6.2c0-1-.8-1.7-1.7-1.7H6.2c-1 0-1.7.8-1.7 1.7v7.6c0 1 .8 1.7 1.7 1.7h2.3"/>'),
     tv: svg('<path class="s" d="M3 17.5V6.5A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5v11a1.5 1.5 0 0 1-1.5 1.5H15"/><path d="M8 21l4-5 4 5z"/>'),
@@ -83,7 +84,8 @@
       this.buf = mk('div', 'np-buf'); this.fill = mk('div', 'np-fill'); this.knob = mk('div', 'np-knob'); this.tip = mk('div', 'np-tip');
       this.low = mk('div', 'np-low'); // الطبقة الخفيفة (144p) — لوين وصل تحميل كل الفيديو
       this.tiersEl = mk('div', 'np-tiers'); // التحميل المتدرّج (720 / 480 / 360)
-      this.bar.append(this.low, this.tiersEl, this.buf, this.fill, this.knob, this.tip);
+      this.sbEl = mk('div', 'np-sb'); // صورة صغيرة من الفيديو فوق الشريط (لمّا تمرّق أو تسحب)
+      this.bar.append(this.low, this.tiersEl, this.buf, this.fill, this.knob, this.sbEl, this.tip);
 
       const row = mk('div', 'np-row');
       this.bPlay = mk('button', 'np-btn', ICON.play); this.bPlay.setAttribute('aria-label', 'تشغيل/إيقاف');
@@ -100,13 +102,17 @@
       this.bCopy.title = plus ? 'ضيف المطرب للمفضّلين' : 'نسخ الرابط'; this.bCopy.setAttribute('aria-label', this.bCopy.title);
       this.bGear = mk('button', 'np-btn', ICON.gear); this.bGear.setAttribute('aria-label', 'الإعدادات');
       this.bFs = mk('button', 'np-btn', ICON.fs); this.bFs.setAttribute('aria-label', 'ملء الشاشة');
+      // وضع المسرح (كمبيوتر): الفيديو بعرض الصفحة
+      this.bTheater = mk('button', 'np-btn np-theater', ICON.theater); this.bTheater.title = 'وضع المسرح (T)'; this.bTheater.setAttribute('aria-label', 'وضع المسرح');
+      this.bTheater.hidden = !DESKTOP;
+      this.bTheater.onclick = e => { e.stopPropagation(); if (window.nuvioTheater) window.nuvioTheater(); };
       const volWrap = mk('div', 'np-volwrap'); volWrap.append(this.bVol, this.vol);
       this.bCast = mk('button', 'np-btn', ICON.tv); this.bCast.title = 'عرض على شاشة'; this.bCast.setAttribute('aria-label', 'عرض على شاشة'); this.bCast.hidden = true;
       this.bCast.onclick = e => { e.stopPropagation(); this.cast(); };
       this.bPip = mk('button', 'np-btn', ICON.pip); this.bPip.title = 'شاشة عايمة'; this.bPip.setAttribute('aria-label', 'شاشة عايمة');
       this.bPip.hidden = !(DESKTOP && (this.canDocPip() || this.canPip()));
       this.bPip.onclick = e => { e.stopPropagation(); (this.canDocPip() ? this.docPip(false) : this.pip()).catch(() => {}); };
-      row.append(this.bPlay, volWrap, this.time, this.chapEl, mk('div', 'np-space'), this.bCast, this.bCopy, this.qBadge, this.bPip, this.bGear, this.bFs);
+      row.append(this.bPlay, volWrap, this.time, this.chapEl, mk('div', 'np-space'), this.bCast, this.bCopy, this.qBadge, this.bPip, this.bGear, this.bTheater, this.bFs);
       bottom.append(this.bar, row);
 
       this.menu = mk('div', 'np-menu'); this.menu.dir = 'rtl'; this.menu.hidden = true;
@@ -120,6 +126,11 @@
       this._bind();
       this._showUI();
       this._watchdog();
+      if (this.canAudioFx()) {
+        this.video.addEventListener('playing', () => this.applyAudioFx(), { once: true });
+        const fxTap = () => { if (this.dead) return document.removeEventListener('pointerdown', fxTap, true); const P = window.nuvioPref; if (P && (P.get('stableVol') || P.get('voiceBoost')) && !this._fx) this.applyAudioFx(); };
+        document.addEventListener('pointerdown', fxTap, true);
+      }
       // النافذة العايمة لسّا مفتوحة من الفيديو اللي قبل (القائمة/التشغيل التلقائي نقل لفيديو تاني وانت برّا)؟ منكمّل فيها
       const kw = DESKTOP && window.documentPictureInPicture && documentPictureInPicture.window;
       if (kw && kw.__nuvioKeep) { const k = kw.__nuvioKeep; setTimeout(() => { if (!this.dead && kw.__nuvioKeep === k && box.parentNode) this.docPip(k.auto, kw).catch(() => {}); }, 0); }
@@ -135,6 +146,33 @@
       this.video.playbackRate = this.rate;
       this._updQ();
     }
+    /* ---------- مستوى الصوت الثابت + تحسين الصوت (متل يوتيوب) ----------
+       بمشغّلنا بس (<video>)، مش بمشغّل يوتيوب المضمّن. منمرّق الصوت من: تحسين الكلام ← ضاغط ← تعويض ← السمّاعة.
+       ما منوصّل إلا لمّا المتصفح يسمح بالصوت (AudioContext شغّال)، لحتى ما يصير الفيديو بلا صوت أبداً. */
+    canAudioFx() { return !this.opts.media && !!(window.AudioContext || window.webkitAudioContext) && this.video instanceof HTMLMediaElement; }
+    async applyAudioFx() {
+      if (!this.canAudioFx()) return;
+      const P = window.nuvioPref; if (!P) return;
+      const stable = !!P.get('stableVol'), voice = !!P.get('voiceBoost');
+      if (!this._fx && !stable && !voice) return; // ما في شي مطلوب: بلا Web Audio أصلاً
+      if (!this._fx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        const ctx = window.__nuvioAC || (window.__nuvioAC = new AC());
+        try { if (ctx.state !== 'running') await ctx.resume(); } catch { /* */ }
+        if (ctx.state !== 'running' || this.dead || this._fx) return; // المتصفح لسّا ما سمح: منجرّب مع أول كبسة
+        let src; try { src = ctx.createMediaElementSource(this.video); } catch { return; }
+        const lows = ctx.createBiquadFilter(); lows.type = 'lowshelf'; lows.frequency.value = 180;
+        const pk = ctx.createBiquadFilter(); pk.type = 'peaking'; pk.frequency.value = 2400; pk.Q.value = 0.9;
+        const comp = ctx.createDynamicsCompressor();
+        const mk2 = ctx.createGain();
+        src.connect(lows); lows.connect(pk); pk.connect(comp); comp.connect(mk2); mk2.connect(ctx.destination);
+        this._fx = { ctx, src, lows, pk, comp, mk2 };
+      }
+      const f = this._fx, t = f.ctx.currentTime;
+      f.pk.gain.setTargetAtTime(voice ? 7 : 0, t, 0.05); f.lows.gain.setTargetAtTime(voice ? -5 : 0, t, 0.05);
+      if (stable) { f.comp.threshold.value = -32; f.comp.knee.value = 18; f.comp.ratio.value = 5; f.comp.attack.value = 0.008; f.comp.release.value = 0.3; f.mk2.gain.setTargetAtTime(1.7, t, 0.1); }
+      else { f.comp.threshold.value = 0; f.comp.knee.value = 0; f.comp.ratio.value = 1; f.mk2.gain.setTargetAtTime(1, t, 0.1); }
+    }
     /* قناة الفيديو (لحتى لغة الصوت تكون حسب اختيارك لهالقناة، وإلا الأصلي) */
     setChannel(ch) { if (!ch || ch === this.chId) return; this.chId = ch; this.applyAudioPref(); }
     applyAudioPref() {
@@ -147,6 +185,31 @@
         if (!target || (act.language === target.language && (!target.role || (act.audioRoles || []).includes(target.role)))) return;
         sp.selectAudioLanguage(target.language, target.role || undefined);
       } catch { /* */ }
+    }
+    /* صور صغيرة فوق شريط التقدّم (storyboard من يوتيوب): «رابط|عرض#طول#عدد#أعمدة#صفوف#كل قدّيش#اسم#توقيع|…» */
+    setStoryboard(spec, dur) {
+      this.sb = null; this.box.classList.remove('has-sb');
+      if (!spec || typeof spec !== 'string') return;
+      const parts = spec.split('|'), base = parts[0];
+      const levels = parts.slice(1).map(x => x.split('#')).filter(x => x.length >= 8);
+      if (!levels.length) return;
+      let L = levels.length - 1; // أول مستوى عرضو ≥ 120 (واضح وخفيف)
+      for (let i = 0; i < levels.length; i++) if (+levels[i][0] >= 120) { L = i; break; }
+      const [w, h, count, cols, rows, interval, name, sigh] = levels[L];
+      this.sb = { base, L, w: +w, h: +h, count: +count, cols: +cols, rows: +rows, interval: +interval, name, sigh, dur: +dur || 0 };
+      this.box.classList.add('has-sb');
+    }
+    _sbShow(f) {
+      const s = this.sb, el = this.sbEl; if (!s || !s.count || !el) return;
+      const dur = this.video.duration || s.dur || 0; if (!dur) return;
+      const t = f * dur;
+      let idx = s.interval > 0 ? Math.floor((t * 1000) / s.interval) : Math.floor(f * s.count);
+      idx = Math.max(0, Math.min(s.count - 1, idx));
+      const per = s.cols * s.rows, page = Math.floor(idx / per), k = idx % per;
+      const url = s.base.replace('$L', s.L).replace('$N', s.name.replace('$M', page)) + (s.sigh ? (s.base.includes('?') ? '&' : '?') + 'sigh=' + encodeURIComponent(s.sigh) : '');
+      const W = 168, sc = W / s.w, H = Math.round(s.h * sc);
+      const bw = this.bar.clientWidth || 1, x = Math.max(W / 2, Math.min(bw - W / 2, f * bw));
+      Object.assign(el.style, { width: W + 'px', height: H + 'px', left: x + 'px', backgroundImage: `url("${url}")`, backgroundSize: `${s.cols * s.w * sc}px ${s.rows * s.h * sc}px`, backgroundPosition: `-${(k % s.cols) * s.w * sc}px -${Math.floor(k / s.cols) * s.h * sc}px` });
     }
     setMarks(segs) { this.segs = segs || []; this._drawMarks(); }
     setChapters(ch) { this.chapters = ch || []; this._drawMarks(); this._chapLabel(true); }
@@ -183,6 +246,7 @@
     message(t) { this.msgEl.textContent = t || ''; this.msgEl.classList.toggle('on', !!t); }
     destroy() {
       if (this._pipWin) this._pipKeep(); // النافذة العايمة بتضل للفيديو الجاي (إذا ما إجا، بتسكّر لحالها)
+      if (this._fx) { try { this._fx.src.disconnect(); this._fx.mk2.disconnect(); } catch { /* */ } this._fx = null; }
       this.dead = true; clearInterval(this._wd); clearTimeout(this._hideT); clearTimeout(this._apT);
       if (this.opts.media && this.opts.media.destroy) this.opts.media.destroy();
       if (this._fakeFs) this._setFakeFs(false);
@@ -448,6 +512,7 @@
         const f = frac(e);
         const ct = this.chapters.length ? this._chapAt(f * (v.duration || 0)) : null;
         this.tip.textContent = fmt(f * (v.duration || 0)) + (ct && ct.title ? `  •  ${ct.title}` : ''); this.tip.style.left = `${f * 100}%`;
+        this._sbShow(f);
         if (drag) this._seekTo(f);
       });
       const end = () => { drag = false; box.classList.remove('drag'); };
@@ -517,15 +582,27 @@
       box.addEventListener('mouseleave', () => { if (!v.paused) this._hideUI(); });
 
       // الكيبورد
+      // اختصارات متل يوتيوب (اكبس ? لتشوفهن كلهن)
       this._key = e => {
         if (this.dead || !box.isConnected) return;
-        if (e.target.closest && e.target.closest('input, textarea, select')) return;
+        if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return; // اختصارات المتصفح لإلو
         const k = e.key.toLowerCase();
+        const rate = d => { const i = Math.max(0, Math.min(SPEEDS.length - 1, SPEEDS.indexOf(SPEEDS.includes(v.playbackRate) ? v.playbackRate : 1) + d)); v.playbackRate = SPEEDS[i]; this.rate = SPEEDS[i]; this.flash(SPEEDS[i] === 1 ? 'عادي' : `${SPEEDS[i]}×`); };
+        const frame = d => { if (!v.paused) return; v.currentTime = Math.max(0, v.currentTime + d / 30); };
+        if (e.shiftKey && k === 'n') { e.preventDefault(); if (this.opts.onNext) this.opts.onNext(); return; } // الفيديو الجاي
+        if (e.shiftKey && k === 'p') { e.preventDefault(); if (window.nuvioPrev) window.nuvioPrev(); return; } // اللي قبلو (بالقائمة)
         const map = {
-          ' ': () => this.toggle(), k: () => this.toggle(), f: () => this.fullscreen(), m: () => { v.muted = !v.muted; },
+          ' ': () => this.toggle(), k: () => this.toggle(), f: () => this.fullscreen(), m: () => { v.muted = !v.muted; this.flash(v.muted ? 'بلا صوت' : 'الصوت رجع'); },
           arrowleft: () => this.skip(-5), arrowright: () => this.skip(5), j: () => this.skip(-10), l: () => this.skip(10),
-          arrowup: () => { v.volume = Math.min(1, v.volume + 0.1); v.muted = false; },
-          arrowdown: () => { v.volume = Math.max(0, v.volume - 0.1); },
+          arrowup: () => { v.volume = Math.min(1, v.volume + 0.1); v.muted = false; this.flash(`الصوت ${Math.round(v.volume * 100)}%`); },
+          arrowdown: () => { v.volume = Math.max(0, v.volume - 0.1); this.flash(`الصوت ${Math.round(v.volume * 100)}%`); },
+          home: () => { v.currentTime = 0; }, end: () => { if (isFinite(v.duration)) v.currentTime = Math.max(0, v.duration - 1); },
+          '>': () => rate(1), '<': () => rate(-1), '.': () => frame(1), ',': () => frame(-1),
+          c: () => this.toggleCaptions(),
+          t: () => { if (window.nuvioTheater) window.nuvioTheater(); },
+          i: () => { if (window.nuvioMiniKey) window.nuvioMiniKey(); },
+          '?': () => this.keysHelp(),
         };
         if (/^[0-9]$/.test(k) && isFinite(v.duration)) { v.currentTime = v.duration * (+k / 10); this._showUI(); return; }
         if (map[k]) { e.preventDefault(); map[k](); this._showUI(); }
@@ -556,6 +633,32 @@
       v.addEventListener('webkitendfullscreen', () => { this.markTransition(); setTimeout(resume, 350); }); // آيفون بيوقّف لمّا تطلع من ملء الشاشة
     }
 
+    /* رسالة صغيرة بنص الفيديو (الصوت، السرعة، الترجمة…) */
+    flash(t) {
+      if (!this.flashEl) { this.flashEl = mk('div', 'np-flash'); this.ui.append(this.flashEl); }
+      this.flashEl.textContent = t; this.flashEl.classList.add('on');
+      clearTimeout(this._flT); this._flT = setTimeout(() => this.flashEl && this.flashEl.classList.remove('on'), 900);
+    }
+    toggleCaptions() {
+      if (this.opts.media && this.video.applyCc && window.nuvioPref) { // مشغّل يوتيوب المضمّن
+        const PP = window.nuvioPref; PP.set('cc', !PP.get('cc')); this.video.applyCc(); this.flash(PP.get('cc') ? 'الترجمة شغّالة' : 'الترجمة مطفية'); return;
+      }
+      if (!this.captions || !this.captions.length) { this.flash('ما في ترجمة لهالفيديو'); return; }
+      if (this.capSel) { this._pickCaption(null); this.flash('الترجمة مطفية'); return; }
+      const c = this.captions.find(x => /^ar/.test(x.lang || '')) || this.captions[0];
+      this._pickCaption(c); this.flash(`الترجمة: ${c.label}`);
+    }
+    keysHelp() {
+      if (this._help) { this._help.remove(); this._help = null; return; }
+      const h = mk('div', 'np-help'); h.dir = 'rtl';
+      const rows = [['مسافة / K', 'تشغيل / إيقاف'], ['J / L', '10 ثواني لورا / لقدّام'], ['← / →', '5 ثواني'], ['↑ / ↓', 'الصوت'], ['M', 'بلا صوت'], ['F', 'ملء الشاشة'],
+        ['T', 'وضع المسرح'], ['I', 'المشغّل الصغير'], ['C', 'الترجمة'], ['Shift+N / Shift+P', 'الجاي / اللي قبل'], ['< / >', 'أبطأ / أسرع'], [', / .', 'صورة صورة (وهو موقّف)'], ['0 … 9', 'روح لـ 0%…90%'], ['Home / End', 'البداية / الآخر']];
+      h.append(mk('div', 'np-help-t', 'اختصارات الكيبورد'));
+      for (const [a, b] of rows) { const r = mk('div', 'np-help-r'); const kb = mk('b'); kb.textContent = a; const tx = mk('span'); tx.textContent = b; r.append(tx, kb); h.append(r); }
+      h.onclick = e => { e.stopPropagation(); h.remove(); this._help = null; };
+      ['pointerdown', 'pointerup'].forEach(n => h.addEventListener(n, e => e.stopPropagation()));
+      this.box.append(h); this._help = h;
+    }
     toggle() {
       const v = this.video;
       this._unlock();
@@ -712,6 +815,9 @@
         ap: '<path class="s" d="M4 6.5v11l7-5.5zM13 6.5v11l7-5.5z"/>',
         sb: '<path class="s" d="M5 5l7 7-7 7M13 5l7 7-7 7"/>',
         tv: '<rect class="s" x="3" y="4.5" width="18" height="12" rx="2"/><path class="s" d="M8.5 20h7M12 16.5V20"/>',
+        sv: '<path class="s" d="M3 12h2M7 8v8M11 5v14M15 8v8M19 10v4M21 12h0"/>',
+        vb: '<path class="s" d="M5 9v6h3l5 4V5L8 9H5zM16.5 8.5a5 5 0 0 1 0 7"/>',
+        am: '<rect class="s" x="5" y="7" width="14" height="10" rx="1.5"/><path class="s" d="M3 4l2 2M21 4l-2 2M3 20l2-2M21 20l-2-2M12 2v2M12 20v2"/>',
       };
       const icon = k => `<svg viewBox="0 0 24 24">${I[k]}</svg>`;
       const row = (k, label, value, onClick, toggle) => {
@@ -746,6 +852,14 @@
       // الترتيب متل يوتيوب: المفاتيح فوق، والجودة تحت (أقرب شي للزر)
       const main = () => {
         sh.replaceChildren(mk('div', 'np-grip'));
+        const PF = window.nuvioPref;
+        // مستوى الصوت الثابت + تحسين الصوت (بمشغّلنا بس)
+        if (PF && this.canAudioFx()) {
+          sh.append(row('sv', 'مستوى الصوت الثابت', '', r => { PF.set('stableVol', !PF.get('stableVol')); r.querySelector('.np-sw').classList.toggle('on', !!PF.get('stableVol')); this.applyAudioFx(); }, !!PF.get('stableVol')));
+          sh.append(row('vb', 'تحسين الصوت (الكلام أوضح)', '', r => { PF.set('voiceBoost', !PF.get('voiceBoost')); r.querySelector('.np-sw').classList.toggle('on', !!PF.get('voiceBoost')); this.applyAudioFx(); }, !!PF.get('voiceBoost')));
+        }
+        // الإضاءة السينمائية (كمبيوتر، الثيم الغامق)
+        if (PF && window.nuvioAmbientOk && window.nuvioAmbientOk()) sh.append(row('am', 'الإضاءة السينمائية', '', r => { PF.set('ambient', PF.get('ambient') === false); r.querySelector('.np-sw').classList.toggle('on', PF.get('ambient') !== false); }, PF.get('ambient') !== false));
         // تكرار
         sh.append(row('lp', 'تكرار الفيديو', '', r => { this.setLoop(!this.loop); r.querySelector('.np-sw').classList.toggle('on', this.loop); }, !!this.loop));
         // إعدادات عامة من app.js
