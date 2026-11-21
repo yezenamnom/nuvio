@@ -2429,6 +2429,7 @@ async function renderWatch(id, startTime) {
       const strong = !!(window.nuvioStrong && nuvioStrong());
       player.configure({
         preferredVideoCodecs: ['avc1', 'vp9'],
+        preferredAudioLanguage: (window.nuvioAudPref && nuvioAudPref()) || '', // لغة الصوت اللي اخترتها آخر مرة (فاضي = الأصلي)
         streaming: {
           // مخزون أكبر + طلب القطع الجاية سلفاً: أي بطء قصير عالشبكة ما بيبيّن (عالواي فاي: 4 دقايق قدّام)
           bufferingGoal: 90, rebufferingGoal: 2, bufferBehind: 30, segmentPrefetchLimit: 2,
@@ -2437,8 +2438,9 @@ async function renderWatch(id, startTime) {
           ignoreTextStreamFailures: true,
         },
         manifest: { retryParameters: { maxAttempts: 3, baseDelay: 400, timeout: 12000 }, dash: { ignoreMinBufferTime: true } },
-        // بداية سريعة، والجودة بتطلع لحالها — بس مش أعلى من الشاشة (4K عالتلفون بيقطّش وما إلو داعي)
-        abr: { enabled: true, defaultBandwidthEstimate: 1.6e6, switchInterval: 4, bandwidthUpgradeTarget: 0.7, restrictToScreenSize: true },
+        // بداية سريعة، والجودة بتطلع لحالها — بس مش أعلى من الشاشة (4K عالتلفون بيقطّش وما إلو داعي).
+        // حدّ الشاشة بـ saverCfg() (screenCap)، مش restrictToScreenSize: هيداك كان يوقّف التلفون الواقف عند 480p
+        abr: { enabled: true, defaultBandwidthEstimate: 1.6e6, switchInterval: 4, bandwidthUpgradeTarget: 0.7, restrictToScreenSize: false },
       });
       player.configure(saverCfg()); // توفير الإنترنت: لحد 480p
       const me = player;
@@ -3201,7 +3203,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261121014325';
+const APP_VERSION = '20261121023534';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

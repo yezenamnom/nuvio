@@ -413,9 +413,20 @@ function strongPreload() {
   return !(c && (c.type === 'cellular' || c.saveData));
 }
 window.nuvioStrong = strongPreload;
-const saverCfg = () => (saverOn()
-  ? { abr: { restrictions: { maxHeight: 480 }, defaultBandwidthEstimate: 6e5 } }
-  : { abr: { restrictions: { maxHeight: Infinity } } });
+// أعلى جودة = قد الشاشة الحقيقية: ضلع الفيديو الطويل مع ضلع الشاشة الطويل، والقصير مع القصير.
+// (restrictToScreenSize تبع Shaka بيقارن ضلع الفيديو الطويل بعرض الشاشة، فالتلفون الواقف ما كان يطلع فوق 480p)
+function screenCap() {
+  const dpr = window.devicePixelRatio || 1;
+  const a = (screen.width || 0) * dpr, b = (screen.height || 0) * dpr;
+  if (!a || !b) return { maxWidth: Infinity, maxHeight: Infinity };
+  return { maxWidth: Math.ceil(Math.max(a, b)) + 8, maxHeight: Math.ceil(Math.min(a, b)) + 8 }; // +8: سماحية للتقريب
+}
+const saverCfg = () => {
+  const cap = screenCap();
+  return saverOn()
+    ? { abr: { restrictions: { maxWidth: cap.maxWidth, maxHeight: Math.min(480, cap.maxHeight) }, defaultBandwidthEstimate: 6e5 } }
+    : { abr: { restrictions: { maxWidth: cap.maxWidth, maxHeight: cap.maxHeight } } };
+};
 
 /* ================= النسخة الاحتياطية ================= */
 const BACKUP_KEYS = ['playlists', 'hist', 'likes', 'favs', 'mhist', 'subs', 'artists', 'ytlists', 'searches', 'later', 'pos', 'nope', 'nopeCh', 'chSeen', 'chTop', 'prefs', 'mode'];

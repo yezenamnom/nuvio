@@ -34,6 +34,11 @@
     get(k, d) { try { const v = localStorage.getItem('nuvio:p:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem('nuvio:p:' + k, JSON.stringify(v)); } catch { /* */ } },
   };
+  // لغة الصوت اللي اخترتها (فاضي = الأصلي) — app.js بيعطيها لـ Shaka قبل ما يبلّش الفيديو
+  window.nuvioAudPref = () => ls.get('aud', '');
+  // أسماء اللغات بالعربي (ar → العربية، en → الإنجليزية…)
+  const AR_LANG = (() => { try { return new Intl.DisplayNames(['ar'], { type: 'language' }); } catch { return null; } })();
+  const langName = l => { if (!l || l === 'und') return 'غير محدّد'; try { return (AR_LANG && AR_LANG.of(l)) || l; } catch { return l; } };
   /* قفل تمرير الصفحة (مع حفظ المكان) وقت تكون قائمة فوقها مفتوحة */
   let lockY = 0, locks = 0;
   function lockScroll(on) {
@@ -573,20 +578,45 @@
       tr.addEventListener('load', () => { tr.track.mode = 'showing'; });
     }
 
-    /* ---------- قائمة الإعدادات: بتطلع من تحت لفوق متل يوتيوب، وكل خيار بيبيّن بس إذا متوفر ---------- */
+    /* ---------- قائمة الإعدادات (متل يوتيوب)، وكل خيار بيبيّن بس إذا متوفر ----------
+       كمبيوتر (ماوس) والمشغّل عريض: قائمة صغيرة بتطلع فوق زر الإعدادات مباشرة.
+       تلفون وتلفزيون: بتطلع من تحت لفوق (أسهل بالإصبع وبالريموت). */
     _menu(open) {
       if (this._sheet) { this._closeSheet(); return; }
       const v = this.video;
       const fs = document.fullscreenElement === this.box;
-      const ov = mk('div', 'np-sheet-ov' + (fs ? ' in-fs' : ''));
+      const pop = !document.documentElement.classList.contains('tv') && matchMedia('(hover: hover) and (pointer: fine)').matches && this.box.getBoundingClientRect().width >= 520;
+      const ov = mk('div', 'np-sheet-ov' + (fs ? ' in-fs' : '') + (pop ? ' pop' : ''));
       const sh = mk('div', 'np-sheet'); sh.dir = 'rtl';
       ov.append(sh);
       ov.addEventListener('click', e => { if (e.target === ov) this._closeSheet(); });
-      (fs ? this.box : document.body).append(ov);
-      this._sheet = ov;
-      lockScroll(true);
+      (fs || pop ? this.box : document.body).append(ov);
+      this._sheet = ov; this._sheetLock = !pop;
+      if (!pop) lockScroll(true);
       // اللمس برّا القائمة ما بيحرّك الصفحة ورا
       ov.addEventListener('touchmove', e => { if (!e.target.closest('.np-sheet')) e.preventDefault(); }, { passive: false });
+      if (pop) {
+        // مكانها: طرفها اليمين مع طرف زر الإعدادات، وتحتها فوق الزر مباشرة
+        const place = () => {
+          const br = this.box.getBoundingClientRect(), gr = this.bGear.getBoundingClientRect();
+          const w = Math.min(330, br.width - 16);
+          let right = 12, bottom = 64;
+          if (gr.width) {
+            const bt = this.bar && this.bar.getBoundingClientRect().height ? this.bar.getBoundingClientRect().top : gr.top; // فوق شريط التقدّم كمان
+            right = Math.round(br.right - gr.right - 6); bottom = Math.round(br.bottom - Math.min(gr.top, bt) + 8);
+          }
+          right = Math.min(Math.max(8, right), Math.max(8, br.width - w - 8));
+          Object.assign(sh.style, { right: right + 'px', bottom: bottom + 'px', width: w + 'px', maxHeight: Math.max(150, br.height - bottom - 10) + 'px' });
+        };
+        place();
+        // كبسة برّا المشغّل أو Esc بتسكّرها
+        const outside = e => { if (!this.box.contains(e.target)) this._closeSheet(); };
+        const esc = e => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); this._closeSheet(); } };
+        document.addEventListener('pointerdown', outside, true);
+        document.addEventListener('keydown', esc, true);
+        window.addEventListener('resize', place);
+        this._sheetOff = () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', esc, true); window.removeEventListener('resize', place); };
+      }
       this._showUI(true);
       const I = {
         q: '<path class="s" d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle class="s" cx="15" cy="7" r="2.2"/><circle class="s" cx="9" cy="17" r="2.2"/>',
@@ -622,55 +652,17 @@
           sh.append(b);
         });
       };
+      // صفحة شرح قصيرة (بدل خيارات) — مع رجوع للقائمة
+      const note = (title, text) => {
+        sh.replaceChildren(mk('div', 'np-grip'));
+        const h = mk('button', 'np-sub-h'); h.textContent = '› ' + title;
+        h.onclick = e => { e.stopPropagation(); main(); };
+        const p = mk('div', 'np-note'); p.textContent = text;
+        sh.append(h, p);
+      };
+      // الترتيب متل يوتيوب: المفاتيح فوق، والجودة تحت (أقرب شي للزر)
       const main = () => {
         sh.replaceChildren(mk('div', 'np-grip'));
-        // الجودة
-        const tracks = this._tracks();
-        if (tracks.length) {
-          const abr = this.shaka.getConfiguration().abr.enabled;
-          const act = this.shaka.getVariantTracks().find(t => t.active);
-          sh.append(row('q', 'الجودة', abr ? `تلقائي${act ? ` (${act.height}p)` : ''}` : `${act ? act.height : ''}p`, () => sub('الجودة', [
-            [`تلقائي${act ? ` (${act.height}p)` : ''}`, abr, () => { this.shaka.configure({ abr: { enabled: true } }); ls.set('q', 0); }],
-            ...tracks.map(t => [`${t.height}p${t.height >= 720 ? '  HD' : ''}`, !abr && act && act.height === t.height, () => {
-              this.shaka.configure({ abr: { enabled: false } });
-              this.shaka.selectVariantTrack(t, true, 4);
-              ls.set('q', t.height); this._updQ();
-            }]),
-          ])));
-        }
-        // السرعة
-        sh.append(row('sp', 'سرعة التشغيل', v.playbackRate === 1 ? 'عادي' : `${v.playbackRate}×`, () => sub('سرعة التشغيل',
-          SPEEDS.map(s => [s === 1 ? 'عادي' : `${s}×`, v.playbackRate === s, () => { v.playbackRate = s; this.rate = s; }]))));
-        // الترجمة (إذا في)
-        if (this.captions && this.captions.length) {
-          sh.append(row('cc', 'الترجمة والشرح', this.capSel || 'إيقاف', () => sub('الترجمة والشرح', [
-            ['إيقاف', !this.capSel, () => this._pickCaption(null)],
-            ...this.captions.map(c => [c.label, this.capSel === c.label, () => this._pickCaption(c)]),
-          ])));
-        }
-        // مشغّل يوتيوب: الترجمة (CC) تشغيل/إيقاف — بتنحفظ لكل الفيديوهات
-        if (this.opts.media && this.video.applyCc && window.nuvioPref) {
-          const PP = window.nuvioPref;
-          sh.append(row('cc', 'الترجمة (CC)', '', r => { PP.set('cc', !PP.get('cc')); this.video.applyCc(); r.querySelector('.np-sw').classList.toggle('on', !!PP.get('cc')); }, !!PP.get('cc')));
-        }
-        // المقطع الصوتي (إذا في أكتر من لغة)
-        if (this.shaka && this.shaka.getAudioLanguagesAndRoles) {
-          const langs = this.shaka.getAudioLanguagesAndRoles();
-          if (langs.length > 1) {
-            const cur = (this.shaka.getVariantTracks().find(t => t.active) || {}).language || '';
-            sh.append(row('au', 'المقطع الصوتي', cur, () => sub('المقطع الصوتي',
-              langs.map(l => [l.label || l.language, l.language === cur, () => this.shaka.selectAudioLanguage(l.language, l.role)]))));
-          }
-        }
-        // مؤقت الإيقاف (من app.js)
-        if (typeof setSleep === 'function' && typeof SLEEP_OPTS !== 'undefined') {
-          const st = typeof sleepState !== 'undefined' ? sleepState : {};
-          const val = st.endOfVideo ? 'آخر الفيديو' : st.at ? `${Math.max(1, Math.ceil((st.at - Date.now()) / 60000))} د` : 'غير مفعّل';
-          sh.append(row('sl', 'مؤقّت إيقاف التشغيل', val, () => sub('مؤقّت إيقاف التشغيل',
-            SLEEP_OPTS.map(([m, label]) => [label, m === 0 ? !st.at && !st.endOfVideo : m === -1 ? !!st.endOfVideo : false, () => setSleep(m, () => this)]))));
-        }
-        // شغّل على جهاز تاني (كمبيوتر / تلفزيون فاتح Nuvio بنفس الحساب)
-        if (this.opts.onOther) sh.append(row('tv', 'شغّل على جهاز تاني', '', () => { this._closeSheet(); this.opts.onOther(); }));
         // تكرار
         sh.append(row('lp', 'تكرار الفيديو', '', r => { this.setLoop(!this.loop); r.querySelector('.np-sw').classList.toggle('on', this.loop); }, !!this.loop));
         // إعدادات عامة من app.js
@@ -679,10 +671,67 @@
           sh.append(row('ap', 'تشغيل تلقائي', '', r => { P.set('autoplay', !P.get('autoplay')); r.querySelector('.np-sw').classList.toggle('on', P.get('autoplay')); }, !!P.get('autoplay')));
           sh.append(row('sb', 'تخطّي الدعايات جوّا الفيديو', '', r => { P.set('sb', !P.get('sb')); r.querySelector('.np-sw').classList.toggle('on', P.get('sb')); }, !!P.get('sb')));
         }
+        // مشغّل يوتيوب: الترجمة (CC) تشغيل/إيقاف — بتنحفظ لكل الفيديوهات
+        if (this.opts.media && this.video.applyCc && window.nuvioPref) {
+          const PP = window.nuvioPref;
+          sh.append(row('cc', 'الترجمة (CC)', '', r => { PP.set('cc', !PP.get('cc')); this.video.applyCc(); r.querySelector('.np-sw').classList.toggle('on', !!PP.get('cc')); }, !!PP.get('cc')));
+        }
         // الفصول (إذا في)
         if (this.chapters.length) {
           const c = this._chapAt(v.currentTime || 0);
-          sh.insertBefore(row('ch', 'الفصول', c && c.title ? c.title.slice(0, 22) : `${this.chapters.length}`, chSub), sh.children[1] || null);
+          sh.append(row('ch', 'الفصول', c && c.title ? c.title.slice(0, 22) : `${this.chapters.length}`, chSub));
+        }
+        // شغّل على جهاز تاني (كمبيوتر / تلفزيون فاتح Nuvio بنفس الحساب)
+        if (this.opts.onOther) sh.append(row('tv', 'شغّل على جهاز تاني', '', () => { this._closeSheet(); this.opts.onOther(); }));
+        // المقطع الصوتي: الدبلجات (العربي وغيرو) — اختيارك بينحفظ للفيديوهات الجاية
+        if (this.shaka && this.shaka.getAudioLanguagesAndRoles) {
+          const langs = this.shaka.getAudioLanguagesAndRoles();
+          if (langs.length > 1) {
+            const act = this.shaka.getVariantTracks().find(t => t.active) || {};
+            const orig = l => l.role === 'main';
+            const name = l => langName(l.language) + (orig(l) ? ' (الأصلي)' : '');
+            // الأصلي أول، بعدو العربي، والباقي بالترتيب
+            const list = langs.slice().sort((a, b) => (orig(b) - orig(a)) || ((b.language === 'ar') - (a.language === 'ar')) || name(a).localeCompare(name(b), 'ar'));
+            const cur = list.find(l => l.language === act.language && (!l.role || (act.audioRoles || []).includes(l.role))) || list.find(l => l.language === act.language);
+            sh.append(row('au', 'المقطع الصوتي', cur ? name(cur) : '', () => sub('المقطع الصوتي',
+              list.map(l => [name(l), l === cur, () => { this.shaka.selectAudioLanguage(l.language, l.role || undefined); ls.set('aud', orig(l) ? '' : l.language); }]))));
+          }
+        } else if (this.opts.media && this.video.applyCc) {
+          // مشغّل يوتيوب المضمّن: ما في أمر رسمي يغيّر لغة الصوت من برّا الإطار
+          sh.append(row('au', 'المقطع الصوتي', 'الأصلي', () => note('المقطع الصوتي',
+            'هون الفيديو شغّال بمشغّل يوتيوب المضمّن، وهو ما بيسمح نغيّر لغة الصوت (بيضل على الأصلي). بتطبيق Nuvio عالأندرويد، أو بالكمبيوتر مع إضافة Nuvio، الفيديو بيشتغل بمشغّلنا وبتقدر تختار العربي وكل الدبلجات.')));
+        }
+        // الترجمة (إذا في)
+        if (this.captions && this.captions.length) {
+          sh.append(row('cc', 'الترجمة والشرح', this.capSel || 'إيقاف', () => sub('الترجمة والشرح', [
+            ['إيقاف', !this.capSel, () => this._pickCaption(null)],
+            ...this.captions.map(c => [c.label, this.capSel === c.label, () => this._pickCaption(c)]),
+          ])));
+        }
+        // مؤقت الإيقاف (من app.js)
+        if (typeof setSleep === 'function' && typeof SLEEP_OPTS !== 'undefined') {
+          const st = typeof sleepState !== 'undefined' ? sleepState : {};
+          const val = st.endOfVideo ? 'آخر الفيديو' : st.at ? `${Math.max(1, Math.ceil((st.at - Date.now()) / 60000))} د` : 'غير مفعّل';
+          sh.append(row('sl', 'مؤقّت إيقاف التشغيل', val, () => sub('مؤقّت إيقاف التشغيل',
+            SLEEP_OPTS.map(([m, label]) => [label, m === 0 ? !st.at && !st.endOfVideo : m === -1 ? !!st.endOfVideo : false, () => setSleep(m, () => this)]))));
+        }
+        // السرعة
+        sh.append(row('sp', 'سرعة التشغيل', v.playbackRate === 1 ? 'عادي' : `${v.playbackRate}×`, () => sub('سرعة التشغيل',
+          SPEEDS.map(s => [s === 1 ? 'عادي' : `${s}×`, v.playbackRate === s, () => { v.playbackRate = s; this.rate = s; }]))));
+        // الجودة (تحت، جنب الزر)
+        const tracks = this._tracks();
+        if (tracks.length) {
+          const abr = this.shaka.getConfiguration().abr.enabled;
+          const act = this.shaka.getVariantTracks().find(t => t.active);
+          const hd = h => (h >= 720 ? ' HD' : '');
+          sh.append(row('q', 'الجودة', abr ? `تلقائية${act ? ` (${act.height}p${hd(act.height)})` : ''}` : `${act ? act.height : ''}p${act ? hd(act.height) : ''}`, () => sub('الجودة', [
+            [`تلقائية${act ? ` (${act.height}p)` : ''}`, abr, () => { this.shaka.configure({ abr: { enabled: true } }); ls.set('q', 0); }],
+            ...tracks.map(t => [`${t.height}p${hd(t.height)}`, !abr && act && act.height === t.height, () => {
+              this.shaka.configure({ abr: { enabled: false } });
+              this.shaka.selectVariantTrack(t, true, 4);
+              ls.set('q', t.height); this._updQ();
+            }]),
+          ])));
         }
       };
       const chSub = () => sub('الفصول', this.chapters.map(c => [`${fmt(c.t)}   ${c.title || ''}`, this._chapAt(v.currentTime || 0) === c, () => { v.currentTime = c.t + 0.05; v.play().catch(() => {}); }]));
@@ -693,7 +742,8 @@
     _closeSheet() {
       const ov = this._sheet; if (!ov) return;
       this._sheet = null;
-      lockScroll(false);
+      if (this._sheetLock) lockScroll(false);
+      if (this._sheetOff) { this._sheetOff(); this._sheetOff = null; }
       ov.classList.remove('open');
       setTimeout(() => ov.remove(), 260);
       this._showUI();
