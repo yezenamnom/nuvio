@@ -8,7 +8,7 @@
 ['gesturestart', 'gesturechange'].forEach(n => document.addEventListener(n, e => e.preventDefault(), { passive: false }));
 
 /* ================= الإعدادات ================= */
-const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto', theme: 'nuvio', holdSpeed: true, holdRate: 2, shortsAuto: false, shortsRate: 1, player: 'nuvio', homeSecs: null, preload: 'auto', cc: false, autoPip: true, floatScroll: true, hoverPreview: true, ambient: true, stableVol: false, voiceBoost: false };
+const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto', theme: 'nuvio', holdSpeed: true, holdRate: 2, shortsAuto: false, shortsRate: 1, shortsAud: '', shortsCcLang: 'ar', player: 'nuvio', homeSecs: null, preload: 'auto', cc: false, autoPip: true, floatScroll: true, hoverPreview: true, ambient: true, stableVol: false, voiceBoost: false };
 const DESK_PTR = !!(window.matchMedia && matchMedia('(hover: hover) and (pointer: fine)').matches); // كمبيوتر بماوس
 /* أقسام راس الرئيسية (فوق «مقترح لك»): الترتيب والتشغيل من الإعدادات */
 const HOME_SECS = [['searches', 'سجل البحث', 'search'], ['subs', 'القنوات', 'subs'], ['hist', 'آخر اللي شفتو', 'clock']];
@@ -700,6 +700,8 @@ let shortsCtx = null; // { ch, items } — من صفحة القناة
 function shortsExit() {
   const s = shortsState; if (!s) return;
   shortsState = null;
+  try { shJudge(s.watch); } catch { /* */ } // آخر شورت قبل ما طلعت
+  try { if (s.stopBg) s.stopBg(); } catch { /* */ }
   document.body.classList.remove('shorts-mode', 'shorts-clean');
   if (s.io) s.io.disconnect();
   try { s.video.pause(); } catch { /* */ }
@@ -756,15 +758,145 @@ async function ytShortsSearch(q) {
     .concat(walk(d, 'videoRenderer').map(fromVR).filter(v => v.duration > 0 && v.duration <= 75));
   return uniqById(items).filter(wanted).map(v => ({ ...v, short: true }));
 }
-function shortsFeed() {
-  const qs = shuffle(store.get('searches', []).slice(0, 6)).concat(shuffle(['مضحك', 'طبخ', 'رياضة', 'حيوانات', 'سفر', 'كرة قدم', 'موسيقى', 'تقنية', 'funny', 'satisfying']));
-  let i = 0;
+/* ================= خوارزمية الشورتس (متل يوتيوب — وكلّها على جهازك) =================
+   يوتيوب بيجيب «مرشّحين» من كذا مصدر، بيرتّبهن حسب اللي بيعجبك (قدّيش حضرت، إذا قلبت بسرعة، إعجاب، «مش مهتم»)،
+   وبالآخر بيرتّب من جديد لحتى يكون في تنوّع. هون نفس الفكرة:
+   - المصادر: ١) اهتماماتك (بحوثك + مواضيع الشورتس اللي عجبتك) ٢) سلسلة شورتس يوتيوب نفسها (من شورت عجبك —
+     بس من جهازك: مع الإضافة أو التطبيق) ٣) قناة من قنواتك ٤) مواضيع جديدة (استكشاف).
+   - الإشارات بتنحفظ على جهازك بس (shProf، ما بتنزامن): حضرت ≥80% أو رجع من الأول = عجبك، قلبت بأقل من 3 ثواني = لأ،
+     إعجاب = كتير، «مش مهتم» = لأ أبداً. كل شي بيخفّ مع الوقت (نص قيمتو كل أسبوعين).
+   - التنوّع: نفس القناة مرة وحدة بكل دفعة وما بترجع قبل 8 شورتس، والقنوات اللي بتقلبها دايماً بتختفي فترة.
+     واللي شفتو ما بيرجع. */
+const SH_EXPLORE = ['مضحك', 'طبخ', 'رياضة', 'حيوانات', 'سفر', 'كرة قدم', 'موسيقى', 'تقنية', 'funny', 'satisfying', 'ألعاب', 'gaming', 'معلومات', 'سيارات', 'رسم', 'تحدي', 'خدع', 'طبيعة', 'كوميديا', 'diy', 'science', 'football skills', 'life hacks', 'animals'];
+const shProf = {
+  get() { const p = store.get('shProf', null) || {}; p.ch = p.ch || {}; p.tp = p.tp || {}; p.seed = p.seed || []; p.seen = p.seen || []; return p; },
+  save(p) { store.set('shProf', p); },
+};
+const shDecay = (x, now = Date.now()) => (x && x.s ? x.s * Math.pow(0.5, (now - (x.t || now)) / (14 * 864e5)) : 0);
+function shBump(map, key, d, label, max = 300) {
+  key = String(key || '').trim().toLowerCase(); if (!key) return;
+  const x = map[key] || {}; x.s = Math.max(-6, Math.min(12, shDecay(x) + d)); x.t = Date.now(); if (label) x.q = label; map[key] = x;
+  const ks = Object.keys(map);
+  if (ks.length > max) ks.sort((a, b) => Math.abs(shDecay(map[a])) - Math.abs(shDecay(map[b]))).slice(0, ks.length - max).forEach(k => delete map[k]);
+}
+// هاشتاغات العنوان = مواضيع (بلا العامّة متل #shorts)
+const shTags = t => (String(t || '').match(/#[\p{L}\p{N}_]{2,30}/gu) || []).map(x => x.slice(1)).filter(x => !/^(shorts?|viral|fyp|foryou|foryoupage|trending|youtubeshorts|ytshorts|subscribe|explore)$/i.test(x)).slice(0, 3);
+// مفتاح القناة: اسمها — بلا «وفلان» (تعاون) وبلا الرقم بالآخر («MrBeast 2» = نفس الشخص)
+const shCk = o => String((o && o.name) || '').replace(/[‎‏‪-‮]/g, '').split(/\s+(?:و|and|&|x|ft\.?|feat\.?)\s*(?=\S)|،|,/i)[0]
+  .replace(/\s+\d+$/, '').replace(/\s*(official|tv|shorts|clips|edits?)$/i, '').trim().toLowerCase();
+function sigAfter(ms) { const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; }
+// مين صاحب الشورت؟ (الاسم والعنوان) — من oembed تبع يوتيوب، مباشرة من جهازك (بيسمح لموقعنا)
+const shOwner = v => (v.author ? Promise.resolve({ name: v.author, title: v.title || '' })
+  : cached('oe2:' + v.id, 24 * 3600e3, () => fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent('https://www.youtube.com/shorts/' + v.id)}`, { referrerPolicy: 'no-referrer', signal: sigAfter(3500) })
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(j => ({ name: j.author_name || '', title: j.title || '' }))));
+// سلسلة شورتس يوتيوب نفسها بعد شورت معيّن (نفس اللي بيعملو تطبيق يوتيوب لمّا تسحب) — بس من جهازك
+let shSeqDown = 0;
+async function ytReelSeq(seed) {
+  if (!seed || typeof extUsable !== 'function' || !extUsable() || Date.now() - shSeqDown < 10 * 60e3) return [];
+  try {
+    // مش عبر ytDirect: إذا الإضافة/التطبيق لسّا ما بيعرفو هالعنوان، ما منعتبر الإضافة واقفة
+    const r = await fetch('https://www.youtube.com/youtubei/v1/reel/reel_watch_sequence?prettyPrint=false', {
+      method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer', signal: sigAfter(5000),
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify({ context: { client: YTI_CLIENT }, sequenceParams: btoa('\x0a\x0b' + seed) }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    return uniqById((j.entries || []).map(e => walk(e, 'reelWatchEndpoint')[0]).filter(x => x && x.videoId)
+      .map(x => ({ id: x.videoId, title: '', author: '', duration: 0, thumb: ytThumb(x.videoId), live: false })));
+  } catch { shSeqDown = Date.now(); return []; }
+}
+// قرعة بوزن: اللي عجبك أكتر بيطلع أكتر، بس مش دايماً نفس الشي
+function shPick(list, n) {
+  const l = list.slice(), out = [];
+  while (out.length < n && l.length) {
+    const tot = l.reduce((a, x) => a + x.w, 0); let r = Math.random() * tot, i = 0;
+    while (i < l.length - 1 && (r -= l[i].w) > 0) i++;
+    out.push(l.splice(i, 1)[0]);
+  }
+  return out;
+}
+// دفعة شورتس جديدة (~12). st = حالة صفحة الشورتس (لحتى نعرف شو انعرض هلّق)
+function shortsFeed(st) {
   return async () => {
-    while (i < qs.length) {
-      try { const items = await ytShortsSearch(qs[i++]); if (items.length) return shuffle(items); } catch { /* اللي بعدو */ }
-    }
-    return [];
+    const P = shProf.get(), now = Date.now();
+    const cand = new Map();
+    const add = (q, w) => { q = String(q || '').trim(); if (!q || q.length > 60) return; const k = q.toLowerCase(); if (shDecay(P.tp[k], now) < -2) return; cand.set(k, { q, w: Math.max(cand.has(k) ? cand.get(k).w : 0, w) }); };
+    store.get('searches', []).slice(0, 8).forEach((q, i) => add(q, 1.3 - i * 0.12));
+    for (const [k, x] of Object.entries(P.tp)) { const sc = shDecay(x, now); if (sc > 0.3) add(x.q || k, 0.6 + sc); }
+    const interests = shPick([...cand.values()], 2).map(x => x.q);
+    // استكشاف: موضوعين جداد (أو 3 إذا ما منعرف شي عنك بعد)
+    const explore = shPick(SH_EXPLORE.filter(q => !cand.has(q.toLowerCase())).map(q => ({ q, w: 1 })), interests.length ? 2 : 3).map(x => x.q);
+    const subsL = subs.list();
+    const sub = subsL.length ? subsL[Math.floor(Math.random() * subsL.length)] : null;
+    // بذرة سلسلة يوتيوب: اللي عم تحضرو هلّق، أو اللي فتحتو، أو شي عجبك مؤخراً
+    const seeds = [st && st.cur && st.cur._v && st.cur._v.id, st && st.seedId, ...P.seed.slice(0, 3)].filter(Boolean);
+    const seed = seeds[Math.floor(Math.random() * seeds.length)] || '';
+    const tag = (l, src, q) => (l || []).map(v => ({ ...v, short: true, _src: src, _q: q || '' }));
+    const intsP = Promise.all(interests.map(q => ytShortsSearch(q).then(l => tag(shuffle(l), 'int', q)).catch(() => [])));
+    const [ints, exps, seqL, subL] = await Promise.all([
+      intsP,
+      Promise.all(explore.map(q => ytShortsSearch(q).then(l => tag(shuffle(l), 'exp', q)).catch(() => []))),
+      // بلا بذرة (أول مرة): من أول شورت بنتيجة اهتماماتك
+      (seed ? ytReelSeq(seed) : intsP.then(ls => ytReelSeq(((ls.flat()[0]) || {}).id))).then(l => tag(l, 'seq')),
+      sub ? channelTab(sub.id, 'shorts').then(r => tag(shuffle(r.items || []).slice(0, 4).map(v => ({ ...v, author: v.author || sub.name, authorId: v.authorId || sub.id })), 'sub')).catch(() => []) : [],
+    ]);
+    // ورا بعض من كذا بحث (مش كلّو من بحث واحد)
+    const mixL = ls => { const out = []; for (let i = 0; ls.some(l => i < l.length); i++) ls.forEach(l => { if (l[i]) out.push(l[i]); }); return out; };
+    const seen = new Set(P.seen);
+    const fresh = v => v && v.id && !seen.has(v.id) && !(st && st.seen && st.seen.has(v.id)) && wanted(v);
+    const pools = { int: mixL(ints).filter(fresh), exp: mixL(exps).filter(fresh), seq: seqL.filter(fresh), sub: subL.filter(fresh) };
+    // مين صاحب كل شورت (لحتى ما يطلع نفس الشخص ورا بعض) — بالتوازي، وبحد أقصى ~3 ثواني
+    const look = Object.values(pools).flatMap(l => l.slice(0, 14)).filter(v => !v.author);
+    await Promise.race([Promise.all(look.map(v => shOwner(v).then(o => { v.author = o.name; if (!v.title) v.title = o.title; }).catch(() => {}))), new Promise(r => setTimeout(r, 3000))]);
+    // الدفعة: اهتماماتك تقريباً النص، والباقي يوتيوب/استكشاف/قنواتك — بالتناوب، ومع قيود التنوّع
+    const plan = ['int', 'seq', 'int', 'exp', 'int', 'sub', 'seq', 'int', 'exp', 'int', 'seq', 'int', 'sub', 'exp'];
+    const recent = (st && st.recentCh) || [];
+    const used = new Map(), perQ = new Map(), out = [];
+    const okCh = (v, loose) => {
+      if (!loose && v._q && (perQ.get(v._q) || 0) >= 4) return false; // ولا موضوع بياخد أكتر من 4 بالدفعة
+      const k = shCk({ name: v.author }); if (!k) return true; // ما عرفنا القناة: منعتبرها مختلفة
+      const sc = shDecay(P.ch[k], now);
+      if (sc <= -2) return false; // دايماً بتقلبها
+      if ((used.get(k) || 0) >= (loose && sc >= 3 ? 2 : 1)) return false;
+      return loose || !recent.includes(k);
+    };
+    const take = (src, loose) => {
+      const l = pools[src]; if (!l) return false;
+      const i = l.findIndex(v => okCh(v, loose)); if (i < 0) return false;
+      const v = l.splice(i, 1)[0], k = shCk({ name: v.author });
+      if (k) { used.set(k, (used.get(k) || 0) + 1); recent.push(k); if (recent.length > 8) recent.shift(); }
+      if (v._q) perQ.set(v._q, (perQ.get(v._q) || 0) + 1);
+      out.push(v); return true;
+    };
+    plan.forEach(src => take(src, false) || take('int', false) || take('exp', false));
+    for (const src of ['int', 'exp', 'seq', 'sub']) while (out.length < 10 && take(src, true)) { /* لحد ما تكمل الدفعة */ }
+    if (st) st.recentCh = recent;
+    return out;
   };
+}
+// الإشارات: كيف كان هالشورت معك؟ (بتنحفظ على جهازك بس)
+function shJudge(w) {
+  if (!w || !w.v || w.done) return; w.done = true;
+  const secs = (Date.now() - w.t0) / 1000, dur = w.dur || +w.v.duration || 0;
+  const frac = w.loops ? 1 : dur ? w.max / dur : 0;
+  let d = 0;
+  if (w.nope) d = -4;
+  else if (w.liked) d = 2.5;
+  else if (w.loops || frac >= 0.8) d = 1;
+  else if (frac >= 0.5) d = 0.3;
+  else if (w.started && secs < 3 && frac < 0.3) d = -1; // قلبتو بسرعة
+  const P = shProf.get();
+  if (!P.seen.includes(w.v.id)) { P.seen.push(w.v.id); if (P.seen.length > 800) P.seen.splice(0, P.seen.length - 800); }
+  if (!d) { shProf.save(P); return; }
+  if (w.v._q) shBump(P.tp, w.v._q, d > 0 ? Math.min(d, 1) : d * 0.5, w.v._q);
+  if (d > 0) {
+    shTags(w.v.title).forEach(t => shBump(P.tp, t, 0.6, t));
+    P.seed = [w.v.id, ...P.seed.filter(x => x !== w.v.id)].slice(0, 10);
+  }
+  shProf.save(P);
+  shOwner(w.v).then(o => { if (!shCk(o)) return; const Q = shProf.get(); shBump(Q.ch, shCk(o), d, o.name, 500); shProf.save(Q); }).catch(() => {});
 }
 const homeShorts = () => cached('home-shorts', 30 * 60e3, async () => {
   const f = shortsFeed(); let all = [];
@@ -809,6 +941,27 @@ function homeShortsRow() {
   return wrap;
 }
 
+/* لغة الصوت والترجمة بالشورتس — بينحفظو لكل الشورتس (shortsAud، cc، shortsCcLang) */
+const shLangName = l => { try { return new Intl.DisplayNames(['ar'], { type: 'language' }).of(l) || l; } catch { return l; } };
+function shortsAvRows(st) {
+  const ym = st.video.ym, sp = st.sp;
+  let langs = [];
+  try { if (!ym && sp) langs = sp.getAudioLanguagesAndRoles(); } catch { /* */ }
+  const audOpts = [['', 'الأصلي'], ['ar', 'العربي (إذا في دبلجة)']]
+    .concat(langs.filter(l => l.role !== 'main' && l.language !== 'ar').map(l => [l.language, shLangName(l.language)]));
+  const want = prefs.get('shortsAud') || '';
+  if (want && !audOpts.some(o => o[0] === want)) audOpts.push([want, shLangName(want)]);
+  const rows = [];
+  if (ym) {
+    // مشغّل يوتيوب المضمّن: ما بيسمح نغيّر الصوت من برّا (بيضل على اختيار يوتيوب)
+    rows.push({ type: 'action', icon: 'globe', label: 'لغة الصوت (بمشغّل يوتيوب ما بتتغيّر)', fn: () => note('هالشورت شغّال بمشغّل يوتيوب المضمّن، وهو ما بيسمحلنا نختار الصوت. بتطبيق Nuvio عالأندرويد أو بالكمبيوتر مع إضافة Nuvio بيشتغل بمشغّلنا وبيمشي اختيارك.') });
+  } else {
+    rows.push({ type: 'choice', icon: 'globe', label: 'لغة الصوت (لكل الشورتس)' + (langs.length > 1 ? ` — هون ${langs.length} لغات` : ''), options: audOpts, get: () => prefs.get('shortsAud') || '', set: x => { prefs.set('shortsAud', x); if (st.applyAud) st.applyAud(true); } });
+  }
+  rows.push({ type: 'toggle', icon: 'book', label: 'الترجمة', get: () => !!prefs.get('cc'), set: x => { prefs.set('cc', x); if (st.applyCc) st.applyCc(); } });
+  rows.push({ type: 'choice', icon: 'book', label: 'لغة الترجمة', options: [['ar', 'العربي (أو مترجمة تلقائياً)'], ['', 'لغة الفيديو']], get: () => prefs.get('shortsCcLang') || '', set: x => { prefs.set('shortsCcLang', x); if (st.applyCc) st.applyCc(); } });
+  return rows;
+}
 function shortsMenu(v, sl) {
   const st = shortsState; if (!st) return;
   const video = st.video;
@@ -818,11 +971,12 @@ function shortsMenu(v, sl) {
     { type: 'toggle', icon: 'bolt', label: 'ضغطة مطوّلة = تسريع', get: () => prefs.get('holdSpeed'), set: x => prefs.set('holdSpeed', x) },
     { type: 'choice', icon: 'bolt', label: 'سرعة الضغط المطوّل', options: HOLD_RATES.map(r => [r, `${r}×`]), get: () => +prefs.get('holdRate') || 2, set: x => prefs.set('holdRate', x) },
     { type: 'toggle', icon: 'music', label: 'كتم الصوت', get: () => video.muted, set: x => { video.muted = x; if (!x) video.play().catch(() => {}); } },
+    ...shortsAvRows(st),
     { type: 'choice', icon: 'wifi', label: 'توفير الإنترنت', options: [['auto', 'تلقائي'], ['on', 'دايماً (480p)'], ['off', 'أبداً']], get: () => prefs.get('saver'), set: x => { prefs.set('saver', x); if (st.sp) try { st.sp.configure(saverCfg()); } catch { /* */ } } },
-    { type: 'toggle', icon: 'eye', label: 'خبّي الأزرار (أو زوم بإصبعين)', get: () => !!prefs.get('shortsClean'), set: x => { if (st.setClean) st.setClean(x); } },
+    { type: 'toggle', icon: 'eye', label: 'خبّي الأزرار (أو كبّر الفيديو بإصبعين)', get: () => !!prefs.get('shortsClean'), set: x => { if (st.setClean) st.setClean(x); if (!x && st.resetZoom) st.resetZoom(); } },
     { type: 'action', icon: 'list', label: 'ضيف لقائمة تشغيل', fn: () => addToPlaylist(v) },
     { type: 'action', icon: 'later', label: queue.has(v.id) ? 'شيل من «شغّل بعدين»' : 'شغّل بعدين', fn: () => note(queue.toggle(v) ? 'انضاف لـ«شغّل بعدين» ✓' : 'انشال من «شغّل بعدين»') },
-    { type: 'action', icon: 'ban', label: 'مش مهتم', fn: () => { addNope('nope', v.id); note('تمام، ما رح نقترحلك ياه'); st.wrap.scrollBy({ top: st.wrap.clientHeight, behavior: 'smooth' }); } },
+    { type: 'action', icon: 'ban', label: 'مش مهتم', fn: () => { addNope('nope', v.id); if (st.watch && st.watch.v === v) st.watch.nope = true; note('تمام، ما رح نقترحلك ياه ولا كتير من هالقناة'); st.wrap.scrollBy({ top: st.wrap.clientHeight, behavior: 'smooth' }); } },
   ]);
 }
 
@@ -851,20 +1005,55 @@ async function renderShorts(startId, ch) {
   const drawMute = () => { mute.innerHTML = video.muted ? '<svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4z"/><path class="s" d="M16 9.5l5 5M21 9.5l-5 5"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4z"/><path class="s" d="M15.5 8.8a4.5 4.5 0 0 1 0 6.4M18.2 6.2a8.2 8.2 0 0 1 0 11.6"/></svg>'; };
   mute.onclick = e => { e.stopPropagation(); video.muted = !video.muted; drawMute(); if (!video.muted) video.play().catch(() => {}); };
   video.addEventListener('volumechange', drawMute); drawMute();
-  const s = shortsState = { wrap, video, sp: null, cur: null, seq: 0, seen: new Set(), more: null, busy: false, pre: new Map() };
-  // زوم بإصبعين (قرّب أو بعّد) = خبّي/رجّع الأزرار. بيضل متل ما هو حتى لمّا تقلب للشورت الجاي
+  const s = shortsState = { wrap, video, sp: null, cur: null, seq: 0, seen: new Set(), more: null, busy: false, pre: new Map(), recentCh: [], watch: null };
+  // الأزرار مخفية؟ (بيضل هيك حتى لمّا تقلب للشورت الجاي) — دائرة صغيرة تحت بترجّعها
   document.body.classList.toggle('shorts-clean', !!prefs.get('shortsClean'));
-  const setClean = on => { prefs.set('shortsClean', on); document.body.classList.toggle('shorts-clean', on); note(on ? 'الأزرار مخفية — زوم بإصبعين كمان مرة لترجّعها' : 'رجعت الأزرار'); };
-  let pinch0 = 0, pinched = false;
-  const dist = e => Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-  wrap.addEventListener('touchstart', e => { if (e.touches.length === 2) { pinch0 = dist(e); pinched = false; } }, { passive: true });
+  const unclean = el('button', 'shorts-unclean'); unclean.setAttribute('aria-label', 'رجّع الأزرار'); unclean.title = 'رجّع الأزرار';
+  unclean.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M6.2 17.8L17.8 6.2"/></svg>';
+  const setClean = (on, quiet) => {
+    prefs.set('shortsClean', on); document.body.classList.toggle('shorts-clean', on);
+    if (!quiet) note(on ? 'الأزرار مخفية — كبّس الدائرة تحت لترجّعها' : 'رجعت الأزرار');
+  };
+  unclean.onclick = e => { e.stopPropagation(); resetZoom(); setClean(false); };
+  /* زوم حقيقي بإصبعين: بيكبّر الفيديو (لحد 4×) وبيخبّي الأزرار. وهو مكبّر: إصبع واحد بيحرّكو، والتقليب واقف
+     لحد ما ترجّعو لحجمو (بإصبعين) أو تكبس الدائرة. الزوم ما بيعمل إعجاب ولا إيقاف (s.multiAt) */
+  const Z = { k: 1, x: 0, y: 0 };
+  let pz = null, pan = null;
+  s.multiAt = 0;
+  const zEls = () => [vEl, video.ym && video.ym.el].filter(Boolean);
+  const drawZoom = anim => {
+    const W = wrap.clientWidth, H = wrap.clientHeight, mx = (Z.k - 1) * W / 2, my = (Z.k - 1) * H / 2;
+    Z.x = Math.max(-mx, Math.min(mx, Z.x)); Z.y = Math.max(-my, Math.min(my, Z.y));
+    zEls().forEach(n => { n.style.transition = anim ? 'transform .2s' : 'none'; n.style.transform = Z.k > 1.001 ? `translate(${Z.x}px, ${Z.y}px) scale(${Z.k})` : ''; });
+    wrap.classList.toggle('zoomed', Z.k > 1.001);
+  };
+  const resetZoom = () => { Z.k = 1; Z.x = 0; Z.y = 0; drawZoom(true); };
+  s.resetZoom = resetZoom;
+  const two = e => { const [a, b] = e.touches; return { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 }; };
+  wrap.addEventListener('touchstart', e => {
+    if (e.touches.length >= 2) { s.multiAt = Date.now(); const t = two(e); pz = { d: t.d || 1, x: t.x, y: t.y, k: Z.k, zx: Z.x, zy: Z.y }; pan = null; }
+    else if (Z.k > 1.001) pan = { x: e.touches[0].clientX, y: e.touches[0].clientY, zx: Z.x, zy: Z.y };
+  }, { passive: true });
   wrap.addEventListener('touchmove', e => {
-    if (e.touches.length !== 2 || !pinch0) return;
-    if (e.cancelable) e.preventDefault(); // ما منخلّي الصفحة تكبر
-    const r = dist(e) / pinch0;
-    if (!pinched && (r > 1.18 || r < 0.85)) { pinched = true; setClean(!prefs.get('shortsClean')); }
+    if (e.touches.length >= 2 && pz) {
+      if (e.cancelable) e.preventDefault(); // ما منخلّي الصفحة كلّها تكبر
+      s.multiAt = Date.now();
+      const t = two(e);
+      Z.k = Math.max(1, Math.min(4, pz.k * t.d / pz.d));
+      Z.x = pz.zx + (t.x - pz.x); Z.y = pz.zy + (t.y - pz.y);
+      drawZoom(false);
+      if (Z.k > 1.08 && !prefs.get('shortsClean')) setClean(true);
+    } else if (pan && e.touches.length === 1 && Z.k > 1.001) {
+      if (e.cancelable) e.preventDefault();
+      Z.x = pan.zx + (e.touches[0].clientX - pan.x); Z.y = pan.zy + (e.touches[0].clientY - pan.y);
+      drawZoom(false);
+    }
   }, { passive: false });
-  wrap.addEventListener('touchend', e => { if (e.touches.length < 2) pinch0 = 0; }, { passive: true });
+  wrap.addEventListener('touchend', e => {
+    if (pz) s.multiAt = Date.now();
+    if (e.touches.length < 2) pz = null;
+    if (!e.touches.length) { pan = null; if (Z.k < 1.08) resetZoom(); }
+  }, { passive: true });
   s.setClean = setClean;
   const preloadShort = async v => {
     if (!s.sp || !s.sp.preload || s.pre.has(v.id) || shortsState !== s) return;
@@ -880,7 +1069,44 @@ async function renderShorts(startId, ch) {
   const shade = el('div', 'shorts-top');
   const ttl = el('div', 'shorts-ttl'); ttl.innerHTML = (window.ico ? window.ico('shorts') : '') + '<span>شورتس</span>';
   shade.append(ttl);
-  view.replaceChildren(wrap, shade, back, mute, nav);
+  view.replaceChildren(wrap, shade, back, mute, nav, unclean);
+  /* التشغيل بالخلفية عالتلفون: المتصفح بيوقّف الفيديو لمّا تطلع منو. متل المشغّل الكبير، منحوّل لملف الصوت لحالو
+     (من جهازك: الإضافة/التطبيق، أو سكربت الآيفون)، ولمّا ترجع منكمّل الفيديو من وين وصل الصوت.
+     بلا رابط صوت: منحاول نكمّل الفيديو نفسو (كروم عالأندرويد أحياناً بيسمح). */
+  const bgA = new Audio(); bgA.preload = 'none'; bgA.setAttribute('playsinline', '');
+  let bgUnlocked = false;
+  const bgUnlock = () => { // لازم يشتغل مرة جوّا كبسة منك، لحتى الآيفون يسمحلو بعدين
+    if (bgUnlocked || DESK_PTR) return; bgUnlocked = true;
+    try { bgA.muted = true; const p = bgA.play(); if (p && p.catch) p.catch(() => {}); bgA.pause(); } catch { /* */ }
+    setTimeout(() => { try { if (!s.bgOn) bgA.pause(); bgA.muted = false; } catch { /* */ } }, 0);
+  };
+  wrap.addEventListener('pointerup', bgUnlock, true);
+  const shBgPrep = (v, my) => {
+    if (DESK_PTR) return;
+    const set = u => { if (u && my === s.seq) s.bgUrl = u; };
+    if (typeof extUsable === 'function' && extUsable()) extManifest(v.id).then(m => set(extAudio(m.data))).catch(() => {});
+    else if (typeof gmUsable === 'function' && gmUsable()) cached('gmbg:' + v.id, 30 * 60e3, () => extPlayer(v.id).then(j => extAudio(extParse(v.id, j)))).then(set).catch(() => {});
+  };
+  const toBg = () => {
+    if (s.bgOn || shortsState !== s || s.userPaused || video.ym || DESK_PTR) return;
+    if (!s.bgUrl) { vEl.play().catch(() => {}); return; }
+    if (bgA.src !== s.bgUrl) bgA.src = s.bgUrl;
+    const t = vEl.currentTime || 0;
+    const go = () => { try { bgA.currentTime = t; } catch { /* */ } };
+    if (bgA.readyState > 0) go(); else bgA.addEventListener('loadedmetadata', go, { once: true });
+    bgA.loop = vEl.loop; bgA.playbackRate = vEl.playbackRate || 1; bgA.volume = vEl.muted ? 0 : vEl.volume;
+    bgA.play().then(() => { s.bgOn = true; if (!vEl.paused) vEl.pause(); }).catch(() => { vEl.play().catch(() => {}); });
+  };
+  const fromBg = () => {
+    if (!s.bgOn) return; s.bgOn = false;
+    const t = bgA.currentTime || 0; bgA.pause();
+    try { vEl.currentTime = t; } catch { /* */ }
+    if (!s.userPaused) vEl.play().catch(() => {});
+  };
+  const onVis = () => { if (shortsState !== s) { document.removeEventListener('visibilitychange', onVis); bgA.pause(); bgA.removeAttribute('src'); return; } if (document.hidden) { if (!vEl.paused) toBg(); } else fromBg(); };
+  document.addEventListener('visibilitychange', onVis);
+  s.stopBg = () => { s.bgOn = false; document.removeEventListener('visibilitychange', onVis); try { bgA.pause(); bgA.removeAttribute('src'); bgA.load(); } catch { /* */ } };
+  vEl.addEventListener('pause', () => { if (document.hidden && !s.userPaused && !s.bgOn) toBg(); }); // الآيفون بيوقّفو قبل ما يوصل الحدث
 
   const sideBtn = (icon, label, on, fn) => {
     const b = el('button', 'short-btn' + (on ? ' on' : ''));
@@ -890,6 +1116,7 @@ async function renderShorts(startId, ch) {
     return b;
   };
   const like = (sl, v) => {
+    if (s.watch && s.watch.v === v) s.watch.liked = true;
     if (!lib.has('likes', v.id)) lib.add('likes', v);
     const b = sl.querySelector('.short-btn'); if (b) b.classList.add('on');
     const h = el('div', 'short-heart'); h.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.3 3 4.5 6.7 4.5c2.1 0 3.6 1.1 5.3 3 1.7-1.9 3.2-3 5.3-3 3.7 0 5.8 3.8 4.3 7.3C19.5 16.4 12 21 12 21z"/></svg>';
@@ -908,7 +1135,7 @@ async function renderShorts(startId, ch) {
     const t = el('div', 'short-title', v.title || ''); t.dir = 'auto'; info.append(t);
     const side = el('div', 'short-side');
     side.append(
-      sideBtn('like', 'إعجاب', lib.has('likes', v.id), () => lib.toggle('likes', v)),
+      sideBtn('like', 'إعجاب', lib.has('likes', v.id), () => { const on = lib.toggle('likes', v); if (s.watch && s.watch.v === v) s.watch.liked = on; return on; }),
       sideBtn('saved', 'حفظ', lib.has('favs', v.id), () => lib.toggle('favs', v)),
       sideBtn('later', 'بعدين', queue.has(v.id), () => queue.toggle(v)),
       sideBtn('share', 'مشاركة', false, () => shareVideo(v)),
@@ -932,11 +1159,13 @@ async function renderShorts(startId, ch) {
     sl.append(poster, spin, info, side, bar, pp, fast, fail);
     // كبسة = إيقاف/تشغيل، كبستين = إعجاب، ضغطة مطوّلة = 2×
     let tapT = 0, lastTap = 0, holdT = 0, held = false;
+    const multi = () => Date.now() - s.multiAt < 600; // زوم بإصبعين (أو لسّا رافع الأصابع منّو)
     sl.addEventListener('pointerdown', e => {
       if (e.target.closest('a, button, .short-bar') || s.cur !== sl) return;
       clearTimeout(holdT);
       if (!prefs.get('holdSpeed')) return;
       holdT = setTimeout(() => {
+        if (multi() || Z.k > 1.001) return; // عم تكبّر أو تحرّك الصورة: مش تسريع
         held = true; const r = +prefs.get('holdRate') || 2;
         fast.textContent = `${r}× ⏩`; video.playbackRate = r;
         sl.classList.add('fast'); if (video.paused) video.play().catch(() => {});
@@ -948,13 +1177,16 @@ async function renderShorts(startId, ch) {
     sl.addEventListener('pointerup', e => {
       if (endHold()) return;
       if (e.target.closest('a, button, .short-bar') || s.cur !== sl) return;
+      if (multi() || !e.isPrimary) { clearTimeout(tapT); lastTap = 0; return; } // زوم: لا إعجاب ولا إيقاف
+      if (pan && (Math.abs(Z.x - pan.zx) > 6 || Math.abs(Z.y - pan.zy) > 6)) { lastTap = 0; return; } // كان عم يحرّك الصورة المكبّرة
       const now = Date.now();
       if (now - lastTap < 300) { clearTimeout(tapT); lastTap = 0; like(sl, v); return; }
       lastTap = now;
       clearTimeout(tapT);
       tapT = setTimeout(() => {
+        if (multi()) return;
         if (video.muted) { video.muted = false; video.play().catch(() => {}); return; }
-        if (video.paused) video.play().catch(() => {}); else video.pause();
+        if (video.paused) { s.userPaused = false; video.play().catch(() => {}); } else { s.userPaused = true; video.pause(); }
       }, 260);
     });
     sl.addEventListener('contextmenu', e => e.preventDefault());
@@ -1012,6 +1244,7 @@ async function renderShorts(startId, ch) {
         });
       }
       s.sp.configure(saverCfg());
+      s.sp.configure({ preferredAudioLanguage: prefs.get('shortsAud') || '' }); // فاضي = الأصلي (اللي يوتيوب معلّمو «original»)
       let ok = false;
       const pm = s.pre.get(v.id);
       if (pm) {
@@ -1034,20 +1267,78 @@ async function renderShorts(startId, ch) {
         await s.sp.load(await fixUrl(mp4.url), 0, 'video/mp4');
       }
       if (my !== s.seq) return;
+      s.applyAud(); s.applyCc(); // لغة الصوت والترجمة اللي اخترتها
       video.loop = !prefs.get('shortsAuto');
       video.playbackRate = +prefs.get('shortsRate') || 1;
-      try { await video.play(); } catch {
-        // الآيفون ما بيسمح بالصوت بلا كبسة: منشغّل بلا صوت، وكبسة وحدة بترجّعو
-        video.muted = true; video.play().catch(() => {});
+      s.userPaused = false;
+      try { await video.play(); } catch (e) {
+        // بس إذا المتصفح فعلاً منع الصوت (NotAllowedError): بلا صوت، وكبسة وحدة بترجّعو.
+        // (لمّا تقلب بسرعة، التشغيل القديم بينقطع بـ AbortError — هاد مش منع، وكان يكتم الصوت لحالو)
+        if (e && e.name === 'NotAllowedError' && my === s.seq) { video.muted = true; video.play().catch(() => {}); }
       }
       lib.add('hist', v);
+      shBgPrep(v, my); // رابط الصوت لحالو (للتشغيل بالخلفية عالتلفون)
     } catch {
       if (my === s.seq) { sl.classList.remove('loading'); sl.classList.add('fail'); }
     }
   };
+  // لغة الصوت: اختيارك إذا موجود بهالشورت، وإلا الأصلي
+  s.applyAud = fresh => {
+    const sp = s.sp; if (!sp || video.ym) return;
+    try {
+      if (fresh) { sp.configure({ preferredAudioLanguage: prefs.get('shortsAud') || '' }); for (const m of s.pre.values()) try { m.destroy(); } catch { /* */ } s.pre.clear(); }
+      const langs = sp.getAudioLanguagesAndRoles(); if (langs.length < 2) return;
+      const want = prefs.get('shortsAud') || '';
+      const t = (want && langs.find(l => l.language === want)) || langs.find(l => l.role === 'main') || langs[0];
+      const act = sp.getVariantTracks().find(x => x.active) || {};
+      if (act.language !== t.language || (t.role && !(act.audioRoles || []).includes(t.role))) sp.selectAudioLanguage(t.language, t.role || undefined);
+    } catch { /* */ }
+  };
+  // الترجمة: من نفس جواب يوتيوب (من جهازك). العربي إذا موجود، وإلا ترجمة يوتيوب التلقائية للعربي (tlang)
+  s.applyCc = async () => {
+    const sp = s.sp, my = s.seq, v = s.cur && s.cur._v;
+    if (video.ym) { try { video.ym.applyCc(); } catch { /* */ } return; } // مشغّل يوتيوب المضمّن بيعرف الترجمة لحالو
+    if (!sp || !v) return;
+    try { await sp.setTextTrackVisibility(false); } catch { /* */ }
+    if (!prefs.get('cc') || typeof extUsable !== 'function' || !extUsable()) return;
+    let caps = [];
+    try { caps = (await extManifest(v.id)).data.captions || []; } catch { return; }
+    if (my !== s.seq || !caps.length) return;
+    const want = prefs.get('shortsCcLang') || '', base = l => String(l || '').split('-')[0];
+    const own = want && (caps.find(c => base(c.lang) === want && !c.auto) || caps.find(c => base(c.lang) === want));
+    const src = own || caps.find(c => !c.auto) || caps[0];
+    const url = own || !want ? src.url : `${src.url}&tlang=${encodeURIComponent(want)}`;
+    try {
+      const tr = await sp.addTextTrackAsync(url, own || !want ? src.lang : want, 'subtitles', 'text/vtt', undefined, own || !want ? src.label : 'العربي (تلقائي)');
+      if (my !== s.seq) return;
+      sp.selectTextTrack(tr); await sp.setTextTrackVisibility(true);
+      drawCc();
+    } catch { /* يوتيوب ما عطى ترجمة هلّق */ }
+  };
+  // الترجمة بصندوق منّا فوق العنوان والأزرار (ترجمة المتصفح نفسو كانت تنقصّ عالجنب وتنخبى ورا الشريط السفلي)
+  const ccBox = el('div', 'short-cc'); const ccTxt = el('span'); ccBox.append(ccTxt); ccBox.dir = 'auto'; ccBox.hidden = true;
+  const drawCc = () => {
+    let txt = '';
+    try {
+      if (prefs.get('cc') && !video.ym) {
+        const t = [...vEl.textTracks].find(x => x.mode === 'showing');
+        const cs = t && t.activeCues ? [...t.activeCues] : [];
+        const c = cs.sort((a, b) => b.startTime - a.startTime)[0]; // ترجمة يوتيوب التلقائية بتتراكب: آخر وحدة بس
+        if (c) txt = (c.getCueAsHTML ? c.getCueAsHTML().textContent : c.text.replace(/<[^>]+>/g, '')).trim();
+      }
+    } catch { /* */ }
+    ccTxt.textContent = txt; ccBox.hidden = !txt;
+  };
+  vEl.textTracks.addEventListener('addtrack', e => { if (e.track) e.track.addEventListener('cuechange', drawCc); });
+  vEl.textTracks.addEventListener('change', drawCc);
   const activate = sl => {
     if (s.cur === sl) return;
     if (s.cur) s.cur.classList.remove('active', 'ready', 'paused', 'fast');
+    ccTxt.textContent = ''; ccBox.hidden = true; sl.append(ccBox);
+    if (Z.k > 1.001) resetZoom(); // الشورت الجاي بيبلّش بحجمو الطبيعي
+    s.bgUrl = '';
+    shJudge(s.watch); // كيف كان الشورت اللي قبلو؟ (للاقتراحات)
+    s.watch = { v: sl._v, t0: Date.now(), max: 0, last: 0, loops: 0, dur: 0, started: false };
     s.cur = sl; sl.classList.add('active');
     sl.insertBefore(vEl, sl.children[1] || null);
     video.playbackRate = 1;
@@ -1066,9 +1357,18 @@ async function renderShorts(startId, ch) {
   video.addEventListener('timeupdate', () => {
     const b = s.cur && s.cur.querySelector('.short-bar i');
     if (b && video.duration) b.style.width = `${(video.currentTime / video.duration) * 100}%`;
+    const w = s.watch; // قدّيش حضرت منو (ورجع من الأول؟)
+    if (w && s.cur && w.v === s.cur._v) {
+      const ct = video.currentTime || 0, d = video.duration || 0;
+      if (ct > 0.2) w.started = true;
+      if (d && isFinite(d)) w.dur = d;
+      if (w.dur && w.last > w.dur - 1.5 && ct < 1.5) w.loops++;
+      w.max = Math.max(w.max, ct); w.last = ct;
+    }
   });
   // الصورة بتضل لحد ما يبلّش الفيديو فعلاً (بدل شاشة سودا)
   video.addEventListener('ended', () => {
+    if (s.watch && s.cur && s.watch.v === s.cur._v) s.watch.loops++;
     if (!prefs.get('shortsAuto') || !s.cur) return;
     wrap.scrollBy({ top: wrap.clientHeight, behavior: 'smooth' });
   });
@@ -1096,13 +1396,15 @@ async function renderShorts(startId, ch) {
       let next = null, fetched = false;
       if (ctx) first = ctx.items;
       else { const r = await channelTab(ch, 'shorts'); first = r.items; next = r.next; fetched = true; }
+      let feed = null; // لمّا تخلص شورتس القناة: منكمّل بالخلاصة المتنوّعة (متل يوتيوب)
       s.more = async () => {
         if (!fetched) { fetched = true; const r = await channelTab(ch, 'shorts'); next = r.next; return r.items; }
-        if (!next) return [];
+        if (!next) { feed = feed || shortsFeed(s); return feed(); }
         const r = await channelTab(ch, 'shorts', '', next); next = r.next; return r.items;
       };
     } else {
-      s.more = shortsFeed();
+      s.seedId = startId || '';
+      s.more = shortsFeed(s);
       first = ctx ? ctx.items : await s.more();
     }
   } catch { /* */ }

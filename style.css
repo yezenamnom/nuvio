@@ -1864,3 +1864,20 @@ html.tv .np-bottom .np-row { height: 64px; }
 @media (max-width: 600px) { .watch-main { position: static; } }
 
 @media (max-width: 700px) { .v-actions { max-width: 100%; min-width: 0; } }
+
+/* ترجمة الشورتس: بصندوق منّا فوق العنوان (ترجمة المتصفح نفسها مخفية) */
+video.short-video::cue { color: transparent; background: transparent; }
+.short-cc { position: absolute; left: 64px; right: 64px; bottom: calc(22px + 9.5em); z-index: 3; text-align: center; pointer-events: none; }
+.short-cc[hidden] { display: none; }
+.short-cc span { display: inline; background: rgba(0, 0, 0, .66); color: #fff; font-size: 16.5px; line-height: 1.6; padding: 2px 8px; border-radius: 6px; white-space: pre-line; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+/* الشورتس: زوم حقيقي بإصبعين (وهو مكبّر: التقليب واقف، وإصبع واحد بيحرّك الصورة) + دائرة «رجّع الأزرار» */
+.shorts.zoomed { overflow: hidden !important; touch-action: none; }
+.shorts.zoomed .short-video, .shorts.zoomed .short-yt { will-change: transform; }
+.shorts-unclean { display: none; }
+body.shorts-clean .shorts-unclean {
+  display: flex; align-items: center; justify-content: center; position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(30px + env(safe-area-inset-bottom, 0px)); z-index: 75; width: 42px; height: 42px; padding: 0; border-radius: 50%;
+  background: rgba(0, 0, 0, .42); border: 1.5px solid rgba(255, 255, 255, .55); color: #fff; cursor: pointer;
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); opacity: .85;
+}
+body.shorts-clean .shorts-unclean svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
