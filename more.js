@@ -641,7 +641,8 @@ function drawerSettings(d, sep, closeDrawerFn) {
     sw('eye', 'خبّي اللي شفتو من المقترحات', () => prefs.get('hideWatched'), v => prefs.set('hideWatched', v)),
     // آيفون: سكربت الصوت بالخلفية (Userscripts)
     /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-      ? act('phones', document.documentElement.hasAttribute('data-nuvio-gm') ? 'صوت بالخلفية: السكربت شغّال ✓' : 'صوت بالخلفية عالآيفون (ركّب السكربت)', () => { location.href = 'ios.html'; })
+      ? act('phones', document.documentElement.hasAttribute('data-nuvio-gm') ? 'صوت بالخلفية: السكربت شغّال ✓'
+        : navigator.standalone ? 'صوت بالخلفية: افتح Nuvio من سفاري' : 'صوت بالخلفية عالآيفون (ركّب السكربت)', () => { location.href = 'ios.html'; })
       : null,
     // كمبيوتر: الفيديو الصغير والنافذة العايمة
     DESK_PTR ? sw('eye', 'معاينة لمّا تمرّق الماوس', () => prefs.get('hoverPreview') !== false, v => prefs.set('hoverPreview', v), 'الفيديو بيشتغل بلا صوت مكان الصورة') : null,

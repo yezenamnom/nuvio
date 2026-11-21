@@ -9,19 +9,23 @@
   :root { --bg: #0b1220; --card: #141c30; --line: #24304d; --text: #eef1f8; --muted: #9aa6c2; --accent: #a78bfa; --grad: linear-gradient(135deg, #8b5cf6, #ec4899); }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font-family: "Cairo", "Segoe UI", system-ui, -apple-system, sans-serif; line-height: 1.7; }
-  main { max-width: 640px; margin: 0 auto; padding: 24px 16px calc(32px + env(safe-area-inset-bottom)); }
+  main { max-width: 640px; margin: 0 auto; padding: calc(20px + env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom)); }
   h1 { font-size: 1.45rem; margin: 6px 0 4px; }
+  h2 { font-size: 1.05rem; margin: 22px 0 10px; }
   .lead { color: var(--muted); margin: 0 0 18px; }
   ol { list-style: none; padding: 0; margin: 0; counter-reset: s; }
-  li { counter-increment: s; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 14px 14px 14px; margin-bottom: 12px; position: relative; padding-inline-start: 52px; }
+  li { counter-increment: s; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; position: relative; padding-inline-start: 52px; }
   li::before { content: counter(s); position: absolute; inset-inline-start: 14px; top: 14px; width: 28px; height: 28px; border-radius: 50%; background: var(--grad); color: #fff; font-weight: 800; display: grid; place-items: center; font-size: .95rem; }
   li b { color: #fff; }
-  .btn { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; padding: 10px 18px; border-radius: 999px; background: var(--grad); color: #fff; font-weight: 800; text-decoration: none; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; padding: 10px 18px; border-radius: 999px; background: var(--grad); color: #fff; font-weight: 800; text-decoration: none; border: 0; font: inherit; font-weight: 800; cursor: pointer; }
   .btn.alt { background: var(--line); }
-  .ok { display: none; background: #0f2f22; border: 1px solid #1f7a52; color: #b9f5d6; border-radius: 14px; padding: 12px 14px; margin-bottom: 16px; }
-  .ok.on { display: block; }
+  .box { display: none; border-radius: 14px; padding: 12px 14px; margin-bottom: 16px; }
+  .box.on { display: block; }
+  .ok { background: #0f2f22; border: 1px solid #1f7a52; color: #b9f5d6; }
+  .warn { background: #3a2a0c; border: 1px solid #a7741c; color: #ffe2a8; }
   .muted { color: var(--muted); font-size: .9rem; }
   .back { color: var(--accent); text-decoration: none; font-weight: 700; }
+  code { direction: ltr; unicode-bidi: embed; background: rgba(255,255,255,.08); padding: 1px 6px; border-radius: 6px; font-size: .88em; }
 </style>
 </head>
 <body>
@@ -29,22 +33,44 @@
   <a class="back" href="./#/">‹ رجوع لـ Nuvio</a>
   <h1>صوت بالخلفية عالآيفون</h1>
   <p class="lead">سكربت صغير بيخلّي صوت الفيديو يضل شغّال لمّا تسكّر الشاشة أو تطلع من سفاري. الصوت بيجي من نت تلفونك مباشرة.</p>
-  <div id="ok" class="ok">✓ السكربت مركّب وشغّال على هالجهاز. افتح أي فيديو، وسكّر الشاشة — الصوت بيكمّل.</div>
+  <div id="ok" class="box ok">✓ السكربت مركّب وشغّال هون. افتح أي فيديو، وسكّر الشاشة — الصوت بيكمّل.</div>
+  <div id="pwa" class="box warn">⚠️ إنت فاتح Nuvio من أيقونة الشاشة الرئيسية. هون الآيفون ما بيشغّل إضافات سفاري (متل Userscripts) أبداً.<br>
+    افتح تطبيق <b>سفاري</b> نفسو واكتب <code>nuvio.glanzstar.de</code> — والصوت بالخلفية بالسكربت بيشتغل بس من سفاري.</div>
+
+  <h2>التركيب</h2>
   <ol>
-    <li>نزّل تطبيق <b>Userscripts</b> من App Store (مجاني، من غير إعلانات).<br>
+    <li>نزّل تطبيق <b>Userscripts</b> من App Store (مجاني).<br>
       <a class="btn alt" href="https://apps.apple.com/app/userscripts/id1463298887" rel="noopener">فتح App Store</a></li>
-    <li>افتح تطبيق Userscripts مرة وحدة، واكبس <b>Set Userscripts Directory</b> واختار أي مجلد (مثلاً «على الآيفون»).</li>
+    <li>افتح تطبيق Userscripts مرة وحدة، واكبس <b>Set Userscripts Directory</b> واختار مجلد (مثلاً «على الآيفون ← Userscripts»). تذكّر وين حطّيتو.</li>
     <li>روح على <b>الإعدادات ← تطبيقات ← سفاري ← الإضافات ← Userscripts</b>: شغّلها، وخلّي الإذن <b>«السماح»</b> لكل المواقع (أو على الأقل nuvio.glanzstar.de).</li>
-    <li>ارجع لهون بسفاري واكبس الزر:<br>
-      <a class="btn" href="nuvio-ios.user.js">ركّب السكربت</a><br>
-      <span class="muted">بيفتحلك صفحة فيها كود. اكبس زر <b>aA</b> (أو قطعة البازل 🧩) جنب العنوان ← <b>Userscripts</b> ← <b>Install</b>.</span></li>
-    <li>ارجع لـ Nuvio وحدّث الصفحة. بالقائمة ← الإعدادات لازم يطلع <b>«صوت بالخلفية: السكربت شغّال ✓»</b>.</li>
+    <li>نزّل ملف السكربت:<br>
+      <a class="btn" id="dl" href="nuvio-ios.user.js" download="nuvio-ios.user.js">⬇︎ تنزيل السكربت</a><br>
+      <span class="muted">إذا سألك «بدك تنزّل؟» اكبس <b>تنزيل</b>. الملف بيروح على <b>الملفات ← التنزيلات</b>.</span></li>
+    <li>افتح تطبيق <b>الملفات</b> ← <b>التنزيلات</b> ← اضغط مطوّل على <code>nuvio-ios.user.js</code> ← <b>نقل</b> ← اختار <b>مجلد Userscripts</b> (اللي اخترتو بالخطوة 2) ← <b>نقل</b>.</li>
+    <li>افتح <b>سفاري</b> على <code>nuvio.glanzstar.de</code> وحدّث الصفحة. بالقائمة ← الإعدادات لازم يطلع <b>«صوت بالخلفية: السكربت شغّال ✓»</b>.</li>
   </ol>
-  <p class="muted">السكربت بيعمل شغلة وحدة: بيطلب من يوتيوب رابط صوت الفيديو اللي عم تحضرو، من تلفونك نفسو. ما بيقرا شي تاني من الصفحة وما بيبعت شي لحدا. بتقدر تشيلو أي وقت من تطبيق Userscripts.</p>
+
+  <h2>أو بطريقة تانية (بلا تنزيل)</h2>
+  <p class="muted">بسفاري (مش من أيقونة الشاشة الرئيسية): افتح <a class="back" href="nuvio-ios.user.js">ملف السكربت</a> — بيطلع كود — اكبس <b>aA</b> أو <b>🧩</b> يسار شريط العنوان ← <b>Userscripts</b> ← <b>Install</b>.</p>
+
+  <p class="muted">السكربت بيعمل شغلة وحدة: بيطلب من يوتيوب رابط صوت الفيديو اللي عم تحضرو، من تلفونك نفسو. ما بيقرا شي تاني من الصفحة وما بيبعت شي لحدا. بتقدر تشيلو أي وقت (امسح الملف من مجلد Userscripts).</p>
 </main>
 <script>
+  // فاتح من أيقونة الشاشة الرئيسية؟ (الإضافات ما بتشتغل هونيك)
+  if (window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)) document.getElementById('pwa').classList.add('on');
   // إذا السكربت مركّب، بيحط علامة عالصفحة (بعد ما تنحمّل بشوي)
   setTimeout(function () { if (document.documentElement.hasAttribute('data-nuvio-gm')) document.getElementById('ok').classList.add('on'); }, 600);
+  // تنزيل أكيد: منجيب الملف ومنعطيه للتلفون كملف (حتى لو المتصفح فتحو كنص)
+  document.getElementById('dl').addEventListener('click', function (e) {
+    if (!window.fetch || !window.Blob || !window.URL) return; // المتصفح بيتصرّف لحالو
+    e.preventDefault();
+    var a = this;
+    fetch(a.getAttribute('href'), { cache: 'no-store' }).then(function (r) { return r.text(); }).then(function (t) {
+      var u = URL.createObjectURL(new Blob([t], { type: 'application/octet-stream' }));
+      var l = document.createElement('a'); l.href = u; l.download = 'nuvio-ios.user.js'; document.body.appendChild(l); l.click(); l.remove();
+      setTimeout(function () { URL.revokeObjectURL(u); }, 20000);
+    }).catch(function () { location.href = a.getAttribute('href'); });
+  });
 </script>
 </body>
 </html>
