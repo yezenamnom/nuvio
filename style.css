@@ -295,6 +295,13 @@ main { padding: 16px; max-width: 1500px; margin: 0 auto; }
   box-shadow: 0 0 0 3px rgba(236,72,153,.45); transform: scale(0); transition: transform .15s; pointer-events: none;
 }
 .np-bar:hover .np-knob, .np.drag .np-knob { transform: scale(1); }
+/* النقطة الدايرية بتبيّن وين وصل الفيديو كل ما تبيّن الأزرار (مش بس بالماوس)، وبتكبر لمّا تمسكها */
+.np.ui .np-knob, .np.paused .np-knob { transform: scale(1); }
+.np.drag .np-knob { transform: scale(1.35); }
+/* مساحة لمس أوسع حول الخط (أسهل تمسكو بإصبعك) — لتحت أكتر من لفوق لحتى ما تاكل من الأزرار */
+.np-bar::after { content: ""; position: absolute; left: -6px; right: -6px; top: -6px; bottom: -12px; }
+/* ماسك الشريط: الأزرار والشريط ما بيختفو مهما طوّلت */
+.np.drag .np-bottom { opacity: 1; transform: none; pointer-events: auto; }
 .np-tip {
   position: absolute; bottom: 22px; transform: translateX(-50%); background: rgba(15,15,25,.92); color: #fff;
   font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; opacity: 0; pointer-events: none; white-space: nowrap;
@@ -1763,12 +1770,23 @@ html:not(.tv) .np-bar { height: 10px; margin-bottom: -2px; }
 @media (max-width: 600px) and (orientation: portrait) {
   /* طول المشغّل حسب نسبة الفيديو الحقيقية (--vr = عرض÷طول، بيحطّها المشغّل لمّا يعرفها)، متل يوتيوب:
      العريض متل ما كان (16/10.4)، الـ4:3 والمربّع والطولي بيكبرو عالطول لحد 68% من الشاشة — وبيتحرّكو بنعومة */
+  /* ولمّا تنزل لتحت (--psy من app.js) بيصغر بالتدريج لحد الحجم العادي، وبيرجع يكبر لمّا تطلع.
+     الفرق بينحط فراغ تحتو (margin) لحتى المحتوى يضل لازق بأسفل الفيديو والصفحة ما تنطّ */
   body.watching .watch-main .player-box:not(.fakefs):not(.fs):not(.in-mini) {
+    --pmax: 68vh;
+    --pmin: calc(100vw * 10.4 / 16);
+    --ph0: min(max(calc(100vw / var(--vr, 1.7778)), var(--pmin)), var(--pmax));
+    --ph: max(min(var(--pmin), var(--ph0)), calc(var(--ph0) - var(--psy, 0px)));
     aspect-ratio: auto;
-    height: min(max(calc(100vw / var(--vr, 1.7778)), calc(100vw * 10.4 / 16)), 68vh);
-    height: min(max(calc(100vw / var(--vr, 1.7778)), calc(100vw * 10.4 / 16)), 68svh);
-    transition: height .35s ease;
+    height: var(--ph);
+    margin-bottom: calc(var(--ph0) - var(--ph));
+    transition: height .35s ease, margin-bottom .35s ease;
   }
+  @supports (height: 1svh) {
+    body.watching .watch-main .player-box:not(.fakefs):not(.fs):not(.in-mini) { --pmax: 68svh; }
+  }
+  /* وإنت عم تنزل: الطول بيلحق إصبعك فوراً */
+  body.watching .watch-main .player-box.psy:not(.fakefs):not(.fs):not(.in-mini) { transition: none; }
 }
 /* كروت التحميل الرمادية: الخطوط تحت الصورة دايماً (بلا ما تتمدّد) */
 .sk-card .meta { display: block !important; }
@@ -1892,3 +1910,10 @@ body.shorts-clean .shorts-unclean {
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); opacity: .85;
 }
 body.shorts-clean .shorts-unclean svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+/* التلفون: بعد ما تشيل إصبعك عن الشريط بيضل «فوقو» (hover عالق)، فكانت المعاينة والوقت يضلّو طالعين فوق الفيديو.
+   عالأجهزة اللمس بيبيّنو بس وإنت ماسك الشريط */
+@media (hover: none) {
+  .np:not(.drag) .np-bar:hover .np-tip, .np.has-sb:not(.drag) .np-bar:hover .np-sb { opacity: 0; }
+}
+/* وإنت عم تسحب: زر التشغيل بالنص بيختفي (ما بيعلق ورا صورة المعاينة) */
+.np.drag .np-big { opacity: 0 !important; pointer-events: none !important; }

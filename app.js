@@ -2216,6 +2216,7 @@ async function renderWatch(id, startTime) {
   main.append(box, info); layout.append(main, side);
   if (typeof commentsSection === 'function' && !tvOn()) main.append(commentsSection(id));
   floatOnScroll(box);
+  shrinkOnScroll(box);
   const ytInfo = ytiUsable() ? YtApi.watch(id).catch(() => null) : null;
   let shown = null; // المعلومات اللي انعرضت (من يوتيوب المباشر أو من السيرفر العام، اللي بيوصل أول)
   let histKey = ''; // وين انحفظ بالسجل بهالفتحة (hist أو mhist)
@@ -3301,6 +3302,25 @@ function floatOnScroll(box) {
   function stop() { removeEventListener('scroll', onScroll); removeEventListener('resize', onScroll); }
 }
 
+/* التلفون واقف: المشغّل الطويل (مربّع/طولي/4:3) بيصغر بالتدريج وإنت نازل لتحت لحد حجمو العادي، وبيرجع يكبر
+   بالتدريج وإنت طالع لفوق — متل يوتيوب. هون بس منحط قدّيش نزلت (--psy)، والطول بيحسبو style.css */
+function shrinkOnScroll(box) {
+  let raf = 0, last = -1;
+  const upd = () => {
+    raf = 0;
+    if (!box.isConnected) { stop(); return; }
+    const y = Math.max(0, Math.round(window.scrollY || 0)); // (الآيفون بيعطي سالب لمّا تشدّ فوق الأول)
+    if (y === last) return;
+    last = y;
+    box.style.setProperty('--psy', y + 'px');
+    box.classList.toggle('psy', y > 0); // وإنت عم تنزل: الطول بيلحق إصبعك فوراً (بلا تأخير الحركة)
+  };
+  const kick = () => { if (!raf) raf = requestAnimationFrame(upd); };
+  addEventListener('scroll', kick, { passive: true });
+  function stop() { removeEventListener('scroll', kick); }
+  kick();
+}
+
 /* ================= كمبيوتر: الفيديو الصغير بينسحب وين ما بدك، وبيكبر/بيصغر من زواياه =================
    (العايم لمّا تنزل بالصفحة، والكرت الصغير لمّا تروح لصفحة تانية) — ومنتذكّر مكانو وحجمو. كبستين عالمقبض = رجّعو لمحلّو */
 function winCtl(win, key, { ratio = 16 / 9, extraH = 0 } = {}) {
@@ -3567,7 +3587,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261121173257';
+const APP_VERSION = '20261121195717';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

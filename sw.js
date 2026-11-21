@@ -2,7 +2,7 @@
    - ملفات الموقع (الصفحة، التصميم، المشغّل…) من التخزين، ومنحدّثها بس لمّا تنزل نسخة جديدة (VERSION).
    - المكتبات الخارجية الثابتة (مشغّل Shaka والخط) بتنحفظ مرة وحدة.
    - الفيديوهات وبيانات السيرفرات ما بتنحفظ هون: بتنجاب وقتها. */
-const VERSION = '20261121173257';
+const VERSION = '20261121195717';
 const CACHE = 'nuvio-' + VERSION;
 const EXT = 'nuvio-ext-v1';
 const SHELL = ['./', 'index.html', 'style.css', 'player.js', 'app.js', 'music.js', 'more.js', 'acc.js', 'tv.js', 'manifest.json', 'icon-180.png', 'icon-192.png', 'icon-512.png'];

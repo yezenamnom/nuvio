@@ -193,8 +193,7 @@
       const parts = spec.split('|'), base = parts[0];
       const levels = parts.slice(1).map(x => x.split('#')).filter(x => x.length >= 8);
       if (!levels.length) return;
-      let L = levels.length - 1; // أول مستوى عرضو ≥ 120 (واضح وخفيف)
-      for (let i = 0; i < levels.length; i++) if (+levels[i][0] >= 120) { L = i; break; }
+      const L = levels.length - 1; // أوضح مستوى عندنا (الأكبر) — التلفونات شاشاتها كثيفة، والصغير بيطلع مغبّش
       const [w, h, count, cols, rows, interval, name, sigh] = levels[L];
       this.sb = { base, L, w: +w, h: +h, count: +count, cols: +cols, rows: +rows, interval: +interval, name, sigh, dur: +dur || 0 };
       this.box.classList.add('has-sb');
@@ -207,7 +206,14 @@
       idx = Math.max(0, Math.min(s.count - 1, idx));
       const per = s.cols * s.rows, page = Math.floor(idx / per), k = idx % per;
       const url = s.base.replace('$L', s.L).replace('$N', s.name.replace('$M', page)) + (s.sigh ? (s.base.includes('?') ? '&' : '?') + 'sigh=' + encodeURIComponent(s.sigh) : '');
-      const W = 168, sc = W / s.w, H = Math.round(s.h * sc);
+      // الحجم حسب شكل الفيديو (العريض لحد 160×90، الطولي والمربّع لحد 120 طول)،
+      // وما منكبّر الصورة أكتر من مرّة ونص من حجمها الأصلي — أكتر من هيك بتصير ممغوطة ومغبّشة
+      const ar = s.w / s.h;
+      let W = 160, H = W / ar;
+      if (H > 120) { H = 120; W = H * ar; }
+      if (W / s.w > 1.5) { W = s.w * 1.5; H = s.h * 1.5; }
+      W = Math.round(W); H = Math.round(H);
+      const sc = W / s.w;
       const bw = this.bar.clientWidth || 1, x = Math.max(W / 2, Math.min(bw - W / 2, f * bw));
       Object.assign(el.style, { width: W + 'px', height: H + 'px', left: x + 'px', backgroundImage: `url("${url}")`, backgroundSize: `${s.cols * s.w * sc}px ${s.rows * s.h * sc}px`, backgroundPosition: `-${(k % s.cols) * s.w * sc}px -${Math.floor(k / s.cols) * s.h * sc}px` });
     }
@@ -525,14 +531,31 @@
         this.tip.textContent = fmt(f * (v.duration || 0)) + (ct && ct.title ? `  •  ${ct.title}` : ''); this.tip.style.left = `${f * 100}%`;
         this._sbShow(f);
       };
-      this.bar.addEventListener('pointerdown', e => { drag = true; this.bar.setPointerCapture(e.pointerId); box.classList.add('drag'); const f = frac(e); peek(f); this._seekTo(f); });
+      // بالإصبع ومعنا صور معاينة: الفيديو بيقفز لمّا تشيل إصبعك (متل يوتيوب) — بلا قفزات ورا بعض بتعلّق الفيديو.
+      // الخط والنقطة والوقت بيلحقو إصبعك. بالماوس (أو بلا صور) القفز مباشر متل قبل.
+      let later = false;
+      const dragTo = f => { if (later) { this._dragF = f; this._progress(); } else this._seekTo(f); };
+      this.bar.addEventListener('pointerdown', e => {
+        drag = true; later = e.pointerType !== 'mouse' && !!this.sb;
+        try { this.bar.setPointerCapture(e.pointerId); } catch { /* */ }
+        box.classList.add('drag'); this._showUI(true); // ماسك الشريط: الأزرار ما بتختفي
+        const f = frac(e); peek(f); dragTo(f);
+      });
       this.bar.addEventListener('pointermove', e => {
         const f = frac(e);
         peek(f);
-        if (drag) this._seekTo(f);
+        if (drag) dragTo(f);
       });
-      const end = () => { drag = false; box.classList.remove('drag'); };
+      const end = e => {
+        if (!drag) return;
+        drag = false;
+        if (later && this._dragF != null && e.type === 'pointerup') this._seekTo(this._dragF);
+        this._dragF = null; later = false;
+        box.classList.remove('drag');
+        this._progress(); this._showUI(); // بعد ما تترك: الأزرار بتضل شوي وبعدين بتختفي
+      };
       this.bar.addEventListener('pointerup', end); this.bar.addEventListener('pointercancel', end);
+      this.bar.addEventListener('lostpointercapture', end);
 
       // ضغطة مطوّلة على الفيديو = سرعة 2× (متل يوتيوب)، ولمّا تشيل إصبعك بترجع متل ما كانت
       let holdT = 0, hx = 0, hy = 0, heldAt = 0;
@@ -717,6 +740,12 @@
     _progress() {
       const v = this.video, d = v.duration;
       if (!isFinite(d) || d <= 0) { this.time.textContent = `${fmt(v.currentTime)}`; return; }
+      if (this._dragF != null) { // عم تسحب بإصبعك: الخط والوقت محل إصبعك (الفيديو بيقفز لمّا تترك)
+        const f = this._dragF;
+        this.fill.style.width = `${f * 100}%`; this.knob.style.left = `${f * 100}%`;
+        this.time.textContent = `${fmt(f * d)} / ${fmt(d)}`;
+        return;
+      }
       const p = v.currentTime / d;
       this.fill.style.width = `${p * 100}%`;
       this.knob.style.left = `${p * 100}%`;
@@ -732,7 +761,7 @@
       clearTimeout(this._hideT);
       if (!stay && !this.video.paused) this._hideT = setTimeout(() => this._hideUI(), 2800);
     }
-    _hideUI() { if (!this._sheet && this.menu.hidden && !this.video.paused) this.box.classList.remove('ui'); }
+    _hideUI() { if (!this._sheet && this.menu.hidden && !this.video.paused && !this.box.classList.contains('drag')) this.box.classList.remove('ui'); } // ماسك الشريط؟ ما منخبّي شي
 
     /* ---------- الجودة ---------- */
     _tracks() {
