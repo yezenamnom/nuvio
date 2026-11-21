@@ -8,7 +8,8 @@
 ['gesturestart', 'gesturechange'].forEach(n => document.addEventListener(n, e => e.preventDefault(), { passive: false }));
 
 /* ================= الإعدادات ================= */
-const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto', theme: 'nuvio', holdSpeed: true, holdRate: 2, shortsAuto: false, shortsRate: 1, player: 'nuvio', homeSecs: null, preload: 'auto', cc: false };
+const PREF_DEFAULTS = { autoplay: true, sb: true, hideWatched: true, saver: 'auto', theme: 'nuvio', holdSpeed: true, holdRate: 2, shortsAuto: false, shortsRate: 1, player: 'nuvio', homeSecs: null, preload: 'auto', cc: false, autoPip: true, floatScroll: true };
+const DESK_PTR = !!(window.matchMedia && matchMedia('(hover: hover) and (pointer: fine)').matches); // كمبيوتر بماوس
 /* أقسام راس الرئيسية (فوق «مقترح لك»): الترتيب والتشغيل من الإعدادات */
 const HOME_SECS = [['searches', 'سجل البحث', 'search'], ['subs', 'القنوات', 'subs'], ['hist', 'آخر اللي شفتو', 'clock']];
 function homeSecs() {
@@ -184,9 +185,17 @@ const queue = {
 let openInMini = false; // الفيديو الجاي بيكمّل بالمشغّل الصغير إذا كان مصغّر
 function pickNext(curId, related, music, force) {
   if (playCtx) {
-    const i = playCtx.ids.indexOf(curId);
-    if (i >= 0 && i + 1 < playCtx.ids.length) return { v: playCtx.items[i + 1], fromList: playCtx.title };
-    if (i < 0 || i + 1 >= playCtx.ids.length) playCtx = i < 0 ? null : playCtx; // خلصت القائمة
+    const c = playCtx, i = c.ids.indexOf(curId);
+    if (i < 0) playCtx = null; // الفيديو مش من القائمة: طلعنا من وضع القائمة
+    else {
+      (c.played || (c.played = new Set())).add(curId);
+      if (c.shuffle) { // عشوائي: واحد ما انشاف من القائمة (ومع التكرار منبلّش دورة جديدة)
+        let rest = c.items.filter(v => !c.played.has(v.id));
+        if (!rest.length && c.loop) { c.played = new Set([curId]); rest = c.items.filter(v => v.id !== curId); }
+        if (rest.length) return { v: rest[Math.floor(Math.random() * rest.length)], fromList: c.title };
+      } else if (i + 1 < c.ids.length) return { v: c.items[i + 1], fromList: c.title };
+      else if (c.loop && c.items.length > 1) return { v: c.items[0], fromList: c.title }; // كرّر القائمة: من الأول
+    }
   }
   const q = queue.list().filter(v => v.id !== curId);
   if (q.length) return { v: q[0], fromQueue: true };
@@ -201,7 +210,7 @@ function goNext(nx) {
   if (nx.fromQueue) queue.remove(nx.v.id);
   preview.set(nx.v.id, nx.v);
   openInMini = !!miniOn;
-  location.hash = `#/watch?v=${encodeURIComponent(nx.v.id)}`;
+  location.hash = `#/watch?v=${encodeURIComponent(nx.v.id)}${nx.fromList ? plParam() : ''}`;
 }
 // «الجاي» فوق الفيديو لمّا يخلص، مع عدّ تنازلي وزر إلغاء
 function showUpNext(box, nx) {
@@ -573,6 +582,9 @@ function drawerSettings(d, sep, closeDrawerFn) {
     sw('skip', 'تخطّي الدعايات جوّا الفيديو', () => prefs.get('sb'), v => prefs.set('sb', v), 'بخدمة SponsorBlock المجانية'),
     sw('subs', 'الترجمة (CC)', () => !!prefs.get('cc'), v => prefs.set('cc', v), 'مطفية بالأساس — بتقدر تشغّلها من إعدادات الفيديو كمان'),
     sw('eye', 'خبّي اللي شفتو من المقترحات', () => prefs.get('hideWatched'), v => prefs.set('hideWatched', v)),
+    // كمبيوتر: الفيديو الصغير والنافذة العايمة
+    DESK_PTR ? sw('play', 'فيديو صغير لمّا تنزل بالصفحة', () => prefs.get('floatScroll') !== false, v => prefs.set('floatScroll', v), 'بيطلع عالطرف، وبتقدر تسحبو وتكبّرو من زواياه') : null,
+    DESK_PTR && window.documentPictureInPicture ? sw('later', 'نافذة عايمة لمّا تروح لتبويب تاني', () => prefs.get('autoPip') !== false, v => prefs.set('autoPip', v), 'الفيديو بيضل ظاهر فوق كل شي، حتى ببرامج تانية') : null,
     saverBtn,
     preBtn,
     tvBtn,
@@ -1234,14 +1246,125 @@ function addToPlaylist(v) {
   openPrefSheet('ضيف لقائمة تشغيل', rows);
 }
 // تشغيل قائمة: الفيديو الجاي من القائمة نفسها
-let playCtx = null; // { ids, title }
-function playList(videos, title, shuffleIt) {
+// playCtx: { ids, items, title, author, plid (قائمة يوتيوب) أو uid (قائمتك)، total, loop, shuffle, played }
+let playCtx = null;
+function playList(videos, title, shuffleIt, uid) {
   const list = shuffleIt ? shuffle(videos) : videos.slice();
   if (!list.length) return;
-  playCtx = { ids: list.map(v => v.id), items: list, title };
+  playCtx = { ids: list.map(v => v.id), items: list, title, uid: uid || '', total: list.length, loop: false, shuffle: false };
   list.forEach(v => preview.set(v.id, v));
   note(`عم نشغّل «${title}»`);
-  goNext({ v: list[0] });
+  goNext({ v: list[0], fromList: title });
+}
+// «&list=…» بالرابط (لحتى التحديث والمشاركة يرجّعو نفس القائمة)
+const plParam = () => (playCtx && playCtx.plid ? `&list=${encodeURIComponent(playCtx.plid)}` : playCtx && playCtx.uid ? `&list=u:${encodeURIComponent(playCtx.uid)}` : '');
+const plWatchHref = id => `#/watch?v=${encodeURIComponent(id)}${plParam()}`;
+
+/* ================= قوائم يوتيوب متل يوتيوب: لوحة جنب الفيديو، والجاي من القائمة ================= */
+// شبّاك من القائمة حوالين الفيديو (يوتيوب بيرجّع لحد ~200 فيديو)؛ بلا فيديو = من أول القائمة
+function ytPlaylistWin(plid, vid) {
+  return cached(`plw:${plid}:${vid || ''}`, 10 * 60e3, async () => {
+    const d = await yti('next', vid ? { videoId: vid, playlistId: plid } : { playlistId: plid });
+    const pl = (((d.contents || {}).twoColumnWatchNextResults || {}).playlist || {}).playlist;
+    if (!pl || !pl.contents) throw new Error('ما في قائمة');
+    const items = pl.contents.map(c => c.playlistPanelVideoRenderer).filter(r => r && r.videoId && !r.unplayableText).map(r => {
+      const by = ((r.shortBylineText || r.longBylineText || {}).runs || [])[0] || {};
+      return {
+        id: r.videoId, title: ytTxt(r.title), author: by.text || '', authorId: ((by.navigationEndpoint || {}).browseEndpoint || {}).browseId || '',
+        duration: durSec(ytTxt(r.lengthText)), thumb: ytThumb(r.videoId), idx: ((r.navigationEndpoint || {}).watchEndpoint || {}).index,
+      };
+    });
+    if (!items.length) throw new Error('القائمة فاضية');
+    const cur = ((d.currentVideoEndpoint || {}).watchEndpoint || {}).videoId || vid || items[0].id;
+    return { plid, title: ytTxt(pl.title) || ytTxt(pl.titleText), author: ytTxt(pl.ownerName) || ytTxt(pl.shortBylineText), total: +pl.totalVideos || items.length, items, cur };
+  });
+}
+function plCtxFrom(w, keep) {
+  const prev = keep && playCtx && playCtx.plid === w.plid ? playCtx : null;
+  // منضيف الشبّاك الجديد للي عنا (بلا تكرار)، مرتّب حسب رقم الفيديو بالقائمة
+  const map = new Map((prev ? prev.items : []).map(v => [v.id, v]));
+  w.items.forEach(v => map.set(v.id, v));
+  const items = [...map.values()].sort((a, b) => (a.idx ?? 0) - (b.idx ?? 0));
+  items.forEach(v => preview.set(v.id, v));
+  playCtx = { ids: items.map(v => v.id), items, title: w.title, author: w.author, plid: w.plid, total: w.total, loop: prev ? prev.loop : false, shuffle: prev ? prev.shuffle : false, played: prev ? prev.played : new Set() };
+}
+// #/watch?list=… (بلا فيديو): منبلّش من أول القائمة (أو عشوائي)
+async function startPlaylist(plid, shuffled) {
+  view.replaceChildren(el('div', 'loading', 'عم جهّز القائمة…'));
+  try {
+    const w = await ytPlaylistWin(plid);
+    plCtxFrom(w, false);
+    if (shuffled) playCtx.shuffle = true;
+    const first = shuffled ? playCtx.items[Math.floor(Math.random() * playCtx.items.length)] : playCtx.items.find(v => v.id === w.cur) || playCtx.items[0];
+    location.replace(`#/watch?v=${encodeURIComponent(first.id)}${plParam()}`);
+  } catch { view.replaceChildren(el('div', 'empty', 'ما قدرت جيب القائمة.')); }
+}
+// صفحة الفيديو: إذا في قائمة، منجهّزها ومنحط اللوحة (عالكمبيوتر فوق المشابه، عالتلفون تحت المعلومات)
+async function mountPlaylist(id, listParam, parts) {
+  if (!listParam) { if (playCtx && !playCtx.ids.includes(id)) playCtx = null; }
+  else if (listParam.startsWith('u:')) {
+    const p = plists.get(listParam.slice(2));
+    if (p && p.videos.length && (!playCtx || playCtx.uid !== p.id)) playCtx = { ids: p.videos.map(v => v.id), items: p.videos.slice(), title: p.title, uid: p.id, total: p.videos.length, loop: false, shuffle: false };
+  } else if (!playCtx || playCtx.plid !== listParam || !playCtx.ids.includes(id)) {
+    try { const w = await ytPlaylistWin(listParam, id); if (!parts.info.isConnected && active && active.id !== id) return; plCtxFrom(w, true); } catch { return; }
+  }
+  const c = playCtx;
+  if (!c || !c.ids.includes(id) || !parts.info.isConnected && !(active && active.id === id)) return;
+  // قربنا من آخر الشبّاك وبالقائمة أكتر؟ منجيب الشبّاك الجاي سلفاً
+  const i = c.ids.indexOf(id), last = c.items[c.items.length - 1];
+  if (c.plid && i >= c.ids.length - 3 && last && last.idx != null && last.idx + 1 < c.total) ytPlaylistWin(c.plid, last.id).then(w => { if (playCtx === c) { plCtxFrom(w, true); } }).catch(() => {});
+  const panel = playlistPanel(id);
+  const wide = matchMedia('(min-width: 1051px)');
+  const place = () => { if (!panel.isConnected && panel._placed) { wide.removeEventListener('change', place); return; } panel._placed = true; if (wide.matches) parts.side.prepend(panel); else parts.info.after(panel); panel.classList.toggle('folded', !wide.matches && !panel._open); };
+  place();
+  wide.addEventListener('change', place);
+}
+function playlistPanel(curId) {
+  const c = playCtx;
+  const p = el('section', 'pl-panel'); p.dir = 'rtl';
+  const i = c.ids.indexOf(curId);
+  const pos = c.items[i] && c.items[i].idx != null ? c.items[i].idx + 1 : i + 1;
+  const head = el('div', 'plp-head');
+  const tb = el('div', 'plp-tb');
+  const tt = el(c.plid || c.uid ? 'a' : 'div', 'plp-title', c.title || 'قائمة تشغيل'); tt.dir = 'auto';
+  if (c.plid) tt.href = `#/pl?id=${encodeURIComponent(c.plid)}`; else if (c.uid) tt.href = `#/plist?id=${encodeURIComponent(c.uid)}`;
+  const sub = el('div', 'plp-sub'); sub.dir = 'auto';
+  sub.textContent = `${pos.toLocaleString('ar')} / ${(c.total || c.ids.length).toLocaleString('ar')}${c.author ? ' · ' + c.author : ''}`;
+  const nxt = c.items[i + 1] || (c.loop ? c.items[0] : null);
+  const nx = el('div', 'plp-next', nxt ? `الجاي: ${nxt.title || ''}` : 'آخر فيديو بالقائمة'); nx.dir = 'auto';
+  tb.append(tt, sub, nx);
+  const btns = el('div', 'plp-btns');
+  const mkB = (svg, label, on) => { const b = el('button', 'plp-b' + (on ? ' on' : '')); b.innerHTML = svg; b.title = label; b.setAttribute('aria-label', label); return b; };
+  const bLoop = mkB('<svg viewBox="0 0 24 24"><path d="M17 2.5l3 3-3 3M4 11V9.5a4 4 0 0 1 4-4h12M7 21.5l-3-3 3-3M20 13v1.5a4 4 0 0 1-4 4H4"/></svg>', 'كرّر القائمة', c.loop);
+  const bShuf = mkB('<svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>', 'عشوائي', c.shuffle);
+  const bFold = mkB('<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>', 'صغّر/كبّر');
+  const bX = mkB('<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>', 'سكّر القائمة');
+  bLoop.onclick = e => { e.stopPropagation(); c.loop = !c.loop; bLoop.classList.toggle('on', c.loop); note(c.loop ? 'القائمة بتتكرّر ✓' : 'بلا تكرار'); };
+  bShuf.onclick = e => { e.stopPropagation(); c.shuffle = !c.shuffle; c.played = new Set([curId]); bShuf.classList.toggle('on', c.shuffle); note(c.shuffle ? 'عشوائي ✓' : 'بالترتيب'); };
+  bFold.onclick = e => { e.stopPropagation(); p._open = p.classList.contains('folded'); p.classList.toggle('folded'); };
+  bX.onclick = e => {
+    e.stopPropagation(); playCtx = null; p.remove();
+    history.replaceState(null, '', location.href.replace(/&list=[^&#]*/, '')); // الرابط بلا القائمة (بلا ما ينعاد تحميل الفيديو)
+  };
+  head.onclick = e => { if (p.classList.contains('folded') && !e.target.closest('a, button')) { p._open = true; p.classList.remove('folded'); } };
+  btns.append(bLoop, bShuf, bFold, bX);
+  head.append(tb, btns);
+  const list = el('div', 'plp-list');
+  c.items.forEach((v, k) => {
+    const a = el('a', 'plp-row' + (v.id === curId ? ' on' : '')); a.href = plWatchHref(v.id);
+    a.onclick = () => preview.set(v.id, v);
+    const n = el('span', 'plp-n', v.id === curId ? '▶' : ((v.idx != null ? v.idx : k) + 1).toLocaleString('ar'));
+    const th = el('span', 'plp-th'); const img = el('img'); img.alt = ''; img.loading = 'lazy'; img.decoding = 'async'; img.src = v.thumb || ytThumb(v.id); th.append(img);
+    if (v.duration) th.append(el('span', 'plp-dur', fmtT(v.duration)));
+    const meta = el('span', 'plp-meta');
+    const t = el('span', 'plp-t', v.title || ''); t.dir = 'auto';
+    meta.append(t, el('span', 'plp-a', v.author || ''));
+    a.append(n, th, meta); list.append(a);
+  });
+  p.append(head, list);
+  // الفيديو الحالي بنص اللوحة
+  requestAnimationFrame(() => requestAnimationFrame(() => { const on = list.querySelector('.on'); if (on) list.scrollTop = Math.max(0, on.offsetTop - list.offsetTop - 8); }));
+  return p;
 }
 function renderUserPlaylist(id) {
   const p = plists.get(id);
@@ -1256,9 +1379,9 @@ function renderUserPlaylist(id) {
   info.append(t, el('div', 'muted', `قائمتك · ${nf.format(p.videos.length)} فيديو`));
   const btns = el('div', 'pl-btns');
   const play = el('button', 'btn btn-main', '▶ شغّل الكل'); play.disabled = !p.videos.length;
-  play.onclick = () => playList(p.videos, p.title);
+  play.onclick = () => playList(p.videos, p.title, false, p.id);
   const shf = el('button', 'btn', '🔀 عشوائي'); shf.disabled = p.videos.length < 2;
-  shf.onclick = () => playList(p.videos, p.title, true);
+  shf.onclick = () => playList(p.videos, p.title, true, p.id);
   const more = el('button', 'btn', '⋮');
   more.onclick = () => openSheet(p.title, [
     ['folder', 'غيّر الاسم', async () => { const n = await askText('اسم جديد للقائمة', '', p.title); if (n) { p.title = n; plists.save(p); renderUserPlaylist(id); } }],

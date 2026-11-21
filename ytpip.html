@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ar">
+<head>
+<meta charset="utf-8">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Nuvio</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
+</head>
+<body>
+<script>
+/* وسيط صغير للنافذة العايمة (فوق كل شي): النافذة ما إلها عنوان، فمشغّل يوتيوب المضمّن جوّاها بيرفض (خطأ 153).
+   هالصفحة إلها عنوان من موقعنا: بتحط مشغّل يوتيوب جوّاها، وبتمرّق الرسايل بينو وبين مشغّلنا متل ما هي. */
+'use strict';
+(() => {
+  let src = '';
+  try { src = decodeURIComponent(location.hash.slice(1)); } catch { return; }
+  if (!/^https:\/\/www\.youtube-nocookie\.com\/embed\/[\w-]{11}\?/.test(src)) return; // بس مشغّل يوتيوب المضمّن
+  const f = document.createElement('iframe');
+  f.allow = 'autoplay; encrypted-media; picture-in-picture';
+  f.referrerPolicy = 'strict-origin-when-cross-origin';
+  f.src = src;
+  document.body.append(f);
+  addEventListener('message', e => {
+    if (e.source === f.contentWindow) parent.postMessage(e.data, location.origin); // من يوتيوب ← لمشغّلنا
+    // من مشغّلنا ← ليوتيوب (كود المشغّل بيشتغل بالصفحة الأصلية، فالمرسل مش «parent» بس نفس موقعنا)
+    else if (e.origin === location.origin && f.contentWindow) f.contentWindow.postMessage(e.data, 'https://www.youtube-nocookie.com');
+  });
+})();
+</script>
+</body>
+</html>

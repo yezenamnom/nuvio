@@ -2,7 +2,7 @@
    - ملفات الموقع (الصفحة، التصميم، المشغّل…) من التخزين، ومنحدّثها بس لمّا تنزل نسخة جديدة (VERSION).
    - المكتبات الخارجية الثابتة (مشغّل Shaka والخط) بتنحفظ مرة وحدة.
    - الفيديوهات وبيانات السيرفرات ما بتنحفظ هون: بتنجاب وقتها. */
-const VERSION = '20261121023534';
+const VERSION = '20261121032054';
 const CACHE = 'nuvio-' + VERSION;
 const EXT = 'nuvio-ext-v1';
 const SHELL = ['./', 'index.html', 'style.css', 'player.js', 'app.js', 'music.js', 'more.js', 'acc.js', 'tv.js', 'manifest.json', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
@@ -29,7 +29,7 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
 
   if (url.origin === self.location.origin) {
-    if (url.pathname.endsWith('version.txt') || url.pathname.endsWith('sw.js')) return; // دايماً من النت
+    if (url.pathname.endsWith('version.txt') || url.pathname.endsWith('sw.js') || url.pathname.endsWith('ytpip.html')) return; // دايماً من النت
     // طلب نسخة أحدث من اللي عندي (?v=…) بعد تحديث: منجيبها من النت، مش من التخزين القديم
     const want = url.searchParams.get('v');
     if (want && want !== VERSION) {

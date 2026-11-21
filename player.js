@@ -34,8 +34,10 @@
     get(k, d) { try { const v = localStorage.getItem('nuvio:p:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem('nuvio:p:' + k, JSON.stringify(v)); } catch { /* */ } },
   };
-  // لغة الصوت اللي اخترتها (فاضي = الأصلي) — app.js بيعطيها لـ Shaka قبل ما يبلّش الفيديو
-  window.nuvioAudPref = () => ls.get('aud', '');
+  // لغة الصوت لكل قناة لحالها: بالأساس الأصلي دايماً، وإذا غيّرت لقناة (مثلاً عربي لمستر بيست) كل فيديوهاتها بتصير هيك
+  // app.js بيعطيها لـ Shaka قبل ما يبلّش الفيديو (فاضي = الأصلي)
+  window.nuvioAudPref = ch => (ch && ls.get('audCh', {})[ch]) || '';
+  try { localStorage.removeItem('nuvio:p:aud'); } catch { /* */ } // الخيار القديم (لكل الفيديوهات) انلغى
   // أسماء اللغات بالعربي (ar → العربية، en → الإنجليزية…)
   const AR_LANG = (() => { try { return new Intl.DisplayNames(['ar'], { type: 'language' }); } catch { return null; } })();
   const langName = l => { if (!l || l === 'und') return 'غير محدّد'; try { return (AR_LANG && AR_LANG.of(l)) || l; } catch { return l; } };
@@ -102,8 +104,8 @@
       this.bCast = mk('button', 'np-btn', ICON.tv); this.bCast.title = 'عرض على شاشة'; this.bCast.setAttribute('aria-label', 'عرض على شاشة'); this.bCast.hidden = true;
       this.bCast.onclick = e => { e.stopPropagation(); this.cast(); };
       this.bPip = mk('button', 'np-btn', ICON.pip); this.bPip.title = 'شاشة عايمة'; this.bPip.setAttribute('aria-label', 'شاشة عايمة');
-      this.bPip.hidden = !(DESKTOP && this.canPip());
-      this.bPip.onclick = e => { e.stopPropagation(); this.pip().catch(() => {}); };
+      this.bPip.hidden = !(DESKTOP && (this.canDocPip() || this.canPip()));
+      this.bPip.onclick = e => { e.stopPropagation(); (this.canDocPip() ? this.docPip(false) : this.pip()).catch(() => {}); };
       row.append(this.bPlay, volWrap, this.time, this.chapEl, mk('div', 'np-space'), this.bCast, this.bCopy, this.qBadge, this.bPip, this.bGear, this.bFs);
       bottom.append(this.bar, row);
 
@@ -118,6 +120,9 @@
       this._bind();
       this._showUI();
       this._watchdog();
+      // النافذة العايمة لسّا مفتوحة من الفيديو اللي قبل (القائمة/التشغيل التلقائي نقل لفيديو تاني وانت برّا)؟ منكمّل فيها
+      const kw = DESKTOP && window.documentPictureInPicture && documentPictureInPicture.window;
+      if (kw && kw.__nuvioKeep) { const k = kw.__nuvioKeep; setTimeout(() => { if (!this.dead && kw.__nuvioKeep === k && box.parentNode) this.docPip(k.auto, kw).catch(() => {}); }, 0); }
     }
 
     /* ---------- ربط مع Shaka (للجودة) ---------- */
@@ -129,6 +134,19 @@
       }
       this.video.playbackRate = this.rate;
       this._updQ();
+    }
+    /* قناة الفيديو (لحتى لغة الصوت تكون حسب اختيارك لهالقناة، وإلا الأصلي) */
+    setChannel(ch) { if (!ch || ch === this.chId) return; this.chId = ch; this.applyAudioPref(); }
+    applyAudioPref() {
+      const sp = this.shaka; if (!sp || !sp.getAudioLanguagesAndRoles) return;
+      try {
+        const langs = sp.getAudioLanguagesAndRoles(); if (langs.length < 2) return;
+        const want = window.nuvioAudPref ? window.nuvioAudPref(this.chId) : '';
+        const target = (want && langs.find(l => l.language === want)) || langs.find(l => l.role === 'main');
+        const act = sp.getVariantTracks().find(t => t.active) || {};
+        if (!target || (act.language === target.language && (!target.role || (act.audioRoles || []).includes(target.role)))) return;
+        sp.selectAudioLanguage(target.language, target.role || undefined);
+      } catch { /* */ }
     }
     setMarks(segs) { this.segs = segs || []; this._drawMarks(); }
     setChapters(ch) { this.chapters = ch || []; this._drawMarks(); this._chapLabel(true); }
@@ -164,6 +182,7 @@
     setLowLayer(f) { this.low.style.width = `${Math.max(0, Math.min(1, f || 0)) * 100}%`; }
     message(t) { this.msgEl.textContent = t || ''; this.msgEl.classList.toggle('on', !!t); }
     destroy() {
+      if (this._pipWin) this._pipKeep(); // النافذة العايمة بتضل للفيديو الجاي (إذا ما إجا، بتسكّر لحالها)
       this.dead = true; clearInterval(this._wd); clearTimeout(this._hideT); clearTimeout(this._apT);
       if (this.opts.media && this.opts.media.destroy) this.opts.media.destroy();
       if (this._fakeFs) this._setFakeFs(false);
@@ -227,6 +246,68 @@
       }
       return false;
     }
+    /* ---------- نافذة عايمة فوق كل شي (حتى لو رحت لتبويب أو برنامج تاني) ----------
+       كروم وإيدج (Document Picture-in-Picture): المشغّل كلّو بأزرارنا — وحتى مشغّل يوتيوب المضمّن — بينتقل لنافذة صغيرة
+       بتقدر تحرّكها وتكبّرها وين ما بدك. غيرهن (فايرفوكس/سفاري): صورة داخل صورة العادية للفيديو بس. */
+    canDocPip() { return !!(DESKTOP && window.documentPictureInPicture); }
+    async docPip(auto, reuse) {
+      const DP = window.documentPictureInPicture;
+      if (!DP) return false;
+      if (this._pipWin) { this._pipWin.pw.close(); return true; } // مفتوحة: الكبسة التانية بترجّعو
+      let pw = reuse && !reuse.closed ? reuse : null;
+      if (!pw) {
+        if (DP.window) DP.window.close();
+        const r = this.box.getBoundingClientRect();
+        const w = Math.round(Math.min(Math.max(r.width || 480, 360), 720));
+        pw = await DP.requestWindow({ width: w, height: Math.round(w * 9 / 16) });
+        const d = pw.document;
+        for (const ss of document.styleSheets) { // نفس التصميم بالنافذة
+          try { const st = d.createElement('style'); st.textContent = [...ss.cssRules].map(x => x.cssText).join('\n'); d.head.append(st); }
+          catch { if (ss.href) { const l = d.createElement('link'); l.rel = 'stylesheet'; l.href = ss.href; d.head.append(l); } }
+        }
+        for (const a of document.documentElement.attributes) if (a.name !== 'style') d.documentElement.setAttribute(a.name, a.value);
+        d.body.classList.add('pip-body');
+      }
+      pw.__nuvioKeep = 0;
+      pw.document.title = document.title;
+      pw.document.body.replaceChildren();
+      // مكان الفيديو بالصفحة: «الفيديو بالنافذة العايمة — رجّعو لهون»
+      const ph = mk('div', 'pip-ph');
+      const back = mk('button', 'pip-back', ICON.pip + '<span>الفيديو شغّال بالنافذة العايمة</span><b>رجّعو لهون</b>');
+      back.onclick = e => { e.stopPropagation(); pw.close(); };
+      ph.append(back);
+      const box = this.box, playing = !this.video.paused;
+      box.before(ph);
+      box.classList.add('in-pip');
+      pw.document.body.append(box);
+      if (this.video.listenOn) this.video.listenOn(pw); // مشغّل يوتيوب المضمّن بيحكي مع النافذة اللي هو فيها
+      if (box._ytResume) box._ytResume(); else if (playing) this.video.play().catch(() => {});
+      // فتحت لحالها لمّا رحت لتبويب تاني؟ لمّا ترجع بترجع الفيديو مكانو
+      const onVis = () => { if (document.visibilityState === 'visible' && this._pipWin && this._pipWin.auto) pw.close(); };
+      document.addEventListener('visibilitychange', onVis);
+      this._pipWin = { pw, ph, auto: !!auto, onVis };
+      pw.addEventListener('pagehide', () => { if (this._pipWin && this._pipWin.pw === pw) this._pipHome(); }, { once: true });
+      return true;
+    }
+    _pipHome(noResume) {
+      const s = this._pipWin; if (!s) return;
+      this._pipWin = null;
+      document.removeEventListener('visibilitychange', s.onVis);
+      const box = this.box, playing = !this.video.paused;
+      box.classList.remove('in-pip');
+      if (s.ph.parentNode) { s.ph.parentNode.insertBefore(box, s.ph); s.ph.remove(); }
+      if (this.video.unlistenOn) this.video.unlistenOn(s.pw);
+      if (!noResume && !this.dead) { if (box._ytResume) box._ytResume(); else if (playing) this.video.play().catch(() => {}); }
+      if (!noResume && window.nuvioPipClosed) window.nuvioPipClosed(this);
+    }
+    _pipKeep() {
+      const s = this._pipWin; if (!s) return;
+      const pw = s.pw, k = { at: Date.now(), auto: s.auto };
+      this._pipHome(true);
+      pw.__nuvioKeep = k;
+      setTimeout(() => { if (pw.__nuvioKeep === k && !pw.closed) pw.close(); }, 6000);
+    }
+
     /* AirPlay على آيفون/ماك، أو Chromecast/عرض على شاشة بأندرويد وكروم */
     enableCast(on) { this.bCast.hidden = !on; }
     async cast() {
@@ -252,9 +333,11 @@
       set('seekforward', d => { const x = cur(); x.currentTime = x.currentTime + (d.seekOffset || 10); });
       set('seekto', d => { cur().currentTime = d.seekTime; });
       set('nexttrack', this.opts.onNext || null);
+      // رحت لتبويب تاني والفيديو شغّال: النافذة العايمة بتطلع لحالها (إذا الخيار شغّال والمتصفح بيسمح)
       if (DESKTOP) set('enterpictureinpicture', async () => {
-        if (this.dead || document.pictureInPictureElement || this.video.paused) return;
-        try { await this.video.requestPictureInPicture(); } catch { /* المتصفح ما سمح */ }
+        const P = window.nuvioPref;
+        if (this.dead || (P && P.get('autoPip') === false) || this._pipWin || document.pictureInPictureElement || this.video.paused) return;
+        try { if (this.canDocPip()) await this.docPip(true); else await this.video.requestPictureInPicture(); } catch { /* المتصفح ما سمح */ }
       });
     }
 
@@ -693,8 +776,11 @@
             // الأصلي أول، بعدو العربي، والباقي بالترتيب
             const list = langs.slice().sort((a, b) => (orig(b) - orig(a)) || ((b.language === 'ar') - (a.language === 'ar')) || name(a).localeCompare(name(b), 'ar'));
             const cur = list.find(l => l.language === act.language && (!l.role || (act.audioRoles || []).includes(l.role))) || list.find(l => l.language === act.language);
-            sh.append(row('au', 'المقطع الصوتي', cur ? name(cur) : '', () => sub('المقطع الصوتي',
-              list.map(l => [name(l), l === cur, () => { this.shaka.selectAudioLanguage(l.language, l.role || undefined); ls.set('aud', orig(l) ? '' : l.language); }]))));
+            sh.append(row('au', 'المقطع الصوتي', cur ? name(cur) : '', () => sub(this.chId ? 'المقطع الصوتي (لكل فيديوهات القناة)' : 'المقطع الصوتي',
+              list.map(l => [name(l), l === cur, () => {
+                this.shaka.selectAudioLanguage(l.language, l.role || undefined);
+                if (this.chId) { const m = ls.get('audCh', {}); if (orig(l)) delete m[this.chId]; else m[this.chId] = l.language; ls.set('audCh', m); } // بينحفظ لهالقناة بس
+              }]))));
           }
         } else if (this.opts.media && this.video.applyCc) {
           // مشغّل يوتيوب المضمّن: ما في أمر رسمي يغيّر لغة الصوت من برّا الإطار
@@ -799,7 +885,10 @@
       this.playsInline = true; this.preload = 'auto'; this.autoplay = true; this.poster = ''; this.disableRemotePlayback = true; this.error = null;
       this._onMsg = e => this._msg(e);
       window.addEventListener('message', this._onMsg);
-      f.addEventListener('load', () => { this._listen(); setTimeout(() => this._listen(), 400); setTimeout(() => this._listen(), 1200); });
+      f.addEventListener('load', () => {
+        const w = f.ownerDocument && f.ownerDocument.defaultView; if (w && w !== window) this.listenOn(w); // الإطار بالنافذة العايمة: رسايلو بتروح لهونيك
+        this._listen(); setTimeout(() => this._listen(), 400); setTimeout(() => this._listen(), 1200);
+      });
     }
     /* الموبايل (خاصة الآيفون) ما بيشغّل لحالو بالإطار رغم autoplay: منبعت «بلا صوت + شغّل» كذا مرة لحد ما يمشي */
     _kick() {
@@ -824,7 +913,9 @@
       this.loadAt = Date.now(); this._kicking = false;
       this._ccN = 0;
       const cc = YtMedia.ccOn() ? '&cc_load_policy=1&cc_lang_pref=ar' : '';
-      this.f.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(this.id)}?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&iv_load_policy=3&rel=0&playsinline=1&enablejsapi=1${cc}&start=${this.t0}&origin=${encodeURIComponent(location.origin)}&_=${Date.now()}`;
+      const url = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(this.id)}?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&iv_load_policy=3&rel=0&playsinline=1&enablejsapi=1${cc}&start=${this.t0}&origin=${encodeURIComponent(location.origin)}&_=${Date.now()}`;
+      // بالنافذة العايمة (بلا عنوان) يوتيوب بيرفض: منمرّق عبر صفحة وسيطة من موقعنا (ytpip.html)
+      this.f.src = this.f.ownerDocument !== document ? `${new URL('ytpip.html', location.href).href}#${encodeURIComponent(url)}` : url;
       this._emit('loadstart'); this._emit('waiting');
     }
     _post(o) { try { this.f.contentWindow.postMessage(JSON.stringify({ id: 'nuvio', channel: 'widget', ...o }), '*'); } catch { /* */ } }
@@ -918,7 +1009,14 @@
     set playbackRate(r) { this._wantRate = +r || 1; this.cmd('setPlaybackRate', [this._wantRate]); }
     play() { if (!this.revealed && !this.wantPlay) this.loadAt = Date.now(); this.wantPlay = true; this.cmd('playVideo'); this._kick(); return Promise.resolve(); }
     pause() { this.wantPlay = false; this.cmd('pauseVideo'); if (this.revealed && this.st !== 2 && this.st !== 0) { this.st = 2; this._emit('pause'); } }
-    destroy() { window.removeEventListener('message', this._onMsg); try { this.f.src = 'about:blank'; } catch { /* */ } }
+    // رسايل الإطار بتوصل للنافذة اللي هو فيها (الصفحة أو النافذة العايمة)
+    listenOn(w) { if (!w || w === window) return; (this._wins || (this._wins = new Set())).add(w); w.addEventListener('message', this._onMsg); }
+    unlistenOn(w) { if (!w || !this._wins) return; this._wins.delete(w); try { w.removeEventListener('message', this._onMsg); } catch { /* */ } }
+    destroy() {
+      window.removeEventListener('message', this._onMsg);
+      if (this._wins) { for (const w of this._wins) { try { w.removeEventListener('message', this._onMsg); } catch { /* */ } } this._wins.clear(); }
+      try { this.f.src = 'about:blank'; } catch { /* */ }
+    }
   }
   window.YtMedia = YtMedia;
   window.NuvioPlayer = NuvioPlayer;

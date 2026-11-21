@@ -1678,3 +1678,91 @@ body.has-guide .home-chips { margin-inline: -24px; padding-inline: 24px; }
 .np-sheet-ov.pop .np-sw:not(.on) { background: rgba(255, 255, 255, .3); }
 .np-note { padding: 12px 16px 14px; font-size: .88rem; line-height: 1.75; color: var(--muted); }
 .np-sheet-ov.pop .np-note { color: rgba(255, 255, 255, .78); }
+
+/* ===== قائمة التشغيل جنب الفيديو (متل يوتيوب) ===== */
+.pl-panel { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); max-height: min(560px, 72vh); }
+.plp-head { display: flex; align-items: flex-start; gap: 8px; padding: 12px 14px 10px; background: var(--card); }
+.plp-tb { flex: 1; min-width: 0; }
+.plp-title { display: block; font-weight: 800; font-size: 1.05rem; color: var(--text); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+a.plp-title:hover { text-decoration: underline; }
+.plp-sub { color: var(--muted); font-size: .8rem; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plp-next { display: none; color: var(--muted); font-size: .8rem; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plp-btns { display: flex; gap: 2px; flex-shrink: 0; margin-top: -4px; }
+.plp-b { width: 34px; height: 34px; border-radius: 50%; border: 0; background: none; color: var(--text); display: grid; place-items: center; cursor: pointer; }
+.plp-b:hover { background: var(--hover); }
+.plp-b.on { color: var(--accent); background: var(--hover); }
+.plp-b svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .2s; }
+.plp-b[aria-label="صغّر/كبّر"] svg { transform: rotate(180deg); }
+.plp-list { overflow-y: auto; padding: 4px 0 8px; overscroll-behavior: contain; scrollbar-width: thin; }
+.plp-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; color: var(--text); text-decoration: none; }
+.plp-row:hover { background: var(--hover); }
+.plp-row.on { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.plp-n { width: 22px; flex-shrink: 0; text-align: center; color: var(--muted); font-size: .78rem; }
+.plp-row.on .plp-n { color: var(--accent); font-size: .7rem; }
+.plp-th { position: relative; width: 100px; aspect-ratio: 16 / 9; flex-shrink: 0; border-radius: 8px; overflow: hidden; background: var(--card); }
+.plp-th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.plp-dur { position: absolute; bottom: 3px; left: 3px; background: rgba(0, 0, 0, .8); color: #fff; font-size: .68rem; font-weight: 700; padding: 0 4px; border-radius: 4px; direction: ltr; }
+.plp-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.plp-t { font-size: .85rem; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.plp-a { font-size: .75rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-panel.folded .plp-list { display: none; }
+.pl-panel.folded .plp-next { display: block; }
+.pl-panel.folded .plp-head { cursor: pointer; }
+.pl-panel.folded .plp-b[aria-label="صغّر/كبّر"] svg { transform: none; }
+@media (max-width: 1050px) { .pl-panel { margin: 14px 0 6px; max-height: 62vh; } }
+/* كرت القائمة: «شغّل الكل» فوق الصورة، و«عرض القائمة كاملة» تحت العنوان */
+.list-card .thumb { position: relative; }
+.list-card .list-play { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, .6); color: #fff; font-weight: 800; font-size: .95rem; opacity: 0; transition: opacity .2s; }
+.list-card:hover .list-play { opacity: 1; }
+.pl-full { display: inline-block; margin-top: 4px; font-size: .8rem; color: var(--muted); font-weight: 600; cursor: pointer; }
+.pl-full:hover { color: var(--text); text-decoration: underline; }
+.pl-top { margin: -4px 0 16px; }
+
+/* ===== الفيديو الصغير (كمبيوتر): مقبض للسحب فوق، وزوايا للتكبير/التصغير ===== */
+.win-ui { position: absolute; inset: 0; z-index: 45; pointer-events: none; opacity: 0; transition: opacity .18s; }
+.player-box.floating:hover .win-ui, .mini:hover .win-ui, .win-moving .win-ui { opacity: 1; }
+.win-grip, .win-rs { pointer-events: auto; position: absolute; display: grid; place-items: center; color: #fff; background: rgba(0, 0, 0, .62); }
+.win-grip { top: 6px; left: 50%; transform: translateX(-50%); width: 46px; height: 26px; border-radius: 999px; cursor: grab; }
+.win-moving .win-grip { cursor: grabbing; }
+.win-rs { width: 24px; height: 24px; border-radius: 7px; }
+.win-rs.nw { top: 4px; left: 4px; cursor: nwse-resize; }
+.win-rs.se { bottom: 4px; right: 4px; cursor: nwse-resize; }
+.win-rs.ne { top: 4px; right: 4px; cursor: nesw-resize; transform: scaleX(-1); }
+.win-rs.sw { bottom: 4px; left: 4px; cursor: nesw-resize; transform: scaleX(-1); }
+.win-grip svg, .win-rs svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.win-moving { transition: none !important; animation: none !important; user-select: none; }
+.win-moving iframe { pointer-events: none; }
+.player-box.floating .float-bar { left: 34px; }
+.mini .win-rs.sw, .mini .win-rs.se { bottom: 62px; } /* زوايا تحت الفيديو، مش تحت الكرت */
+.mini-pip svg { fill: none !important; stroke: currentColor !important; stroke-width: 2 !important; }
+
+/* ===== النافذة العايمة فوق كل شي (Document Picture-in-Picture) ===== */
+.pip-body { margin: 0; background: #000; overflow: hidden; }
+.player-box.in-pip { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; max-width: none !important; aspect-ratio: auto !important; margin: 0 !important; border-radius: 0 !important; transform: none !important; box-shadow: none !important; z-index: 1; }
+.pip-ph { aspect-ratio: 16 / 9; width: 100%; background: #000; border-radius: var(--radius); display: grid; place-items: center; }
+.mini-vid .pip-ph { border-radius: 0; height: 100%; }
+.pip-back { display: flex; flex-direction: column; align-items: center; gap: 8px; border: 0; background: none; color: #ddd; font: inherit; cursor: pointer; padding: 16px; text-align: center; }
+.pip-back svg { width: 46px; height: 46px; opacity: .8; }
+.pip-back b { color: #fff; background: rgba(255, 255, 255, .14); padding: 6px 16px; border-radius: 999px; font-size: .9rem; }
+.pip-back:hover b { background: rgba(255, 255, 255, .24); }
+.mini .mini-btn[aria-label="سكّر"] svg { fill: none; stroke-width: 2.2; stroke-linecap: round; } /* زر السكّر (ما عاد آخر عنصر بعد مقابض السحب) */
+
+/* ===== شريط التقدّم أقرب للأزرار (كمبيوتر)، وعالتلفون تحت خالص متل تطبيق يوتيوب ===== */
+html:not(.tv) .np-bottom { padding-bottom: 4px; }
+html:not(.tv) .np-bar { height: 10px; margin-bottom: -2px; }
+@media (max-width: 600px), (hover: none) and (pointer: coarse) {
+  html:not(.tv) .np-bottom { display: flex; flex-direction: column-reverse; padding: 20px 4px 0; }
+  html:not(.tv) .np-bar { height: 16px; margin: -4px 8px 0; }
+  html:not(.tv) .np-row { height: 38px; }
+}
+/* ===== التلفون واقف: مستطيل الفيديو أكبر شوي ===== */
+@media (max-width: 600px) and (orientation: portrait) {
+  body.watching .watch-main .player-box:not(.fakefs):not(.fs):not(.in-mini) { aspect-ratio: 16 / 10.4; }
+}
+/* كروت التحميل الرمادية: الخطوط تحت الصورة دايماً (بلا ما تتمدّد) */
+.sk-card .meta { display: block !important; }
+.sk-card .sk-line { grid-column: auto !important; }
+/* صف أزرار المشغّل: مش متل صفوف قائمة الإعدادات (كان ياخد طولها 56px وفراغاتها، فالشريط كان يطلع لفوق) */
+.np-bottom .np-row { min-height: 0 !important; padding: 0 !important; height: 44px; gap: 4px; width: auto; border-radius: 0; font-size: inherit; cursor: default; }
+@media (max-width: 600px), (hover: none) and (pointer: coarse) { html:not(.tv) .np-bottom .np-row { height: 40px; } }
+html.tv .np-bottom .np-row { height: 64px; }
