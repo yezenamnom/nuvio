@@ -1657,7 +1657,8 @@ body.has-guide .home-chips { margin-inline: -24px; padding-inline: 24px; }
 @media (min-width: 1100px) {
   .grid.feed { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px 16px; }
 }
-@media (min-width: 3000px) { .grid.feed { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* شاشة عريضة: 4 بالصف متل يوتيوب */
+@media (min-width: 1400px) { .grid.feed { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (min-width: 3800px) { .grid.feed { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 .grid.feed > .card { contain-intrinsic-size: auto 360px; }
 .grid.feed .thumb { border-radius: 12px; }

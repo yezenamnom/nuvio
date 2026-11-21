@@ -76,7 +76,7 @@ async function accLogout() {
   try { await accApi('/logout', { method: 'POST' }); } catch { /* */ }
   // تسجيل الخروج = بياناتك بتنمسح من هالجهاز (بتضل محفوظة بحسابك)
   for (const k of ACC_KEYS) if (k !== 'prefs') localStorage.removeItem('nuvio:' + k);
-  ['homeFeed', 'me', 'auth', 'chTopAt'].forEach(k => localStorage.removeItem('nuvio:' + k));
+  ['homeFeed', 'homePool', 'homeImp', 'me', 'auth', 'chTopAt'].forEach(k => localStorage.removeItem('nuvio:' + k));
   location.hash = '#/';
   location.reload();
 }

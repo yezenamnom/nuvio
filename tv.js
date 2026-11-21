@@ -212,9 +212,10 @@ async function renderTVHome() {
   focusFirst();
   // ٢) مقترح لك
   try {
-    var saved = store.get('homeFeed', null), items = [];
-    if (saved && saved.items && Date.now() - saved.at < 12 * 3600e3) items = saved.items;
-    if (items.length < 12) { var feed = makeHomeFeed(new Set()); for (var i = 0; i < 3 && items.length < 24; i++) items = items.concat(await feed()); }
+    // نفس خوارزمية الرئيسية (app.js: rankHome): كل فتحة بيتبدّل الترتيب شوي وبيطلع الجديد
+    var items = diversify(rankHome(homePool.load().items.filter(suggestOk)));
+    if (items.length < 12) { var feed = makeHomeFeed(new Set()); for (var i = 0; i < 3 && items.length < 24; i++) { var m = await feed(); if (!m.length) break; homePool.add(m); items = items.concat(m); } }
+    else setTimeout(refillHomePool, 3000);
     tvRow(rows, 'مقترح لك', uniqById(items).filter(suggestOk).slice(0, 30));
     focusFirst();
   } catch (e) { /* */ }

@@ -1119,9 +1119,12 @@ function arAgo(s) {
 
 /* خلاصة منوّعة: كل مصدر (فيديو شفتو، بحث عملتو، إعجاب، مواضيع عامة عشوائية) بياخد دور صغير بكل دفعة،
    وما في قناة وحدة بتاخد أكتر من فيديوين بالدفعة. لهيك ما بيغلب «مستر بيست» أو غيرو. */
-function makeHomeFeed(seen) {
-  const watched = new Set(lib.list('hist').map(v => v.id));
-  const hist = lib.list('hist').slice(0, 10), likes = lib.list('likes').slice(0, 5), favs = lib.list('favs').slice(0, 5);
+function makeHomeFeed(seen, opt = {}) {
+  const allHist = lib.list('hist');
+  const watched = new Set(allHist.map(v => v.id));
+  // explore (التعبئة بالخلفية): آخر 4 حضرتن + 6 عشوائيين من أقدم — كل مرّة مشابهات غير، فالتحديث بيجيب شي جديد
+  const hist = opt.explore && allHist.length > 10 ? allHist.slice(0, 4).concat(shuffle(allHist.slice(4, 60)).slice(0, 6)) : allHist.slice(0, 10);
+  const likes = lib.list('likes').slice(0, 5), favs = lib.list('favs').slice(0, 5);
   const searches = store.get('searches', []).slice(0, 6);
   const seeds = [];
   for (let i = 0; i < 10; i++) for (const v of [hist[i], likes[i], favs[i]]) if (v && !seeds.some(s => s.id === v.id)) seeds.push(v);
@@ -1131,16 +1134,20 @@ function makeHomeFeed(seen) {
   const relSrc = id => () => relatedOf(id);
   const chSrc = (id, n) => () => getChannel(id).then(r => r.res.items.slice(0, n));
   const subIds = new Set(store.get('subs', []).map(c => c.id));
-  const sources = [
+  // rel = قدّيش هالمصدر بيعبّر عن ذوقك (للترتيب بـ rankHome)، key = اسمو (فيديو بيطلع من مصدرين = بيناسبك أكتر)
+  const histRel = id => { const i = allHist.findIndex(h => h.id === id); return i >= 0 ? Math.max(0.4, 1 - i * 0.05) : 0.8; };
+  const list = [
     // متل يوتيوب: آخر شي حضرتو هو الأقوى (آخر 3 فيديوهات بياخدو دورين بكل جولة)
-    ...seeds.map((v, i) => ({ load: relSrc(v.id), w: i < 3 && hist.some(h => h.id === v.id) ? 2 : 1 })),
-    ...searches.map(q => ({ load: searchSrc(q) })),
-    ...shuffle(store.get('subs', [])).slice(0, 6).map(c => ({ load: chSrc(c.id, 8) })),
+    ...seeds.map((v, i) => ({ load: relSrc(v.id), w: i < 3 && hist.some(h => h.id === v.id) ? 2 : 1, rel: histRel(v.id), key: 'rel:' + v.id })),
+    ...searches.map((q, j) => ({ load: searchSrc(q), rel: 0.75 - j * 0.06, key: 'q:' + q })),
+    ...shuffle(store.get('subs', [])).slice(0, 6).map(c => ({ load: chSrc(c.id, 8), rel: 0.72, key: 'ch:' + c.id })),
     // قنوات بتحضرها كتير حتى لو مش مشترك فيها: أحدث فيديوهاتها
-    ...favChannels(4).filter(id => !subIds.has(id)).map(id => ({ load: chSrc(id, 6) })),
-    ...shuffle(GENERAL_TOPICS).slice(0, 2).map(q => ({ load: popSrc(q) })),
-    ...shuffle(GENERAL_TOPICS).slice(0, 2).map(q => ({ load: searchSrc(q) })),
+    ...favChannels(4).filter(id => !subIds.has(id)).map(id => ({ load: chSrc(id, 6), rel: 0.68, key: 'ch:' + id })),
+    ...shuffle(GENERAL_TOPICS).slice(0, 2).map(q => ({ load: popSrc(q), rel: 0.35, key: 'pop:' + q })),
+    ...shuffle(GENERAL_TOPICS).slice(0, 2).map(q => ({ load: searchSrc(q), rel: 0.3, key: 'tq:' + q })),
   ].map(s => ({ w: 1, ...s, pool: null, dead: false }));
+  // بالخلفية: المصادر بترتيب عشوائي (لحتى البحوث والقنوات والمواضيع ياخدو دورن، مش بس المشابهات)
+  const sources = opt.explore ? shuffle(list) : list;
   const expandIds = [];
   const ensure = s => {
     if (s.pool || s.dead) return Promise.resolve();
@@ -1150,8 +1157,9 @@ function makeHomeFeed(seen) {
   return async () => {
     for (let attempt = 0; attempt < 4; attempt++) {
       // منبلّش بلحد 5 مصادر سوا، بس منكمّل أول ما يجهز واحد منهن (ما منستنّى الأبطأ)
-      const pending = sources.filter(s => !s.pool && !s.dead).slice(0, 5).map(ensure);
-      if (pending.length && !sources.some(s => s.pool && s.pool.length)) {
+      const pending = sources.filter(s => !s.pool && !s.dead).slice(0, opt.explore ? 8 : 5).map(ensure);
+      if (opt.explore && pending.length) await Promise.race([Promise.allSettled(pending), sleep(6000)]); // بالخلفية ما في عجلة: منستنّى كل المصادر لحتى يتنوّعو
+      else if (pending.length && !sources.some(s => s.pool && s.pool.length)) {
         await Promise.race([
           Promise.any(pending.map(p => p.then(() => { if (!sources.some(s => s.pool && s.pool.length)) throw 0; }))).catch(() => {}),
           Promise.allSettled(pending),
@@ -1169,7 +1177,7 @@ function makeHomeFeed(seen) {
           const a = v.authorId || v.author || '';
           if ((perAuthor[a] || 0) >= 2) { s.pool.push(v); continue; }
           perAuthor[a] = (perAuthor[a] || 0) + 1;
-          seen.add(v.id); expandIds.push(v.id); out.push(v);
+          seen.add(v.id); expandIds.push(v.id); out.push({ ...v, _r: s.rel != null ? s.rel : 0.45, _s: s.key || '' });
           return;
         }
       };
@@ -1180,9 +1188,9 @@ function makeHomeFeed(seen) {
       if (sources.filter(s => !s.dead && (!s.pool || s.pool.length)).length < 6) {
         for (let k = 0; k < 3 && expandIds.length; k++) {
           const id = expandIds.splice(Math.floor(Math.random() * expandIds.length), 1)[0];
-          sources.push({ load: relSrc(id), w: 1, pool: null, dead: false });
+          sources.push({ load: relSrc(id), w: 1, rel: 0.45, key: 'rel:' + id, pool: null, dead: false });
         }
-        if (Math.random() < 0.5) sources.push({ load: popSrc(GENERAL_TOPICS[Math.floor(Math.random() * GENERAL_TOPICS.length)]), w: 1, pool: null, dead: false });
+        if (Math.random() < 0.5) { const q = GENERAL_TOPICS[Math.floor(Math.random() * GENERAL_TOPICS.length)]; sources.push({ load: popSrc(q), w: 1, rel: 0.35, key: 'pop:' + q, pool: null, dead: false }); }
       }
       if (out.length) return out;
       if (!sources.some(s => !s.dead && (!s.pool || s.pool.length))) return [];
@@ -1196,6 +1204,114 @@ function favChannels(n) {
   const cnt = {};
   for (const v of lib.list('hist').slice(0, 80)) if (v.authorId) cnt[v.authorId] = (cnt[v.authorId] || 0) + 1;
   return Object.entries(cnt).filter(([, k]) => k >= 2).sort((a, b) => b[1] - a[1]).slice(0, n).map(([id]) => id);
+}
+
+/* ================= خوارزمية «مقترح لك» (متل يوتيوب) =================
+   جرّبنا يوتيوب: بكل تحديث لنفس الصفحة بيضل ~75% من الاقتراحات بس بيتحرّكو كم محل (اللي تحت بيطلع واللي فوق بينزل)،
+   والأول تقريباً ثابت، و~25% جداد بيندسّو بالنص وفوق. وبلا سجل مشاهدة رئيسيتو فاضية: كلّو مبني على شو حضرت وشو بحثت.
+   هون:
+   ١) مخزن مرشّحين على جهازك (homePool): من مشابهات اللي حضرتو، بحوثك، قنواتك، ومواضيع عامة للاكتشاف — كل واحد معو قدّيش بيناسبك
+   ٢) بكل فتحة/تحديث منرتّبن من جديد (rankHome): المصدر + قناة بتحضرها/عجبتك + جديد + شعبي
+      − اللي مرق قدّامك كذا مرة وما فتحتو (بينزل لتحت وبيرجع مع الوقت) + شوية حظ (فبيتبدّل الترتيب بلا ما تتبدّل الصفحة كلها)
+   ٣) تنويع: ما بتطلع قناة وحدة أكتر من مرتين بكل 8 فيديوهات
+   ٤) بالخلفية منجيب مرشّحين جداد، وبيطلعو فوق بالتحديث الجاي */
+const impN = (e, now) => (e ? e.n * Math.pow(0.5, (now - e.t) / (3 * 86400e3)) : 0); // كل 3 أيام بتنسى نص المرّات
+const homeImp = {
+  load: () => store.get('homeImp', {}),
+  pending: new Set(), t: 0,
+  mark(id) { this.pending.add(id); clearTimeout(this.t); this.t = setTimeout(() => this.flush(), 2500); },
+  flush() {
+    if (!this.pending.size) return;
+    const m = this.load(), now = Date.now();
+    for (const id of this.pending) m[id] = { n: impN(m[id], now) + 1, t: now };
+    this.pending.clear();
+    for (const k of Object.keys(m)) if (now - m[k].t > 14 * 86400e3) delete m[k];
+    const keys = Object.keys(m);
+    if (keys.length > 900) keys.sort((a, b) => m[a].t - m[b].t).slice(0, keys.length - 900).forEach(k => delete m[k]);
+    store.set('homeImp', m);
+  },
+};
+addEventListener('pagehide', () => homeImp.flush());
+const homePool = {
+  load() { const p = store.get('homePool', null); return p && p.v === 3 && Array.isArray(p.items) ? p : { v: 3, at: 0, items: [] }; },
+  add(list, { stamp = true } = {}) {
+    const p = homePool.load(), by = new Map(p.items.map(x => [x.id, x])), now = Date.now();
+    for (const v of list || []) {
+      if (!v || !v.id) continue;
+      const r = typeof v._r === 'number' ? v._r : 0.5, s = v._s || '';
+      const o = by.get(v.id);
+      if (o) { o.r = Math.max(o.r, r); if (s && !o.s.includes(s)) o.s = [...o.s, s].slice(-4); continue; }
+      by.set(v.id, { ...slim(v), ts: v.ts || 0, r, s: s ? [s] : [], in: now });
+    }
+    // تنظيف: اللي حضرتو، «مش مهتم»، اللي صرلو بالمخزن أكتر من 3 أسابيع، واللي مرق قدّامك كتير وما فتحتو
+    const imp = homeImp.load();
+    let items = [...by.values()].filter(x => wanted(x) && !isWatched(x.id) && now - x.in < 21 * 86400e3 && impN(imp[x.id], now) < 6);
+    if (items.length > 300) items = items.sort((a, b) => (b.r - a.r) || (b.in - a.in)).slice(0, 300);
+    p.items = items; if (stamp) p.at = now;
+    store.set('homePool', p);
+    return p;
+  },
+};
+function rankHome(items, noise = 0.1) {
+  const now = Date.now(), nowS = now / 1000;
+  const chCount = {};
+  for (const v of lib.list('hist').slice(0, 120)) { const c = v.authorId || v.author; if (c) chCount[c] = (chCount[c] || 0) + 1; }
+  const liked = new Set(lib.list('likes').concat(lib.list('favs')).map(v => v.authorId).filter(Boolean));
+  const disliked = new Set(lib.list('dislikes').map(v => v.authorId).filter(Boolean));
+  const subCh = new Set(subs.list().map(c => c.id));
+  const imp = homeImp.load();
+  const gumbel = () => -Math.log(-Math.log(Math.random() * 0.9998 + 0.0001));
+  return items.map(v => {
+    let s = typeof v.r === 'number' ? v.r : typeof v._r === 'number' ? v._r : 0.5;
+    s += 0.08 * Math.min(3, ((v.s && v.s.length) || 1) - 1); // طلع من أكتر من مصدر
+    const ch = v.authorId || v.author || '';
+    s += 0.1 * Math.log2(1 + (chCount[ch] || 0)); // قناة بتحضرها
+    if (liked.has(v.authorId)) s += 0.1;
+    if (subCh.has(v.authorId)) s += 0.08;
+    if (disliked.has(v.authorId)) s -= 0.35;
+    if (v.ts > 0) { const d = (nowS - v.ts) / 86400; s += d < 2 ? 0.14 : d < 7 ? 0.09 : d < 30 ? 0.04 : d > 1000 ? -0.03 : 0; } // الجديد
+    if (v.views > 0) s += 0.035 * Math.max(0, Math.log10(v.views) - 3); // الشعبي (شوي)
+    const n = impN(imp[v.id], now);
+    if (!n && v.in && now - v.in < 2 * 86400e3) s += 0.08; // لسّا واصل وما شفتو
+    s -= 0.13 * n; // مرق قدّامك وما فتحتو
+    return { v, k: s + noise * gumbel() };
+  }).sort((a, b) => b.k - a.k).map(x => x.v);
+}
+/* ما بتطلع قناة وحدة أكتر من max مرات بكل win فيديوهات (اللي بيزيد بيتأجّل لتحت شوي) */
+function diversify(list, win = 8, max = 2) {
+  const out = [], wait = [];
+  const chOf = v => v.authorId || v.author || '';
+  const ok = v => { const c = chOf(v); if (!c) return true; let k = 0; for (let i = Math.max(0, out.length - win + 1); i < out.length; i++) if (chOf(out[i]) === c) k++; return k < max; };
+  for (const v of list) {
+    for (let i = 0; i < wait.length; i++) if (ok(wait[i])) { out.push(wait.splice(i, 1)[0]); i--; }
+    if (ok(v)) out.push(v); else wait.push(v);
+  }
+  return out.concat(wait);
+}
+/* بالخلفية: مرشّحين جداد للتحديث الجاي */
+let poolFilling = false;
+async function refillHomePool() {
+  if (poolFilling || navigator.onLine === false) return;
+  poolFilling = true;
+  try {
+    const f = makeHomeFeed(new Set(homePool.load().items.map(v => v.id)), { explore: true });
+    for (let k = 0; k < 3; k++) { const m = await f(); if (!m.length) break; homePool.add(m); }
+  } catch { /* */ } finally { poolFilling = false; }
+}
+/* «شافها»: الكرت ضل 60% منو قدّامك ثانية كاملة */
+function impressionWatcher(g) {
+  if (!('IntersectionObserver' in window)) return null;
+  const timers = new Map(), done = new Set();
+  const io = new IntersectionObserver(es => {
+    if (!g.isConnected) { io.disconnect(); timers.forEach(clearTimeout); return; }
+    for (const e of es) {
+      const id = e.target.dataset.vid;
+      if (!id || done.has(id)) continue;
+      if (e.isIntersecting) { if (!timers.has(id)) timers.set(id, setTimeout(() => { done.add(id); timers.delete(id); homeImp.mark(id); io.unobserve(e.target); }, 1000)); }
+      else { clearTimeout(timers.get(id)); timers.delete(id); }
+    }
+  }, { threshold: 0.6 });
+  return c => io.observe(c);
 }
 
 /* ---- شرائح المواضيع فوق الرئيسية (متل يوتيوب): «الكل» = خلاصتك، والباقي خلاصة لموضوع واحد ---- */
@@ -1428,42 +1544,46 @@ async function renderHome(force) {
   const personal = store.get('searches', []).length || subs.list().length || lib.list('hist').length;
   // ٤) مقترح لك (بيتحمّل شوي شوي مع التمرير)
   view.append(sectionHead(personal ? 'مقترح لك' : 'مقترحات'));
-  const g = el('div', 'grid feed'); g.append(skCards(9));
+  const g = el('div', 'grid feed'); g.append(skCards(12));
   view.append(g);
   const seen = new Set();
   const feed = makeHomeFeed(seen);
-  // القائمة بتنحفظ على الجهاز: لمّا تفتح الموقع بتلاقي آخر قائمة فوراً، وبتتجدّد بس بالسحب للتحديث
-  const kept = [];
-  const keep = items => { kept.push(...items.map(slim)); if (kept.length <= 120) store.set('homeFeed', { at: Date.now(), items: kept, v: 2 }); };
-  const saved = !force && store.get('homeFeed', null);
+  const seenBy = impressionWatcher(g);
+  const add = v => { const c = card(v); c.dataset.vid = v.id; g.append(c); if (seenBy) seenBy(c); };
+  // الخلاصة القديمة (قبل الخوارزمية): منحطّها بالمخزن لحتى ما تفتح عالفاضي، ومنمسحها
+  const old = store.get('homeFeed', null);
+  if (old) { try { localStorage.removeItem('nuvio:homeFeed'); } catch { /* */ } if (!homePool.load().items.length && Array.isArray(old.items)) homePool.add(old.items.map(v => ({ ...v, _r: 0.5, _s: 'old' })), { stamp: false }); }
   try {
-    let first = [];
-    // (v: 2 = الخوارزمية الجديدة؛ القديمة كان فيها رائج أمريكي — منتركها)
-    if (saved && saved.v === 2 && saved.items && saved.items.length && Date.now() - saved.at < 3 * 86400e3) {
-      first = saved.items.filter(v => v && v.id);
-      first.forEach(v => seen.add(v.id));
-      kept.push(...first);
-      // صارت قديمة (أكتر من 6 ساعات)؟ منجهّز وحدة جديدة بالخلفية، وبتبيّن بالفتحة الجاية (بلا ما تنط الصفحة هلّق)
-      if (Date.now() - saved.at > 6 * 3600e3) makeHomeFeed(new Set())().then(m => { if (m && m.length) store.set('homeFeed', { at: Date.now(), items: m.map(slim), v: 2 }); }).catch(() => {});
-    } else {
-      first = await feed();
-      keep(first);
+    let p = homePool.load();
+    const usable = () => p.items.filter(suggestOk).length;
+    if (usable() < 12) {
+      // أول مرة: منستنّى أول دفعة
+      for (let k = 0; usable() < 12 && k < 4; k++) { const m = await feed(); if (!m.length) break; p = homePool.add(m); }
+    } else if (force) {
+      // سحبت للتحديث: منجيب دفعة جديدة (بلا ما نستنّى أكتر من 4.5 ثواني)، وبتطلع فوق
+      const m = await Promise.race([feed(), sleep(4500).then(() => [])]).catch(() => []);
+      if (m.length) p = homePool.add(m);
     }
-    let shownFirst = first.filter(suggestOk);
-    for (let k = 0; !shownFirst.length && k < 3; k++) { const m = await feed(); keep(m); shownFirst = m.filter(suggestOk); if (!m.length) break; }
-    // أول دفعة لازم تعبّي صفّين عالأقل (عالشاشات الكبيرة)
-    for (let k = 0; shownFirst.length < 12 && k < 2; k++) { const m = await feed(); keep(m); shownFirst = shownFirst.concat(m.filter(suggestOk)); if (!m.length) break; }
+    const ranked = diversify(rankHome(p.items.filter(suggestOk)));
+    ranked.forEach(v => seen.add(v.id));
     if (!g.isConnected) return;
     g.replaceChildren();
-    if (!shownFirst.length) throw new Error('فاضي');
-    shownFirst.forEach(v => g.append(card(v)));
+    if (!ranked.length) throw new Error('فاضي');
+    let at = Math.min(24, ranked.length);
+    ranked.slice(0, at).forEach(add);
     // رف الشورتس جوّا الخلاصة: بعد صفّين كاملين (متل يوتيوب)
     if (ytiUsable()) {
       const sr = homeShortsRow();
-      const at = gridCols(g) * 2;
-      if (g.children.length > at) g.insertBefore(sr, g.children[at]); else g.append(sr);
+      const at2 = gridCols(g) * 2;
+      if (g.children.length > at2) g.insertBefore(sr, g.children[at2]); else g.append(sr);
     }
-    infinite(g, async () => { const more = await feed(); more.filter(suggestOk).forEach(v => g.append(card(v))); keep(more); return more.length > 0; });
+    infinite(g, async () => {
+      if (at < ranked.length) { ranked.slice(at, at + 12).forEach(add); at += 12; return true; }
+      const more = await feed(); more.filter(suggestOk).forEach(add); if (more.length) homePool.add(more, { stamp: false });
+      return more.length > 0;
+    });
+    // مرشّحين جداد للتحديث الجاي (مش أكتر من مرّة كل 3 دقايق)
+    if (Date.now() - (p.at || 0) > 3 * 60e3) setTimeout(refillHomePool, 1500);
   } catch {
     if (!g.isConnected) return;
     const d = el('div', 'empty');
@@ -3587,7 +3707,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261121195717';
+const APP_VERSION = '20261122001739';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
