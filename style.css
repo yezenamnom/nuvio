@@ -1761,7 +1761,14 @@ html:not(.tv) .np-bar { height: 10px; margin-bottom: -2px; }
 }
 /* ===== التلفون واقف: مستطيل الفيديو أكبر شوي ===== */
 @media (max-width: 600px) and (orientation: portrait) {
-  body.watching .watch-main .player-box:not(.fakefs):not(.fs):not(.in-mini) { aspect-ratio: 16 / 10.4; }
+  /* طول المشغّل حسب نسبة الفيديو الحقيقية (--vr = عرض÷طول، بيحطّها المشغّل لمّا يعرفها)، متل يوتيوب:
+     العريض متل ما كان (16/10.4)، الـ4:3 والمربّع والطولي بيكبرو عالطول لحد 68% من الشاشة — وبيتحرّكو بنعومة */
+  body.watching .watch-main .player-box:not(.fakefs):not(.fs):not(.in-mini) {
+    aspect-ratio: auto;
+    height: min(max(calc(100vw / var(--vr, 1.7778)), calc(100vw * 10.4 / 16)), 68vh);
+    height: min(max(calc(100vw / var(--vr, 1.7778)), calc(100vw * 10.4 / 16)), 68svh);
+    transition: height .35s ease;
+  }
 }
 /* كروت التحميل الرمادية: الخطوط تحت الصورة دايماً (بلا ما تتمدّد) */
 .sk-card .meta { display: block !important; }

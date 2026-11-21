@@ -2692,6 +2692,12 @@ async function renderWatch(id, startTime) {
   function applySb(spec, dur) {
     if (spec) { sbSpec = spec; if (dur) sbDur = dur; }
     if (sbSpec && np && np.setStoryboard && !np.sb) np.setStoryboard(sbSpec, sbDur);
+    // نسبة الفيديو من أبعاد صور المعاينة (مشغّل يوتيوب الاحتياطي ما بيعطي أبعاد الفيديو)؛ الفيديو نفسو بيصحّحها إذا عرفها
+    if (sbSpec && np && np.setRatio && !np.ratio) {
+      const lv = sbSpec.split('|').slice(1).map(x => x.split('#')).filter(x => +x[0] > 0 && +x[1] > 0);
+      const L = lv[lv.length - 1];
+      if (L) np.setRatio(+L[0] / +L[1]);
+    }
   }
   function ownExtras() {
     setChip('بلا إعلانات ✓', 'ok');
@@ -3561,7 +3567,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261121172237';
+const APP_VERSION = '20261121173257';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

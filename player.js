@@ -211,6 +211,12 @@
       const bw = this.bar.clientWidth || 1, x = Math.max(W / 2, Math.min(bw - W / 2, f * bw));
       Object.assign(el.style, { width: W + 'px', height: H + 'px', left: x + 'px', backgroundImage: `url("${url}")`, backgroundSize: `${s.cols * s.w * sc}px ${s.rows * s.h * sc}px`, backgroundPosition: `-${(k % s.cols) * s.w * sc}px -${Math.floor(k / s.cols) * s.h * sc}px` });
     }
+    /* نسبة الفيديو (عرض÷طول) من الفيديو نفسو أو من معلوماتو — بتحدّد طول المشغّل عالتلفون الواقف */
+    setRatio(r) {
+      if (this.dead || !(r > 0.3 && r < 4)) return;
+      this.ratio = r;
+      this.box.style.setProperty('--vr', r.toFixed(4));
+    }
     setMarks(segs) { this.segs = segs || []; this._drawMarks(); }
     setChapters(ch) { this.chapters = ch || []; this._drawMarks(); this._chapLabel(true); }
     _chapAt(t) { let c = null; for (const x of this.chapters) { if (x.t <= t) c = x; else break; } return c; }
@@ -495,6 +501,9 @@
         if (this._autoMuted && !v.muted && this.opts.media) { this._autoMuted = false; this.unmuteEl.hidden = true; } // رجع الصوت (من زر الصوت مثلاً)
         if (!this._autoMuted && !this.opts.media) { ls.set('vol', v.volume); ls.set('muted', v.muted); } // بمشغّل يوتيوب ما منحفظ (حالتو مش دايماً منّا)
       });
+      // نسبة الفيديو الحقيقية (عرض/طول): عالتلفون الواقف المربّع والطولي بيكبرو عالطول متل يوتيوب (style.css: --vr)
+      const fitRatio = () => { if (!this.opts.media && v.videoWidth > 0 && v.videoHeight > 0) this.setRatio(v.videoWidth / v.videoHeight); };
+      v.addEventListener('loadedmetadata', fitRatio); v.addEventListener('resize', fitRatio);
       // مشغّل يوتيوب عالآيفون بلّش لحالو بلا صوت (الصوت بدّو كبسة منك): نفس زر «اكبس لتشغيل الصوت»
       v.addEventListener('automuted', () => { if (this.dead) return; this._autoMuted = true; this.unmuteEl.hidden = false; this._showUI(); });
       v.addEventListener('error', () => this.opts.onError && this.opts.onError(v.currentTime));
