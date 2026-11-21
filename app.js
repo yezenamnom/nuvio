@@ -2456,6 +2456,9 @@ async function renderWatch(id, startTime) {
     window.__nuvioNp = np;
     np.video.poster = ytThumb(id, 'hqdefault');
     qoe.attach(np.video);
+    // صور المعاينة: إذا عرفناها من قبل، وإلا منسأل سيرفرنا (الصور نفسها من يوتيوب، بتبيّن عكل الأجهزة)
+    if (sbSpec) applySb();
+    else if (svUsable()) fetch(`${SV}/info/${id}`).then(r => (r.ok ? r.json() : null)).then(j => { if (j && box.isConnected) applySb(j.storyboard, j.duration); }).catch(() => {});
     if (svUsable() && !extUsable()) np.setBgAudio(`${SV}/vp/${encodeURIComponent(id)}/140`);
     gmBgAudio(np, id); // آيفون + السكربت: الصوت بالخلفية من التلفون نفسو
     setChip('مشغّل احتياطي', 'warn');
@@ -2684,10 +2687,17 @@ async function renderWatch(id, startTime) {
     fillInfo(res); if (!current) current = { inst, data: res };
     if (np && !(np.captions && np.captions.length)) np.setCaptions(res.captions || []);
   }).catch(() => {});
+  // صور المعاينة فوق شريط التقدّم (لمّا تسحبو): من جواب سيرفرنا أو جهازك، وبتنتقل للمشغّل الاحتياطي كمان
+  let sbSpec = '', sbDur = 0;
+  function applySb(spec, dur) {
+    if (spec) { sbSpec = spec; if (dur) sbDur = dur; }
+    if (sbSpec && np && np.setStoryboard && !np.sb) np.setStoryboard(sbSpec, sbDur);
+  }
   function ownExtras() {
     setChip('بلا إعلانات ✓', 'ok');
     fetch(`${SV}/info/${id}`).then(r => (r.ok ? r.json() : null)).then(j => {
       if (!j || !np) return;
+      applySb(j.storyboard, j.duration);
       if (j.captions && j.captions.length) np.setCaptions(j.captions);
       const svA = j.audio || `${SV}/vp/${encodeURIComponent(id)}/140`;
       if (!gmBgAudio(np, id, svA)) np.setBgAudio(svA); // آيفون + السكربت: من التلفون أول
@@ -2700,7 +2710,7 @@ async function renderWatch(id, startTime) {
     extManifest(id).then(({ data: d }) => {
       if (!np) return;
       if (d.captions.length) np.setCaptions(d.captions);
-      if (d.storyboard && np.setStoryboard) np.setStoryboard(d.storyboard, d.duration);
+      applySb(d.storyboard, d.duration);
       const a = extAudio(d);
       if (a) np.setBgAudio(a);
     }).catch(() => {});
@@ -3551,7 +3561,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261121164016';
+const APP_VERSION = '20261121172237';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

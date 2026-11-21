@@ -510,12 +510,16 @@
       // شريط التقدّم: سحب بالماوس أو بالإصبع
       const frac = e => { const r = this.bar.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); };
       let drag = false;
-      this.bar.addEventListener('pointerdown', e => { drag = true; this.bar.setPointerCapture(e.pointerId); box.classList.add('drag'); this._seekTo(frac(e)); });
-      this.bar.addEventListener('pointermove', e => {
-        const f = frac(e);
+      // الوقت + صورة المعاينة فوق الإصبع/الماوس (من أول لمسة، مش بس لمّا يتحرّك)
+      const peek = f => {
         const ct = this.chapters.length ? this._chapAt(f * (v.duration || 0)) : null;
         this.tip.textContent = fmt(f * (v.duration || 0)) + (ct && ct.title ? `  •  ${ct.title}` : ''); this.tip.style.left = `${f * 100}%`;
         this._sbShow(f);
+      };
+      this.bar.addEventListener('pointerdown', e => { drag = true; this.bar.setPointerCapture(e.pointerId); box.classList.add('drag'); const f = frac(e); peek(f); this._seekTo(f); });
+      this.bar.addEventListener('pointermove', e => {
+        const f = frac(e);
+        peek(f);
         if (drag) this._seekTo(f);
       });
       const end = () => { drag = false; box.classList.remove('drag'); };

@@ -1832,7 +1832,7 @@ html.tv .np-bottom .np-row { height: 64px; }
 .np-sb { position: absolute; bottom: 42px; transform: translateX(-50%); border: 2px solid #fff; border-radius: 8px; background-color: #000; background-repeat: no-repeat; box-shadow: 0 6px 20px rgba(0,0,0,.5); opacity: 0; pointer-events: none; transition: opacity .12s; display: none; }
 .np.has-sb .np-sb { display: block; }
 .np.has-sb .np-bar:hover .np-sb, .np.has-sb.drag .np-sb { opacity: 1; }
-.np.has-sb .np-tip { bottom: 18px; }
+.np.has-sb .np-tip { bottom: 48px; } /* الوقت عأسفل صورة المعاينة (مش فوق وقت الفيديو) */
 
 /* ===== معاينة لمّا تمرّق الماوس ===== */
 .hv-wrap { position: absolute; inset: 0; overflow: hidden; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 2; background: #000; }
