@@ -639,6 +639,10 @@ function drawerSettings(d, sep, closeDrawerFn) {
     sw('skip', 'تخطّي الدعايات جوّا الفيديو', () => prefs.get('sb'), v => prefs.set('sb', v), 'بخدمة SponsorBlock المجانية'),
     sw('subs', 'الترجمة (CC)', () => !!prefs.get('cc'), v => prefs.set('cc', v), 'مطفية بالأساس — بتقدر تشغّلها من إعدادات الفيديو كمان'),
     sw('eye', 'خبّي اللي شفتو من المقترحات', () => prefs.get('hideWatched'), v => prefs.set('hideWatched', v)),
+    // آيفون: سكربت الصوت بالخلفية (Userscripts)
+    /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      ? act('phones', document.documentElement.hasAttribute('data-nuvio-gm') ? 'صوت بالخلفية: السكربت شغّال ✓' : 'صوت بالخلفية عالآيفون (ركّب السكربت)', () => { location.href = 'ios.html'; })
+      : null,
     // كمبيوتر: الفيديو الصغير والنافذة العايمة
     DESK_PTR ? sw('eye', 'معاينة لمّا تمرّق الماوس', () => prefs.get('hoverPreview') !== false, v => prefs.set('hoverPreview', v), 'الفيديو بيشتغل بلا صوت مكان الصورة') : null,
     DESK_PTR ? sw('play', 'فيديو صغير لمّا تنزل بالصفحة', () => prefs.get('floatScroll') !== false, v => prefs.set('floatScroll', v), 'بيطلع عالطرف، وبتقدر تسحبو وتكبّرو من زواياه') : null,
@@ -766,12 +770,24 @@ const homeShorts = () => cached('home-shorts', 30 * 60e3, async () => {
   for (let k = 0; k < 2 && all.length < 12; k++) all = all.concat(await f());
   return uniqById(all).slice(0, 16);
 });
+/* صورة الشورت بالطول: يوتيوب أحياناً ما عندو «oardefault» وبيرجّع صورة رمادية عليها «•••» (120×90)
+   بدل ما يعطي خطأ — فمنفحص قياسها ومنجرّب اللي بعدها: صورة الجواب نفسو ← oardefault ← oar2 ← hqdefault (دايماً موجودة) */
+function shortThumb(img, v) {
+  const id = encodeURIComponent(v.id);
+  const list = [];
+  if (v.thumb && !/\/(mq|hq|sd)default\.jpg/.test(v.thumb)) list.push(v.thumb);
+  list.push(`https://i.ytimg.com/vi/${id}/oardefault.jpg`, `https://i.ytimg.com/vi/${id}/oar2.jpg`, `https://i.ytimg.com/vi/${id}/hqdefault.jpg`);
+  let k = 0;
+  const next = () => { if (++k < list.length) img.src = list[k]; };
+  img.onerror = next;
+  img.addEventListener('load', () => { if (img.naturalWidth === 120 && img.naturalHeight === 90 && k < list.length - 1) next(); }); // «ما في صورة» تبع يوتيوب
+  img.src = list[0];
+}
 // بطاقة شورت بالطول (للرفوف)
 function shortCard(v, list) {
   const a = el('a', 'short-card'); a.href = `#/shorts?v=${encodeURIComponent(v.id)}`; a.dataset.vid = v.id;
   const img = el('img'); img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
-  img.src = `https://i.ytimg.com/vi/${v.id}/oardefault.jpg`;
-  img.onerror = () => { if (!img.dataset.f) { img.dataset.f = '1'; img.src = ytThumb(v.id, 'hqdefault'); } };
+  shortThumb(img, v);
   const t = el('div', 'short-card-t', v.title || ''); t.dir = 'auto';
   const s = el('div', 'short-card-s', v.viewsText || '');
   a.append(img, t, s);
@@ -884,8 +900,7 @@ async function renderShorts(startId, ch) {
     preview.set(v.id, v);
     const sl = el('section', 'short loading'); sl._v = v;
     const poster = el('img', 'short-poster'); poster.alt = '';
-    poster.src = `https://i.ytimg.com/vi/${v.id}/oardefault.jpg`;
-    poster.onerror = () => { if (!poster.dataset.f) { poster.dataset.f = '1'; poster.src = ytThumb(v.id, 'hqdefault'); } };
+    shortThumb(poster, v); // (بلا الصورة الرمادية «•••»)
     const spin = el('div', 'short-spin');
     const info = el('div', 'short-info');
     if (v.author) { const a = el(v.authorId ? 'a' : 'span', 'short-ch', '@' + v.author.replace(/^@/, '')); if (v.authorId) a.href = chHref(v.authorId); a.dir = 'auto'; info.append(a); }

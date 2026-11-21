@@ -717,7 +717,36 @@ function svCheck() { // إذا فشل، منشوف إذا الخدمة نفسه�
    مع الإضافة ما في ولا طلب لسيرفرنا (لا فيديو ولا بحث): إذا ما زبط من جهازك، مشغّل يوتيوب مباشرة.
    بلا الإضافة ما بيتغيّر شي: سيرفرنا، وبعدين مشغّل يوتيوب. (extOn/extUsable فوق، جنب YTI) */
 const XCLIENT = { clientName: 'VISIONOS', clientVersion: '1.02', deviceMake: 'Apple', deviceModel: 'RealityDevice17,1', osName: 'visionOS', osVersion: '26.5.23O471', hl: 'en' };
+/* ===== آيفون + سكربت Nuvio (تطبيق Userscripts، nuvio-ios.user.js) =====
+   الصفحة ما بتقدر تحكي مع يوتيوب مباشرة؛ السكربت بيقدر. منبعتلو الطلب برسالة، وهو بيعملو من التلفون نفسو.
+   (بس «player» و«visitor_id»: لرابط صوت الفيديو، لحتى يضل شغّال لمّا تسكّر الشاشة — بلا سيرفرنا) */
+const gmOn = () => document.documentElement.hasAttribute('data-nuvio-gm');
+const gmUsable = () => gmOn() && !extOn();
+let gmSeq = 0;
+function gmDirect(ep, body, ms = 14000) {
+  return new Promise((ok, bad) => {
+    const rid = `g${++gmSeq}-${Date.now()}`;
+    const on = e => {
+      const d = e.data; if (!d || d.nuvioGMr !== rid) return;
+      clearTimeout(tm); removeEventListener('message', on);
+      if (!d.ok) { bad(new Error(d.data || 'السكربت ما زبط')); return; }
+      try { ok(JSON.parse(d.data)); } catch (er) { bad(er); }
+    };
+    const tm = setTimeout(() => { removeEventListener('message', on); bad(new Error('السكربت ما رد')); }, ms);
+    addEventListener('message', on);
+    postMessage({ nuvioGM: 1, rid, ep, body }, location.origin);
+  });
+}
+// صوت الفيديو من التلفون (للتشغيل بالخلفية): الصوت الأصلي m4a
+function gmBgAudio(n, id, fallback) {
+  if (!gmUsable() || !n || !n.setBgAudio) return false;
+  cached('gmbg:' + id, 30 * 60e3, () => extPlayer(id).then(j => extAudio(extParse(id, j))))
+    .then(u => { if (!n.dead) { if (u) n.setBgAudio(u); else if (fallback) n.setBgAudio(fallback); } })
+    .catch(() => { if (fallback && !n.dead) n.setBgAudio(fallback); }); // السكربت ما زبط: من سيرفرنا متل قبل
+  return true;
+}
 async function ytDirect(ep, body, ms = 8000) {
+  if (!extOn() && gmOn()) return gmDirect(ep, body, ms + 6000); // آيفون: عبر السكربت
   const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), ms);
   try {
     let r;
@@ -992,6 +1021,7 @@ function card(v, { row = false, noAuthorLink = false } = {}) {
   const img = c.querySelector('img');
   img.src = v.thumb;
   img.onerror = () => { if (img.src !== ytThumb(v.id)) img.src = ytThumb(v.id); };
+  img.addEventListener('load', () => { if (img.naturalWidth === 120 && img.naturalHeight === 90 && img.src !== ytThumb(v.id)) img.src = ytThumb(v.id); }); // صورة «•••» الرمادية تبع يوتيوب
   c.querySelector('.dur').textContent = v.live ? 'مباشر' : fmtDur(v.duration);
   const t = c.querySelector('.title');
   t.textContent = v.title; t.title = v.title; t.dir = 'auto';
@@ -2240,6 +2270,7 @@ async function renderWatch(id, startTime) {
     } catch { /* */ }
   });
   if (svUsable() && !extUsable()) np.setBgAudio(`${SV}/vp/${encodeURIComponent(id)}/140`); // مع الإضافة: الصوت من جهازك (extExtras)
+  gmBgAudio(np, id); // آيفون + السكربت: الصوت بالخلفية من التلفون نفسو (أحسن من سيرفرنا)
   window.__nuvioNp = np;
   box.classList.add('loading');
 
@@ -2423,6 +2454,7 @@ async function renderWatch(id, startTime) {
     np.video.poster = ytThumb(id, 'hqdefault');
     qoe.attach(np.video);
     if (svUsable() && !extUsable()) np.setBgAudio(`${SV}/vp/${encodeURIComponent(id)}/140`);
+    gmBgAudio(np, id); // آيفون + السكربت: الصوت بالخلفية من التلفون نفسو
     setChip('مشغّل احتياطي', 'warn');
     // كل شي مربوط بالمشغّل (حفظ المكان، تخطّي الدعايات جوّا الفيديو، الجاي…)
     const ex = extras = watchExtras({ id, getNp: () => np, box, music, related: () => (shown && shown.related) || (current && current.data.related) || [] });
@@ -2648,7 +2680,8 @@ async function renderWatch(id, startTime) {
     fetch(`${SV}/info/${id}`).then(r => (r.ok ? r.json() : null)).then(j => {
       if (!j || !np) return;
       if (j.captions && j.captions.length) np.setCaptions(j.captions);
-      np.setBgAudio(j.audio || `${SV}/vp/${encodeURIComponent(id)}/140`);
+      const svA = j.audio || `${SV}/vp/${encodeURIComponent(id)}/140`;
+      if (!gmBgAudio(np, id, svA)) np.setBgAudio(svA); // آيفون + السكربت: من التلفون أول
     }).catch(() => {});
     if (ytInfo) ytInfo.then(d => { if (!d) infoFromPublic(); }); else infoFromPublic();
   }
@@ -3504,7 +3537,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261121040003';
+const APP_VERSION = '20261121040925';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
