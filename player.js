@@ -818,6 +818,7 @@
         sv: '<path class="s" d="M3 12h2M7 8v8M11 5v14M15 8v8M19 10v4M21 12h0"/>',
         vb: '<path class="s" d="M5 9v6h3l5 4V5L8 9H5zM16.5 8.5a5 5 0 0 1 0 7"/>',
         am: '<rect class="s" x="5" y="7" width="14" height="10" rx="1.5"/><path class="s" d="M3 4l2 2M21 4l-2 2M3 20l2-2M21 20l-2-2M12 2v2M12 20v2"/>',
+        hp: '<path class="s" d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect class="s" x="3" y="14" width="4" height="6" rx="1.5"/><rect class="s" x="17" y="14" width="4" height="6" rx="1.5"/>',
       };
       const icon = k => `<svg viewBox="0 0 24 24">${I[k]}</svg>`;
       const row = (k, label, value, onClick, toggle) => {
@@ -857,6 +858,16 @@
         if (PF && this.canAudioFx()) {
           sh.append(row('sv', 'مستوى الصوت الثابت', '', r => { PF.set('stableVol', !PF.get('stableVol')); r.querySelector('.np-sw').classList.toggle('on', !!PF.get('stableVol')); this.applyAudioFx(); }, !!PF.get('stableVol')));
           sh.append(row('vb', 'تحسين الصوت (الكلام أوضح)', '', r => { PF.set('voiceBoost', !PF.get('voiceBoost')); r.querySelector('.np-sw').classList.toggle('on', !!PF.get('voiceBoost')); this.applyAudioFx(); }, !!PF.get('voiceBoost')));
+        }
+        // التلفون: من وين بيجي الصوت لمّا تسكّر الشاشة (من تلفونك = السكربت/التطبيق، من سيرفرنا، أو لسّا مش جاهز)
+        if (!DESKTOP) {
+          const u = this.bgUrl || '';
+          const fromPhone = /googlevideo\.com/.test(u), fromUs = /tube\.glanzstar\.de/.test(u);
+          const val = fromPhone ? 'من تلفونك ✓' : fromUs ? 'من سيرفرنا' : 'مش جاهز';
+          const why = fromPhone ? 'لمّا تسكّر الشاشة أو تطلع من سفاري، الصوت بيكمّل من نت تلفونك مباشرة — السكربت (أو التطبيق) شغّال، وبلا سيرفرنا.'
+            : fromUs ? 'لمّا تسكّر الشاشة، الصوت بيكمّل من سيرفرنا (إذا كان شغّال). لتخلّيه من تلفونك مباشرة: افتح Nuvio من سفاري وركّب سكربت الآيفون (القائمة ← الإعدادات ← «صوت بالخلفية عالآيفون»).'
+              : 'لسّا ما في صوت جاهز لهالفيديو بالخلفية. استنّى كم ثانية بعد ما يبلّش الفيديو وافتح القائمة كمان مرة.';
+          sh.append(row('hp', 'الصوت بالخلفية', val, () => note('الصوت بالخلفية', why)));
         }
         // الإضاءة السينمائية (كمبيوتر، الثيم الغامق)
         if (PF && window.nuvioAmbientOk && window.nuvioAmbientOk()) sh.append(row('am', 'الإضاءة السينمائية', '', r => { PF.set('ambient', PF.get('ambient') === false); r.querySelector('.np-sw').classList.toggle('on', PF.get('ambient') !== false); }, PF.get('ambient') !== false));
