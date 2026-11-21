@@ -2190,7 +2190,7 @@ async function renderWatch(id, startTime) {
       if (box.querySelector('iframe')) return 'embed';
       const c = srcList[srcIdx];
       if (!c) return 'other';
-      if (c.kind === 'ext') return 'ext';
+      if (c.kind === 'ext') return document.documentElement.hasAttribute('data-nuvio-app') ? 'app' : 'ext'; // تطبيق الأندرويد أو إضافة المتصفح
       if (c.url.startsWith(SV)) return c.kind === 'mp4' ? 'mp4' : 'own';
       if (c.url.startsWith(COMP)) return 'comp';
       return curInst && curInst.type === 'piped' ? 'piped' : 'inv';
@@ -2561,7 +2561,10 @@ async function renderWatch(id, startTime) {
     startT = setTimeout(() => {
       if (!box.isConnected || embedOn || !np || !np.video) return;
       const v = np.video;
-      if (v.currentTime > (at || 0) + 0.3 || np.userPaused) return;
+      // اشتغل فعلاً؟ (إذا رجعت لورا بعد ما كمّلت من نص الفيديو، الوقت بيصير أقل من نقطة البداية — مش يعني إنو ما اشتغل)
+      let played = 0;
+      try { for (let i = 0; i < v.played.length; i++) played += v.played.end(i) - v.played.start(i); } catch { /* */ }
+      if (v.currentTime > (at || 0) + 0.3 || played > 0.3 || v.seeking || np.userPaused) return;
       embed(at);
     }, 12000);
   };
@@ -3198,7 +3201,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261120224012';
+const APP_VERSION = '20261121014325';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

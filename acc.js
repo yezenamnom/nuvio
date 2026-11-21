@@ -14,7 +14,8 @@ async function accApi(path, { method = 'GET', body, token = accToken(), keepaliv
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = 'Bearer ' + token;
-  const r = await fetch(ACC + path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined, keepalive, cache: 'no-store' });
+  // (بلا cache:'no-store': كروم بيتجاهل معو ذاكرة طلب الفحص OPTIONS وبيعيدو قبل كل طلب. السيرفر أصلاً بيرد Cache-Control: no-store)
+  const r = await fetch(ACC + path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined, keepalive });
   let j = null; try { j = await r.json(); } catch { /* */ }
   if (!r.ok) throw Object.assign(new Error((j && j.error) || 'ما قدرت اتصل بالسيرفر'), { status: r.status });
   return j;
@@ -37,14 +38,21 @@ function accPush(keys) {
   return accApi('/data', { method: 'PUT', body }).catch(() => { keys.forEach(k => accState.dirty.add(k)); });
 }
 function accFlush() {
-  clearTimeout(accState.timer);
+  clearTimeout(accState.timer); accState.timer = 0;
   if (!accState.dirty.size) return;
   const keys = [...accState.dirty]; accState.dirty.clear();
   accPush(keys);
 }
+// مكان الوقوف بالفيديو (pos) بيتغيّر كل 5 ثواني وقت التشغيل: منرفعو بالكتير مرة بالدقيقة،
+// أو فوراً مع أي تغيير تاني، أو لمّا تطلع من الصفحة/التطبيق. الباقي بعد 2.5 ثانية متل قبل.
+const ACC_SLOW = new Set(['pos']);
 window.addEventListener('nuvio:store', e => {
   if (accState.applying || !accToken() || !ACC_KEYS.includes(e.detail)) return;
   accState.dirty.add(e.detail);
+  if (ACC_SLOW.has(e.detail)) {
+    if (!accState.timer) accState.timer = setTimeout(accFlush, 60000); // في رفعة مجدولة؟ pos بيروح معها
+    return;
+  }
   clearTimeout(accState.timer);
   accState.timer = setTimeout(accFlush, 2500);
 });
@@ -269,7 +277,7 @@ async function renderAdmin() {
         card('جلسات مشاهدة', nf.format(qa.sessions), `${nf.format(qa.watchedMin)} دقيقة · ${nf.format(qa.failed)} ما اشتغلت`),
       );
       qp.append(qc);
-      const SRC_AR = { ext: 'من جهازك (الإضافة)', own: 'مصدرنا', comp: 'Companion', mp4: 'احتياط 360p', inv: 'سيرفر عام', piped: 'Piped', embed: 'مشغّل احتياطي', other: 'غيرو' };
+      const SRC_AR = { ext: 'من جهازك (الإضافة)', app: 'من جهازك (التطبيق)', own: 'مصدرنا', comp: 'Companion', mp4: 'احتياط 360p', inv: 'سيرفر عام', piped: 'Piped', embed: 'مشغّل احتياطي', other: 'غيرو' };
       Object.entries(s.qoe.src || {}).sort((a, b) => b[1].sessions - a[1].sessions).forEach(([k, x]) => {
         const r = el('div', 'adm-row');
         const tx = el('div', 'adm-tx');
@@ -316,7 +324,7 @@ function deviceName() {
 async function longGet(path, token) {
   const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 35000);
   try {
-    const r = await fetch(ACC + path, { cache: 'no-store', signal: ctl.signal, headers: token ? { Authorization: 'Bearer ' + token } : {} });
+    const r = await fetch(ACC + path, { signal: ctl.signal, headers: token ? { Authorization: 'Bearer ' + token } : {} });
     const j = await r.json().catch(() => null);
     if (!r.ok) throw Object.assign(new Error((j && j.error) || 'خطأ'), { status: r.status });
     return j;

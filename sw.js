@@ -2,7 +2,7 @@
    - ملفات الموقع (الصفحة، التصميم، المشغّل…) من التخزين، ومنحدّثها بس لمّا تنزل نسخة جديدة (VERSION).
    - المكتبات الخارجية الثابتة (مشغّل Shaka والخط) بتنحفظ مرة وحدة.
    - الفيديوهات وبيانات السيرفرات ما بتنحفظ هون: بتنجاب وقتها. */
-const VERSION = '20261120224012';
+const VERSION = '20261121014325';
 const CACHE = 'nuvio-' + VERSION;
 const EXT = 'nuvio-ext-v1';
 const SHELL = ['./', 'index.html', 'style.css', 'player.js', 'app.js', 'music.js', 'more.js', 'acc.js', 'tv.js', 'manifest.json', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
@@ -73,6 +73,7 @@ const API = 'nuvio-api-v1';
 const MAX_API = 400;
 function apiRule(url) {
   const p = url.pathname;
+  if (p.startsWith('/acc/')) return null; // حسابك ومزامنتك: دايماً من السيرفر
   if (/\/(manifest|videoplayback|latest_version|companion|captions)\b/.test(p)) return null;
   if (/\/api\/v1\/search\/suggestions|\/suggestions$/.test(p)) return { fresh: 24 * 3600e3, max: 7 * 86400e3 };
   if (/\/api\/v1\/videos\/|\/streams\//.test(p)) return { fresh: 30 * 60e3, max: 45 * 60e3 }; // فيه روابط بتنتهي
