@@ -200,7 +200,8 @@ function pickNext(curId, related, music, force) {
   const q = queue.list().filter(v => v.id !== curId);
   if (q.length) return { v: q[0], fromQueue: true };
   if (!force && !prefs.get('autoplay')) return null;
-  const all = (related || []).filter(v => v && v.id && v.id !== curId && !v.live);
+  let all = (related || []).filter(v => v && v.id && v.id !== curId && !v.live);
+  if (music && typeof isSong === 'function') { const s = all.filter(v => isSong(v, 1)); if (s.length) all = s; } // Nuvio Music: اللي بعدو أغنية، مش فيديو عادي
   const fresh = all.filter(v => wanted(v) && (music || !isWatched(v.id)));
   const v = fresh[0] || all.find(wanted) || all[0];
   return v ? { v } : null;

@@ -89,6 +89,56 @@ function toggleArtist(a) {
   note(on ? `${a.name} صار بمطربينك المفضّلين` : `شلت ${a.name} من المفضّلين`);
 }
 
+/* ================= أغنية ولا فيديو عادي؟ =================
+   قسم الأغاني لازم يكون أغاني بس. منحكم من: شارة «فنان رسمي» تبع يوتيوب (artist)، قنوات «Topic» و VEVO،
+   كلمات العنوان (كليب، Official Music Video، كلمات، ft.، ريمكس…)، والمدة (أقل من دقيقة = شورت).
+   وأي شي فيه «فلوق، مقلب، ردة فعل، طبخ، شرح، بودكاست…» مش أغنية حتى لو من قناة مطرب. */
+const SONG_YES = /official (?:music |lyrics? )?(?:video|audio)|lyrics? video|music video|visuali[sz]er|[([](?:official )?audio[)\]]|فيديو ?كليب|الفيديو الكليب|كليب|\bclip\b|كلمات|\blyrics\b|حصري|exclusive|النسخ[ةه] الأصلي[ةه]|\bft\.|\bfeat\.|prod\.? by|توزيع|غناء|مهرجان|ريمكس|\bremix\b|\bcover\b|acoustic|مواويل|موال|زف[ةه]|شار[ةه]|أغني[ةه]|اغني[ةه]|الأغاني|الاغاني|أغاني|اغاني|ألبوم|البوم|\balbum\b|كوكتيل|ميكس|\bmix\b|\bsongs?\b|طرب|lo-?fi|\bbeats\b|نشيد|أنشود[ةه]|انشود[ةه]|دبك[ةه]|موسيقى|instrumental|karaoke|كاريوكي/gi;
+const SONG_NO = /vlog|فلوق|فلوغ|فلوج|مدون[ةه] فيديو|رد[ةه]? فعل|reaction|ر[يی]?أكشن|مقلب|مقالب|prank|كامير[اة]? خفي[ةه]|تحدي|challenge|بث مباشر|livestream|podcast|بودكاست|مقابل[ةه]|لقاء|interview|gameplay|walkthrough|let'?s play|شرح|tutorial|how to|طريق[ةه] عمل|وصف[ةه]|recipe|طبخ|unboxing|فتح صندوق|مراجع[ةه]|\breview|أخبار|اخبار|\bnews\b|وثائقي|documentary|كواليس|behind the scenes|making of|يوميات|روتين|routine|ملخص|highlights|مبارا[ةه]|أهداف|اهداف|\bgoals\b|تصميمي|حالات واتس|حالات_واتس|#fyp|#shorts|خطب[ةه]|محاضر[ةه]|lecture|تلاو[ةه]|قرآن|quran/gi;
+const SONG_WEAK = /الحلق[ةه]|حلق[ةه]|episode|مسلسل|فيلم|movie|trailer|برومو/gi;
+const SONG_CH = /rotana|روتانا|mazzika|مزيكا|melody|ميلودي|music|ميوزك|موسيقى|records|ريكوردز|sony music|universal|warner|طرب|للإنتاج الفني|انتاج فني|production/i;
+const SONG_LONG_OK = /mix|ميكس|كوكتيل|album|ألبوم|البوم|ساع[ةه]|ساعات|hours?|playlist|أجمل|اجمل|best|روائع|radio|lo-?fi|beats|جلس[ةه]|حفل[ةه]|concert|live/i;
+const hits = (re, s) => (String(s).match(re) || []).length;
+function songScore(v) {
+  if (!v) return -9;
+  const t = String(v.title || ''), a = String(v.author || ''), d = +v.duration || 0;
+  if (v.short || (d && d < 60)) return -5;
+  let s = 0;
+  if (/ - Topic$|VEVO$|^الموضوع - /i.test(a)) s += 3;
+  if (v.artist) s += 2;
+  const y = hits(SONG_YES, t); if (y) s += y > 1 ? 3 : 2;
+  if (hits(SONG_NO, t)) s -= 4;
+  if (hits(SONG_WEAK, t)) s -= 1;
+  if (SONG_CH.test(a)) s += 1;
+  if (/\s[-–|]\s/.test(t) && d >= 90 && d <= 480) s += 1; // «المطرب - الأغنية» بطول أغنية
+  if (d > 1200 && !SONG_LONG_OK.test(t)) s -= 1;
+  return s;
+}
+const isSong = (v, min = 2) => songScore(v) >= min;
+// رفوف الأغاني: الأغاني بس (إذا ضل كتير قليل، منقبل اللي قريب منها)
+const songsOnly = l => { const s = (l || []).filter(v => isSong(v)); return s.length >= 4 ? s : (l || []).filter(v => isSong(v, 1)); };
+
+/* تنضيف لمرة وحدة: قبل هيك أي فيديو انفتح من Nuvio Music كان ينحسب أغنية. اللي أكيد مش أغنية
+   (شورت، فلوق، مقلب، ردة فعل…) بيرجع عالسجل العادي وبتنشال عنو علامة «أغنية» */
+document.addEventListener('DOMContentLoaded', function cleanSongs() { // بعد ما app.js يجهّز (store)
+  try {
+    if (localStorage.getItem('nuvio:songsClean') === '1') return;
+    const bad = v => v && v.music && songScore(v) <= -3;
+    const mh = store.get('mhist', []);
+    const out = mh.filter(bad).map(v => { const x = { ...v }; delete x.music; return x; });
+    if (out.length) {
+      store.set('mhist', mh.filter(v => !bad(v)));
+      const h = store.get('hist', []), ids = new Set(h.map(v => v.id));
+      store.set('hist', h.concat(out.filter(v => !ids.has(v.id))).sort((p, q) => (q.at || 0) - (p.at || 0)).slice(0, 500));
+    }
+    ['likes', 'favs', 'hist', 'later'].forEach(k => {
+      const l = store.get(k, []);
+      if (l.some(bad)) store.set(k, l.map(v => { if (!bad(v)) return v; const x = { ...v }; delete x.music; return x; }));
+    });
+    localStorage.setItem('nuvio:songsClean', '1');
+  } catch { /* */ }
+});
+
 /* ================= بحث موسيقي (مع ترتيب وتاريخ) ================= */
 function musicSearch(q, o = {}, page = 1) {
   const key = 'ms:' + q + JSON.stringify(o) + ':' + page;
@@ -183,9 +233,10 @@ async function renderMusic(path, params) {
     const seen = new Set();
     const add = items => { let n = 0; items.forEach(v => { if (!seen.has(v.id)) { seen.add(v.id); g.append(card(v)); n++; } }); return n; };
     try {
-      const first = await musicSearch(def.q, def.o, 1);
+      const flt = k[0] === 'p' ? (l => l) : songsOnly;
+      const first = flt(await musicSearch(def.q, def.o, 1));
       g.replaceChildren(); add(first);
-      infinite(g, async () => { page++; const more = await musicSearch(def.q, def.o, page); return add(more) > 0; });
+      infinite(g, async () => { page++; const more = flt(await musicSearch(def.q, def.o, page)); return add(more) > 0; });
     } catch { g.replaceWith(el('div', 'empty', 'ما قدرت جيب هالقسم هلّق.')); }
     return;
   }
@@ -221,7 +272,8 @@ async function renderMusic(path, params) {
   }));
   if (mine.length) {
     view.append(lazyShelf('من مطربينك', async () => {
-      const res = await Promise.all(shuffle(mine).slice(0, 5).map(a => getChannel(a.id).then(r => r.res.items.slice(0, 4)).catch(() => [])));
+      // من قناة المطرب: الأغاني بس (بلا فلوقات ومقابلات وكواليس)
+      const res = await Promise.all(shuffle(mine).slice(0, 5).map(a => getChannel(a.id).then(r => r.res.items.filter(v => isSong(v, 1)).slice(0, 4)).catch(() => [])));
       return shuffle(res.flat());
     }, null, 'star'));
   }
@@ -237,7 +289,7 @@ async function renderMusic(path, params) {
       } catch { /* */ }
     }
   })();
-  MUSIC_SHELVES.forEach((s, n) => view.append(lazyShelf(s.t, () => musicSearch(s.q, s.o), `#/music/more?k=m${n}`, s.i)));
+  MUSIC_SHELVES.forEach((s, n) => view.append(lazyShelf(s.t, () => musicSearch(s.q, s.o).then(songsOnly), `#/music/more?k=m${n}`, s.i)));
 }
 
 /* ================= القائمة الجانبية ☰ ================= */
@@ -340,7 +392,7 @@ function closeDrawer() {
   if (ov && ov.classList.contains('open')) { ov.classList.remove('open'); if (window.nuvioLockScroll) window.nuvioLockScroll(false); }
 }
 
-/* ================= ضغطة مطوّلة على اللوغو: Nuvio أو Nuvio Music ================= */
+/* ================= ضغطة مطوّلة على اللوغو: Nuvio أو Nuvio Music (أو يوتيوب جوّا التطبيق) ================= */
 function openModePicker() {
   let ov = document.querySelector('.mode-ov');
   if (!ov) {
@@ -359,6 +411,12 @@ function openModePicker() {
       opt('v', 'play', 'Nuvio', 'فيديوهات', () => { setMode('video', true); location.hash = '#/'; }),
       opt('m', 'music', 'Nuvio Music', 'أغاني ومطربين وبودكاست', () => { setMode('music', true); location.hash = '#/music'; }),
     );
+    // جوّا تطبيق Nuvio (أندرويد 1.0.4+): موقع يوتيوب الرسمي نفسو، بلا إعلانات
+    if (document.documentElement.hasAttribute('data-nuvio-yt')) {
+      box.append(opt('y', 'globe', 'يوتيوب', 'الموقع الرسمي، بلا إعلانات', () => {
+        try { window.NuvioApp.postMessage('yt:open'); } catch { note('حدّث تطبيق Nuvio لتفتح يوتيوب'); }
+      }));
+    }
     ov.append(box);
     ov.onclick = e => { if (e.target === ov) ov.classList.remove('open'); };
     document.body.append(ov);
@@ -390,7 +448,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const stop = () => clearTimeout(t);
     brand.addEventListener('pointerdown', start);
     ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => brand.addEventListener(ev, stop));
-    brand.addEventListener('contextmenu', e => e.preventDefault());
+    // عالتلفون: الضغطة المطوّلة تبع النظام (contextmenu) كمان بتفتح القائمة — ما بتتأثر إذا المتصفح لغى اللمسة قبل المؤقّت
+    brand.addEventListener('contextmenu', e => { e.preventDefault(); if (!long) { clearTimeout(t); long = true; openModePicker(); } });
     brand.addEventListener('click', e => {
       e.preventDefault();
       if (long) { long = false; return; }

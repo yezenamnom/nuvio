@@ -501,7 +501,8 @@ function fromVR(v) {
   const vt = ytTxt(v.viewCountText), pt = ytTxt(v.publishedTimeText);
   const av = httpsUrl(lastThumb((((v.channelThumbnailSupportedRenderers || {}).channelThumbnailWithLinkRenderer) || {}).thumbnail));
   return { id: v.videoId, title: ytTxt(v.title), author: by.text || '', authorId: ((by.navigationEndpoint || {}).browseEndpoint || {}).browseId || '', avatar: av,
-    duration: live ? 0 : durSec(ytTxt(v.lengthText)), views: parseCount(vt), viewsText: vt, published: pt, ts: agoTs(pt), thumb: ytThumb(v.videoId), live };
+    duration: live ? 0 : durSec(ytTxt(v.lengthText)), views: parseCount(vt), viewsText: vt, published: pt, ts: agoTs(pt), thumb: ytThumb(v.videoId), live,
+    ...((v.ownerBadges || []).some(b => /ARTIST/.test((b.metadataBadgeRenderer || {}).style || '')) ? { artist: true } : {}) };
 }
 // فيديو بشكل lockupViewModel (القنوات والمشابه)
 function fromLockup(l, ch) {
@@ -647,6 +648,7 @@ YtApi.watch = async function (id) {
   return {
     id, title: ytTxt(pr.title), author: by.text || '', authorId: ((by.navigationEndpoint || {}).browseEndpoint || {}).browseId || '',
     avatar: httpsUrl(lastThumb(o.thumbnail)), subs: ytTxt(o.subscriberCountText).replace(/\u00a0/g, ' '),
+    artist: (o.badges || []).some(b => /ARTIST/.test((b.metadataBadgeRenderer || {}).style || '')),
     views: parseCount(vt), viewsText: vt,
     published: ytTxt(pr.relativeDateText) || ytTxt(pr.dateText).replace(/\u200f/g, ''),
     likes: parseCount(like.accessibilityText) || parseCount(like.title) || 0,
@@ -2216,6 +2218,7 @@ async function renderWatch(id, startTime) {
   floatOnScroll(box);
   const ytInfo = ytiUsable() ? YtApi.watch(id).catch(() => null) : null;
   let shown = null; // المعلومات اللي انعرضت (من يوتيوب المباشر أو من السيرفر العام، اللي بيوصل أول)
+  let histKey = ''; // وين انحفظ بالسجل بهالفتحة (hist أو mhist)
   active = { id, box, layout, main, title: () => (current && current.data.title) || (shown && shown.title) || (pv && pv.title) || '', author: () => (current && current.data.author) || (shown && shown.author) || (pv && pv.author) || '', np: () => np };
   enableSwipeDown(box);
 
@@ -2756,8 +2759,13 @@ async function renderWatch(id, startTime) {
     au.append(nameBox);
 
     // إعجاب + حفظ بالمفضلة (محفوظين على جهازك)
-    const item = { id, title: d.title, thumb: ytThumb(id), author: d.author, authorId: d.authorId, views: d.views, published: d.published, duration: pv && pv.duration, ...(music ? { music: true } : {}), ...(d.avatar ? { avatar: d.avatar } : {}) };
-    lib.add(music ? 'mhist' : 'hist', item);
+    // فتحتو من Nuvio Music: بيكفي يكون «قريب لأغنية»؛ من الفيديوهات: لازم يكون أغنية أكيد
+    const song = isSong({ title: d.title, author: d.author, duration: pv && pv.duration, artist: d.artist || (pv && pv.artist) }, music ? 1 : 2);
+    const item = { id, title: d.title, thumb: ytThumb(id), author: d.author, authorId: d.authorId, views: d.views, published: d.published, duration: pv && pv.duration, ...(song ? { music: true } : {}), ...(d.avatar ? { avatar: d.avatar } : {}) };
+    const hk = music && song ? 'mhist' : 'hist';
+    if (histKey && histKey !== hk) lib.remove(histKey, id); // المعلومات الكاملة غيّرت الحكم: منشيلو من السجل التاني
+    histKey = hk;
+    lib.add(hk, item);
     const actions = el('div', 'v-actions');
     const likeBtn = el('button', 'pill');
     const disBtn = el('button', 'pill pill-dis'); disBtn.title = 'ما عجبني'; disBtn.setAttribute('aria-label', 'ما عجبني');
@@ -3537,7 +3545,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261121065620';
+const APP_VERSION = '20261121112633';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
