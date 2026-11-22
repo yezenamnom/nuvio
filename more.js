@@ -1309,9 +1309,13 @@ async function renderShorts(startId, ch) {
       const dur = +v.duration || ym.dur;
       const ad = !!((ym.vid && ym.vid !== v.id) || (dur && ym.curDur && Math.abs(ym.curDur - dur) > 3));
       if (!ad && ym.ct0 >= 0 && ym.st === 1 && ym.ct - Math.max(ym.ct0, 0) > 0.4) { ym.reveal(); lib.add('hist', v); return; }
-      if (!ym.wantPlay || now - ym.loadAt < 3500) return;
+      if (!ym.wantPlay || ym.blocked || now - ym.loadAt < 3500) return;
       const started = ym.st === 1 || ym.st === 3 || ym.ct > 0.3;
-      if (!started) { ym.wantPlay = false; sl.classList.remove('loading'); sl.classList.add('paused'); return; } // بدّو كبسة منك
+      if (!started) {
+        if (ym.readyAt ? now - ym.readyAt < 3000 : now - ym.loadAt < 12000) return; // مشغّل يوتيوب لسّا عم يجهز (عالموبايل ٣-٥ ثواني)
+        // الآيفون منع التشغيل: زر التشغيل بيبيّن، بس منضل نحاول — وإذا بلّش لحالو بيكمّل (ما منوقّفو)
+        ym.block(); sl.classList.remove('loading'); sl.classList.add('paused'); return;
+      }
       if (ad) {
         if (tries < 2) { tries++; ym.load(0); return; }
         if (!adAt) { adAt = now; ym.cmd('mute'); }

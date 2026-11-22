@@ -2776,15 +2776,17 @@ async function renderWatch(id, startTime) {
       if (document.hidden) { media.loadAt = now; media.ctMoveAt = now; return; } // بالخلفية الرسايل بتبطى: ما منحكم
       if (!media.revealed) {
         if (isContent()) { waitUser = false; adSince = 0; msg.textContent = ''; goodCt = media.ct; cover.hidden = true; media.reveal(); return; }
-        if (waitUser || !media.wantPlay) return; // ناطرين كبسة «تشغيل» منك
+        if (waitUser && !media.blocked && media.wantPlay) { waitUser = false; media.loadAt = now; } // كبست تشغيل: منرجع نراقب (إعلان، تعليق…)
+        if (waitUser || !media.wantPlay) return; // ناطرين كبسة «تشغيل» منك (وبالخلفية منضل نحاول)
         if (now - media.loadAt > 3500) {
           const started = media.st === 1 || media.st === 3 || media.ct > media.t0 + 0.3;
           if (!started) {
             // مشغّل يوتيوب لسّا عم يحمّل (عالموبايل بياخد ٣-٥ ثواني): منستنّاه يجهز، وبعدين منعطيه ٣ ثواني يحاول يشغّل
             const blocked = media.readyAt ? now - media.readyAt > 3000 : now - media.loadAt > 12000;
             if (!blocked) return;
-            // ما بلّش أبداً (الموبايل منع التشغيل): صورتنا بتضل فوق وزر التشغيل تبعنا بيبيّن
-            waitUser = true; msg.textContent = ''; media.wantPlay = false; media._emit('pause'); return;
+            // ما بلّش لهلّق (الآيفون منع التشغيل أو يوتيوب بطيء): زر التشغيل تبعنا بيبيّن، بس منضل نحاول بالخلفية،
+            // وإذا بلّش لحالو بيكمّل (قبل كنّا نوقّفو!) — وأي كبسة منك بالصفحة بتشغّلو
+            waitUser = true; msg.textContent = ''; media.block(); return;
           }
           if (adLike()) {
             // إعلان: مرة وحدة منعيد (أحياناً بيروح). إذا رجع، منستنّاه يخلص تحت الصورة بلا صوت ومع عدّاد — بلا لفّ
@@ -3911,7 +3913,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261122060537';
+const APP_VERSION = '20261122114742';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

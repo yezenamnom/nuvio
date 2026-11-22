@@ -1220,6 +1220,35 @@
       };
       go();
     }
+    /* الآيفون رفض يشغّل لحالو (أو يوتيوب عم يتأخّر كتير): منبيّن زر التشغيل تبعنا، بس:
+       - منضل نحاول بالخلفية، وإذا بلّش لحالو بيكمّل (ما منوقّفو متل قبل)
+       - أول كبسة منك بأي محل بالصفحة بتشغّلو (الكبسة بتوصل للإطار ومعها إذن التشغيل والصوت) */
+    block() {
+      if (this._blocked || this.revealed) return;
+      this._blocked = true;
+      this._emit('pause');
+      let n = 0;
+      const again = () => {
+        if (!this._blocked || this.revealed || !this.f.isConnected || n++ > 40) return;
+        this.cmd('mute'); this.cmd('playVideo');
+        setTimeout(again, 1500);
+      };
+      setTimeout(again, 1500);
+      const evs = ['pointerup', 'touchend', 'click'];
+      const off = () => { evs.forEach(n => window.removeEventListener(n, onTap)); if (this._unblockTap === off) this._unblockTap = null; };
+      const onTap = e => {
+        if (!this._blocked || this.revealed || !this.f.isConnected) { off(); return; }
+        const t = e.target instanceof Element ? e.target : null;
+        if (t && t.closest('.np-big, .np-bottom, .np-menu, .np-sheet, .np-sheet-ov, .np-unmute, .own-fail, .short')) return; // أزرار المشغّل (والشورتس) بتشغّل لحالها
+        if (t && e.pointerType === 'mouse' && t.closest('.np-ui')) return; // الماوس عالفيديو: المشغّل نفسو بيشغّل/بيوقّف
+        if (e.type !== 'click' && !YtMedia.gesture()) return; // سحب/تمرير مش كبسة
+        off(); this.play();
+      };
+      if (this._unblockTap) this._unblockTap();
+      this._unblockTap = off;
+      evs.forEach(n => window.addEventListener(n, onTap));
+    }
+    get blocked() { return !!this._blocked; }
     setAttribute() { /* متل <video> */ }
     removeAttribute() { /* */ }
     get isConnected() { return this.el.isConnected; }
@@ -1228,6 +1257,7 @@
       this.st = -1; this.vid = ''; this.curDur = 0; this.ct0 = -1; this.ctMoveAt = 0; this.seekingTo = null;
       this.t0 = Math.max(0, Math.floor(start || 0)); this.ct = this.t0; this.ctAt = 0;
       this.loadAt = Date.now(); this._kicking = false;
+      this._blocked = false; if (this._unblockTap) this._unblockTap();
       this._ccN = 0; this._ccSched = false; this.readyAt = 0;
       const cc = YtMedia.ccOn() ? '&cc_load_policy=1&cc_lang_pref=ar' : '';
       const url = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(this.id)}?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&iv_load_policy=3&rel=0&playsinline=1&enablejsapi=1${cc}&start=${this.t0}&origin=${encodeURIComponent(location.origin)}&_=${Date.now()}`;
@@ -1288,6 +1318,7 @@
     reveal() {
       if (this.revealed) return;
       this.revealed = true;
+      this._blocked = false; if (this._unblockTap) this._unblockTap(); // بلّش لحالو
       // الآيفون: إذا رجّعنا الصوت بلا كبسة منك، بيوقّف الفيديو وبيطلّع زر يوتيوب.
       // فمنخلّيه ماشي بلا صوت، ومشغّلنا بيبيّن «اكبس لتشغيل الصوت» (الكبسة بتوصل للإطار ومعها إذن الصوت)
       const quiet = !this._wantMuted && YtMedia.quietStart && !this._unlocked;
@@ -1321,7 +1352,7 @@
       this._emit('seeking'); this._emit('timeupdate');
     }
     get duration() { return this.dur || this.curDur || NaN; }
-    get paused() { return this.revealed ? !(this.st === 1 || this.st === 3) : !this.wantPlay; }
+    get paused() { return this.revealed ? !(this.st === 1 || this.st === 3) : (!this.wantPlay || !!this._blocked); }
     get ended() { return this.revealed && this.st === 0; }
     get seeking() { return this.seekingTo != null; }
     get readyState() { return this.revealed ? 4 : 0; }
@@ -1334,12 +1365,19 @@
     set volume(x) { this._wantVol = +x; if (this.revealed) { this.cmd('setVolume', [Math.round(Math.max(0, Math.min(1, +x)) * 100)]); this._emit('volumechange'); } }
     get playbackRate() { return this._wantRate || 1; }
     set playbackRate(r) { this._wantRate = +r || 1; this.cmd('setPlaybackRate', [this._wantRate]); }
-    play() { if (YtMedia.gesture()) this._unlocked = true; if (!this.revealed && !this.wantPlay) this.loadAt = Date.now(); this.wantPlay = true; this.cmd('playVideo'); this._kick(); return Promise.resolve(); }
-    pause() { this.wantPlay = false; this.cmd('pauseVideo'); if (this.revealed && this.st !== 2 && this.st !== 0) { this.st = 2; this._emit('pause'); } }
+    play() {
+      if (YtMedia.gesture()) this._unlocked = true;
+      if (!this.revealed && (!this.wantPlay || this._blocked)) this.loadAt = Date.now();
+      this._blocked = false; if (this._unblockTap) this._unblockTap();
+      this.wantPlay = true;
+      this.cmd('playVideo'); this._kick(); return Promise.resolve();
+    }
+    pause() { this.wantPlay = false; this._blocked = false; if (this._unblockTap) this._unblockTap(); this.cmd('pauseVideo'); if (this.revealed && this.st !== 2 && this.st !== 0) { this.st = 2; this._emit('pause'); } }
     // رسايل الإطار بتوصل للنافذة اللي هو فيها (الصفحة أو النافذة العايمة)
     listenOn(w) { if (!w || w === window) return; (this._wins || (this._wins = new Set())).add(w); w.addEventListener('message', this._onMsg); }
     unlistenOn(w) { if (!w || !this._wins) return; this._wins.delete(w); try { w.removeEventListener('message', this._onMsg); } catch { /* */ } }
     destroy() {
+      this._blocked = false; if (this._unblockTap) this._unblockTap();
       window.removeEventListener('message', this._onMsg);
       if (this._wins) { for (const w of this._wins) { try { w.removeEventListener('message', this._onMsg); } catch { /* */ } } this._wins.clear(); }
       try { this.f.src = 'about:blank'; } catch { /* */ }
