@@ -2750,11 +2750,11 @@ async function renderWatch(id, startTime) {
       cover.hidden = false;
     };
     media.addEventListener('yterror', () => { if (tries < 2) { tries++; media.load(goodCt || at); } else fail(); });
-    // واقف (منك أو الآيفون وقّفو) أو خلص: يوتيوب بيطلّع زرّو الأحمر وشعارو واقتراحاتو — منغطّيهن بصورة الفيديو
-    // (فوق إطار يوتيوب وتحت أزرارنا، فزر التشغيل تبعنا بيضل باين)
+    // خلص الفيديو: يوتيوب بيطلّع شبكة اقتراحاتو فوقو — منغطّيها بصورة الفيديو (فوق إطار يوتيوب وتحت أزرارنا).
+    // التوقيف المؤقت لأ: الصورة الواقفة نفسها بتضل باينة (يوتيوب ما بيطلّع شي فوقها، وعنوانو مقصوص)
     const still = el('img', 'emb-still'); still.alt = ''; still.src = ytThumb(id, 'hqdefault'); still.hidden = true;
     media.f.after(still);
-    media.addEventListener('pause', () => { if (media.revealed && !failed) still.hidden = false; });
+    media.addEventListener('ended', () => { if (media.revealed && !failed) still.hidden = false; });
     media.addEventListener('playing', () => { still.hidden = true; });
     // إعلان؟ (فيديو تاني، أو مدّتو غير مدّة الفيديو). على الآيفون أحياناً ما بيوصل رقم الفيديو، فالمدّة بتكفّي
     const adLike = () => !!((media.vid && media.vid !== id) || (dur && media.curDur && Math.abs(media.curDur - dur) > 3));
@@ -3872,7 +3872,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261122052134';
+const APP_VERSION = '20261122052824';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
