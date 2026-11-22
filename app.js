@@ -2694,8 +2694,9 @@ async function renderWatch(id, startTime) {
      التشغيل من يوتيوب على جهازك، بس كل الأزرار والشكل تبعنا، وبلا كلمة يوتيوب ولا شعارو.
      منتأكد إنو الفيديو نفسو هو اللي عم يمشي (نفس الرقم + نفس المدة + الوقت عم يتقدّم)؛
      إذا لا (إعلان أو علّق) منعيد تحميلو فوراً من نفس الثانية — لحد 4 مرات بالبداية و3 بالنص. */
-  function embed(at) {
+  function embed(at, force) {
     if (embedOn || !window.YtMedia) return;
+    if (!force && prefs.get('player') === 'own') { ownOnly(at); return; } // «موقعي»: بلا يوتيوب أبداً
     embedOn = true;
     destroyPlayer();
     const prev = np;
@@ -3011,6 +3012,40 @@ async function renderWatch(id, startTime) {
       if (a) np.setBgAudio(a);
     }).catch(() => {});
     if (ytInfo) ytInfo.then(d => { if (!d) infoFromPublic(); }); else infoFromPublic();
+  }
+
+  /* «موقعي» (الإعدادات ← المشغّل الأساسي): مشغّل Nuvio بس. إذا المصدر الأول ما زبط منجرّب كل مصادرنا التانية
+     (من جهازك، سيرفرنا DASH، سيرفرنا MP4، السيرفرات العامة)، وإذا ولا واحد زبط منقلّك — وإنت بتقرّر إذا بدك يوتيوب هالمرة */
+  let ownBusy = false, ownRounds = 0;
+  async function ownOnly(at) {
+    if (ownBusy || !box.isConnected) return;
+    ownBusy = true;
+    const giveUp = ++ownRounds > 2; // جرّبنا كل شي مرتين: ما منضل نعيد للأبد
+    try {
+      const v = np && np.video;
+      if (v && !v.paused && v.currentTime > 0.5) return; // اشتغل بالآخر
+      const list = [];
+      if (giveUp) list.length = 0; else if (extUsable()) { memo.delete('xmf:' + id); list.push([OWN_INST, [{ kind: 'ext', id, url: 'nuvioext://direct/' + id }]]); }
+      if (!giveUp) list.push([OWN_INST, [{ kind: 'dash', url: ownMpd(id) }, { kind: 'mp4', url: ownMp4(id) }]]);
+      for (const [inst, srcs] of list) {
+        if (!box.isConnected) return;
+        try { if (await playSources(inst, srcs, at)) { np.autoplay(); armStart(at); return; } } catch { /* اللي بعدو */ }
+      }
+      if (!giveUp) try {
+        const { inst, res } = await getVideo(id);
+        if (box.isConnected && res.sources && res.sources.length && await playSources(inst, res.sources, at)) { np.autoplay(); return; }
+      } catch { /* */ }
+      if (!box.isConnected) return;
+      // ولا مصدر زبط
+      const w = el('div', 'emb-cover own-fail');
+      const img = el('img'); img.alt = ''; img.src = ytThumb(id, 'hqdefault');
+      const m = el('div', 'emb-msg', 'هالفيديو ما اشتغل بمشغّل Nuvio هلّق 😕');
+      const again = el('button', 'btn btn-main', 'جرّب كمان مرة'); again.onclick = e => { e.stopPropagation(); renderWatch(id, at || 0); };
+      const yt = el('button', 'btn', 'شغّلو بيوتيوب هالمرة'); yt.onclick = e => { e.stopPropagation(); w.remove(); embed(at, true); };
+      const row = el('div', 'own-fail-btns'); row.append(again, yt);
+      w.append(img, m, row);
+      box.append(w);
+    } finally { ownBusy = false; }
   }
 
   let publicUntil = 0, embedTimer = 0;
@@ -3876,7 +3911,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261122055947';
+const APP_VERSION = '20261122060537';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

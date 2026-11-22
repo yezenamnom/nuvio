@@ -673,13 +673,21 @@ function drawerSettings(d, sep, closeDrawerFn) {
   tvBtn.append(tvic, tvtx, tvval);
   tvBtn.onclick = () => { const order = ['auto', 'on', 'off']; const nx = order[(order.indexOf(tvMode()) + 1) % 3]; tvval.textContent = TVM[nx]; setTVMode(nx); };
   // المشغّل الأساسي: مشغّلنا (بلا إعلانات) أو يوتيوب بواجهتنا (التشغيل من جهازك)
-  const PLY = { nuvio: 'تلقائي', yt: 'يوتيوب' };
+  const PLY = { own: 'موقعي', nuvio: 'تلقائي', yt: 'يوتيوب' };
   const plBtn = el('button', 'drawer-item');
   const plic = el('span', 'drawer-ico'); plic.innerHTML = window.ico ? window.ico('play') : '';
   const plval = el('span', 'drawer-count', PLY[prefs.get('player')] || PLY.nuvio);
-  const pltx = el('span', 'drawer-tx'); pltx.append(el('span', null, 'المشغّل الأساسي'), el('small', 'muted', 'تلقائي: سيرفرنا، وإذا ما زبط يوتيوب على جهازك فوراً'));
+  const PLY_HINT = { own: 'موقعي: مشغّل Nuvio بس (بلا يوتيوب أبداً)', nuvio: 'تلقائي: مشغّل Nuvio، وإذا ما زبط يوتيوب فوراً', yt: 'يوتيوب: كل الفيديوهات بمشغّل يوتيوب (بواجهتنا)' };
+  const plKey = () => (prefs.get('player') in PLY ? prefs.get('player') : 'nuvio');
+  const plhint = el('small', 'muted', PLY_HINT[plKey()]);
+  const pltx = el('span', 'drawer-tx'); pltx.append(el('span', null, 'المشغّل الأساسي'), plhint);
   plBtn.append(plic, pltx, plval);
-  plBtn.onclick = () => { const nx = prefs.get('player') === 'yt' ? 'nuvio' : 'yt'; prefs.set('player', nx); plval.textContent = PLY[nx]; note(nx === 'yt' ? 'الفيديوهات الجاية من يوتيوب (بواجهتنا)' : 'تلقائي: سيرفرنا أول، وإذا ما زبط يوتيوب'); };
+  plBtn.onclick = () => { // تلقائي ← موقعي ← يوتيوب ← تلقائي
+    const order = ['nuvio', 'own', 'yt'];
+    const nx = order[(order.indexOf(plKey()) + 1) % order.length];
+    prefs.set('player', nx); plval.textContent = PLY[nx]; plhint.textContent = PLY_HINT[nx];
+    note(nx === 'yt' ? 'الفيديوهات الجاية بمشغّل يوتيوب (بواجهتنا)' : nx === 'own' ? 'الفيديوهات الجاية بمشغّل Nuvio بس — بلا يوتيوب' : 'تلقائي: مشغّل Nuvio أول، وإذا ما زبط يوتيوب');
+  };
   // أول ما تفتح البرنامج: Nuvio ولا Nuvio Music (ولا يوتيوب، جوّا تطبيق أندرويد)
   const inApp = document.documentElement.hasAttribute('data-nuvio-yt');
   const STS = inApp ? { auto: 'متل آخر مرة', video: 'Nuvio', music: 'Nuvio Music', yt: 'يوتيوب' } : { video: 'Nuvio', music: 'Nuvio Music' };
