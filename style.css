@@ -1432,6 +1432,8 @@ html.tv .tv-sinput.tv-f { border-color: #fff; }
 /* ملء شاشة «يدوي» (آيفون مع مشغّل يوتيوب): المشغّل بيغطّي كل الشاشة */
 .player-box.fakefs { position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; width: 100vw !important; height: 100vh !important; height: 100dvh !important; max-width: none !important; aspect-ratio: auto !important; border-radius: 0 !important; margin: 0 !important; transform: none !important; z-index: 9999; }
 .player-box.fakefs .yt-frame { --crop: 90px; }
+/* التلفون واقف والفيديو عريض: المشغّل المكبّر بينلفّ بالعرض (متل يوتيوب) — لفّ التلفون وبيعبّي الشاشة كلها، حتى لو قفل التدوير شغّال */
+.player-box.fakefs.np-rot { top: 50% !important; left: 50% !important; right: auto !important; bottom: auto !important; width: 100vh !important; width: 100dvh !important; height: 100vw !important; transform: translate(-50%, -50%) rotate(90deg) !important; transform-origin: center center !important; }
 html.np-fakefs .bnav, html.np-fakefs .topbar, html.np-fakefs .fab-wrap { display: none !important; }
 
 /* رقم النسخة جنب الاسم بالقائمة الجانبية */

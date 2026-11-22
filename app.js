@@ -3886,7 +3886,7 @@ function enableSwipeUp() {
 function enableSwipeDown(box) {
   let y0 = null, x0 = 0, dy = 0;
   box.addEventListener('touchstart', e => {
-    if (e.touches.length !== 1 || e.target.closest('.np-bottom, .np-menu') || document.fullscreenElement) { y0 = null; return; }
+    if (e.touches.length !== 1 || e.target.closest('.np-bottom, .np-menu') || document.fullscreenElement || box.classList.contains('fakefs')) { y0 = null; return; }
     y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0;
   }, { passive: true });
   box.addEventListener('touchmove', e => {
@@ -3913,7 +3913,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261122114742';
+const APP_VERSION = '20261122164922';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

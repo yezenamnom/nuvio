@@ -287,6 +287,7 @@
       if (this.dead || !(r > 0.3 && r < 4)) return;
       this.ratio = r;
       this.box.style.setProperty('--vr', r.toFixed(4));
+      if (this._fakeFs) this._fitRot(); // طلع الفيديو طولي؟ ما منلفّو
     }
     setMarks(segs) { this.segs = segs || []; this._drawMarks(); }
     setChapters(ch) { this.chapters = ch || []; this._drawMarks(); this._chapLabel(true); }
@@ -588,7 +589,7 @@
       this.bGear.onclick = e => { e.stopPropagation(); this._menu(); };
 
       // شريط التقدّم: سحب بالماوس أو بالإصبع
-      const frac = e => { const r = this.bar.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); };
+      const frac = e => Math.min(1, Math.max(0, this._along(e, this.bar)));
       let drag = false;
       // الوقت + صورة المعاينة فوق الإصبع/الماوس (من أول لمسة، مش بس لمّا يتحرّك)
       const peek = f => {
@@ -668,7 +669,7 @@
         if (!this.menu.hidden) { this.menu.hidden = true; return; }
         const touch = e.pointerType === 'touch';
         const now = Date.now();
-        const r = box.getBoundingClientRect(); const x = (e.clientX - r.left) / r.width;
+        const x = this._along(e, box);
         if (now - lastTap < 300 && (x < 0.35 || x > 0.65)) {
           clearTimeout(tapT); lastTap = 0;
           this.skip(x < 0.35 ? -10 : 10);
@@ -782,7 +783,7 @@
       this.markTransition();
       if (this._fakeFs) { this._setFakeFs(false); return; }
       if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
-      if (box.requestFullscreen) {
+      if (box.requestFullscreen && document.fullscreenEnabled !== false) { // الآيفون ما بيسمح فيها: لا تضيّع الكبسة عليها
         try {
           await box.requestFullscreen({ navigationUI: 'hide' });
           if (v.videoWidth > v.videoHeight) { try { await screen.orientation.lock('landscape'); } catch { /* */ } }
@@ -799,7 +800,22 @@
       document.documentElement.classList.toggle('np-fakefs', this._fakeFs);
       this.bFs.innerHTML = this._fakeFs ? ICON.fsx : ICON.fs;
       lockScroll(this._fakeFs);
+      // التلفون واقف (أو قفل التدوير شغّال) والفيديو عريض: المشغّل بينلفّ بالعرض متل يوتيوب، ولمّا تلفّ التلفون بيرجع عادي
+      if (!this._rotFit) this._rotFit = () => this._fitRot();
+      ['resize', 'orientationchange'].forEach(n => (this._fakeFs ? window.addEventListener : window.removeEventListener).call(window, n, this._rotFit));
+      this._fitRot();
       this._showUI();
+    }
+    _fitRot() {
+      const rot = !!this._fakeFs && innerHeight > innerWidth && !(this.ratio && this.ratio < 1.05);
+      if (rot === !!this._rot) return;
+      this._rot = rot;
+      this.box.classList.toggle('np-rot', rot);
+    }
+    /* وين الإصبع على طول العنصر (0 = أولو، 1 = آخرو) — والمشغّل ملفوف بالعرض: الطول عالشاشة صار من فوق لتحت */
+    _along(e, el) {
+      const r = el.getBoundingClientRect();
+      return this._rot ? (e.clientY - r.top) / (r.height || 1) : (e.clientX - r.left) / (r.width || 1);
     }
 
     _progress() {
