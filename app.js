@@ -2778,7 +2778,11 @@ async function renderWatch(id, startTime) {
         if (waitUser || !media.wantPlay) return; // ناطرين كبسة «تشغيل» منك
         if (now - media.loadAt > 3500) {
           const started = media.st === 1 || media.st === 3 || media.ct > media.t0 + 0.3;
-          if (!started) { // ما بلّش أبداً (الموبايل منع التشغيل): صورتنا بتضل فوق وزر التشغيل تبعنا بيبيّن
+          if (!started) {
+            // مشغّل يوتيوب لسّا عم يحمّل (عالموبايل بياخد ٣-٥ ثواني): منستنّاه يجهز، وبعدين منعطيه ٣ ثواني يحاول يشغّل
+            const blocked = media.readyAt ? now - media.readyAt > 3000 : now - media.loadAt > 12000;
+            if (!blocked) return;
+            // ما بلّش أبداً (الموبايل منع التشغيل): صورتنا بتضل فوق وزر التشغيل تبعنا بيبيّن
             waitUser = true; msg.textContent = ''; media.wantPlay = false; media._emit('pause'); return;
           }
           if (adLike()) {
@@ -3872,7 +3876,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261122055731';
+const APP_VERSION = '20261122055947';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });

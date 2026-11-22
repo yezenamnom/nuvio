@@ -880,7 +880,7 @@
     _menu(open) {
       if (this._sheet) { this._closeSheet(); return; }
       const v = this.video;
-      const fs = document.fullscreenElement === this.box;
+      const fs = document.fullscreenElement === this.box || !!this._fakeFs; // الآيفون مكبّر (ملء شاشة تبعنا): القائمة جوّا المشغّل، مش تحتو
       const pop = !document.documentElement.classList.contains('tv') && matchMedia('(hover: hover) and (pointer: fine)').matches && this.box.getBoundingClientRect().width >= 520;
       const ov = mk('div', 'np-sheet-ov' + (fs ? ' in-fs' : '') + (pop ? ' pop' : ''));
       const sh = mk('div', 'np-sheet'); sh.dir = 'rtl';
@@ -1228,7 +1228,7 @@
       this.st = -1; this.vid = ''; this.curDur = 0; this.ct0 = -1; this.ctMoveAt = 0; this.seekingTo = null;
       this.t0 = Math.max(0, Math.floor(start || 0)); this.ct = this.t0; this.ctAt = 0;
       this.loadAt = Date.now(); this._kicking = false;
-      this._ccN = 0; this._ccSched = false;
+      this._ccN = 0; this._ccSched = false; this.readyAt = 0;
       const cc = YtMedia.ccOn() ? '&cc_load_policy=1&cc_lang_pref=ar' : '';
       const url = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(this.id)}?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&iv_load_policy=3&rel=0&playsinline=1&enablejsapi=1${cc}&start=${this.t0}&origin=${encodeURIComponent(location.origin)}&_=${Date.now()}`;
       // بالنافذة العايمة (بلا عنوان) يوتيوب بيرفض: منمرّق عبر صفحة وسيطة من موقعنا (ytpip.html)
@@ -1244,7 +1244,7 @@
       let d = e.data; try { d = typeof d === 'string' ? JSON.parse(d) : d; } catch { return; }
       if (!d || typeof d !== 'object') return;
       if (d.event === 'onError') { this.errorCode = d.info; this._emit('yterror'); return; }
-      if (d.event === 'onReady' || d.event === 'initialDelivery') { this._kick(); this.applyCc(); if (d.event === 'onReady') this.cmd('addEventListener', ['onApiChange']); }
+      if (d.event === 'onReady' || d.event === 'initialDelivery') { if (!this.readyAt) this.readyAt = Date.now(); this._kick(); this.applyCc(); if (d.event === 'onReady') this.cmd('addEventListener', ['onApiChange']); }
       // يوتيوب بيحمّل الترجمة لحالو (بيتذكّر آخر مرة شغّلتها، أو صاحب الفيديو مفعّلها): إذا مطفية عنا، منرجع نطفيها
       if (d.event === 'onApiChange' && !YtMedia.ccOn()) this.applyCc();
       const i = d.info; if (!i || typeof i !== 'object') return;
