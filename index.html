@@ -19,10 +19,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap">
-  <link rel="stylesheet" href="style.css?v=20261122055204">
+  <link rel="stylesheet" href="style.css?v=20261122055731">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.12.6/shaka-player.compiled.js" defer></script>
-  <script src="player.js?v=20261122055204" defer></script>
-  <script src="more.js?v=20261122055204" defer></script>
+  <script src="player.js?v=20261122055731" defer></script>
+  <script src="more.js?v=20261122055731" defer></script>
   <script>
   /* الأخطاء: بتنبعت للوحة التحكّم (بلا بيانات شخصية: الرسالة، الملف، نوع الجهاز، الصفحة) */
   (function () {
@@ -32,7 +32,7 @@
     function send(m, s, l) {
       m = String(m || ''); if (local || !m || skip.test(m) || ++n > 6) return;
       try {
-        var v = (document.querySelector('script[src*="app.js?v=20261122055204"]') || {}).src || '';
+        var v = (document.querySelector('script[src*="app.js?v=20261122055731"]') || {}).src || '';
         fetch('https://tube.glanzstar.de/acc/err', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, keepalive: true,
           body: JSON.stringify({ m: m.slice(0, 400), s: String(s || '').split('/').pop().slice(0, 60), l: l || 0, v: (v.match(/v=(\d+)/) || [])[1] || '', ua: navigator.userAgent.slice(0, 180), p: (location.hash.slice(1) || '/').split('?')[0] }) });
       } catch (e) { /* */ }
@@ -48,18 +48,24 @@
     if (!Object.fromEntries) Object.fromEntries = function (it) { var o = {}; Array.from(it).forEach(function (kv) { o[kv[0]] = kv[1]; }); return o; };
     if (!Array.prototype.flat) Array.prototype.flat = function () { return [].concat.apply([], this); };
     try {
-      var q = location.search, p = JSON.parse(localStorage.getItem('nuvio:prefs') || '{}');
-      if (/[?&]tv=1/.test(q)) { p.tvMode = 'on'; localStorage.setItem('nuvio:prefs', JSON.stringify(p)); }
-      if (/[?&]tv=0/.test(q)) { p.tvMode = 'off'; localStorage.setItem('nuvio:prefs', JSON.stringify(p)); }
-      var tv = p.tvMode === 'on' || (p.tvMode !== 'off' && /SmartTV|SMART-TV|Tizen|Web0S|webOS|NetCast|BRAVIA|AFT[A-Z]|CrKey|HbbTV|Android TV|GoogleTV|VIDAA|Opera TV|Roku|PhilipsTV|Hisense|TV Safari|PlayStation|Xbox/i.test(navigator.userAgent));
+      // وضع التلفزيون لكل جهاز لحالو (nuvio:tvLocal) — مش من الإعدادات اللي بتتزامن مع الحساب (كان يطلع عالتلفون والكمبيوتر)
+      var q = location.search, p = JSON.parse(localStorage.getItem('nuvio:prefs') || '{}'), lt = localStorage.getItem('nuvio:tvLocal') || '';
+      if (p.tvMode) { // الإعداد القديم (كان يتزامن): «دايماً» بينتقل بس لجهاز بلا لمس وبلا ماوس (تلفزيون)، والتلفون والكمبيوتر بيتجاهلوه
+        var noPtr = !('ontouchstart' in window) && !(window.matchMedia && matchMedia('(any-pointer: fine)').matches);
+        if (!lt && p.tvMode === 'on' && noPtr) { lt = 'on'; localStorage.setItem('nuvio:tvLocal', lt); }
+        delete p.tvMode; localStorage.setItem('nuvio:prefs', JSON.stringify(p));
+      }
+      if (/[?&]tv=1/.test(q)) { lt = 'on'; localStorage.setItem('nuvio:tvLocal', lt); }
+      if (/[?&]tv=0/.test(q)) { lt = 'off'; localStorage.setItem('nuvio:tvLocal', lt); }
+      var tv = lt === 'on' || (lt !== 'off' && /SmartTV|SMART-TV|Tizen|Web0S|webOS|NetCast|BRAVIA|AFT[A-Z]|CrKey|HbbTV|Android TV|GoogleTV|VIDAA|Opera TV|Roku|PhilipsTV|Hisense|TV Safari|PlayStation|Xbox/i.test(navigator.userAgent));
       if (tv) document.documentElement.className += ' tv';
     } catch (e) { /* */ }
   })();
   </script>
-  <script src="tv.js?v=20261122055204" defer></script>
-  <script src="acc.js?v=20261122055204" defer></script>
-  <script src="music.js?v=20261122055204" defer></script>
-  <script src="app.js?v=20261122055204" defer></script>
+  <script src="tv.js?v=20261122055731" defer></script>
+  <script src="acc.js?v=20261122055731" defer></script>
+  <script src="music.js?v=20261122055731" defer></script>
+  <script src="app.js?v=20261122055731" defer></script>
 </head>
 <body>
   <header class="topbar">

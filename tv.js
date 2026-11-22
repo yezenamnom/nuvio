@@ -5,8 +5,10 @@
 
 var TV_UA = /SmartTV|SMART-TV|Tizen|Web0S|webOS|NetCast|BRAVIA|AFT[A-Z]|CrKey|HbbTV|Android TV|GoogleTV|VIDAA|Opera TV|Roku|PhilipsTV|Hisense|TV Safari|PlayStation|Xbox/i;
 function isTV() { return document.documentElement.classList.contains('tv'); }
+// لهالجهاز بس (ما بيتزامن مع الحساب): تلفزيونك ما بيقلب تلفونك وكمبيوترك لوضع التلفزيون
+function tvLocalMode() { try { return localStorage.getItem('nuvio:tvLocal') || 'auto'; } catch (e) { return 'auto'; } }
 function setTVMode(m) {
-  prefs.set('tvMode', m);
+  try { localStorage.setItem('nuvio:tvLocal', m); } catch (e) { /* */ }
   var on = m === 'on' || (m !== 'off' && TV_UA.test(navigator.userAgent));
   document.documentElement.classList.toggle('tv', on);
   location.reload();

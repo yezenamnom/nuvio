@@ -667,10 +667,11 @@ function drawerSettings(d, sep, closeDrawerFn) {
   const TVM = { auto: 'تلقائي', on: 'دايماً', off: 'أبداً' };
   const tvBtn = el('button', 'drawer-item');
   const tvic = el('span', 'drawer-ico'); tvic.innerHTML = window.ico ? window.ico('subs') : '';
-  const tvval = el('span', 'drawer-count', TVM[prefs.get('tvMode') || 'auto']);
+  const tvMode = () => (typeof tvLocalMode === 'function' ? tvLocalMode() : 'auto');
+  const tvval = el('span', 'drawer-count', TVM[tvMode()] || TVM.auto);
   const tvtx = el('span', 'drawer-tx'); tvtx.append(el('span', null, 'وضع التلفزيون'), el('small', 'muted', 'واجهة كبيرة وتنقّل بالريموت'));
   tvBtn.append(tvic, tvtx, tvval);
-  tvBtn.onclick = () => { const order = ['auto', 'on', 'off']; const nx = order[(order.indexOf(prefs.get('tvMode') || 'auto') + 1) % 3]; tvval.textContent = TVM[nx]; setTVMode(nx); };
+  tvBtn.onclick = () => { const order = ['auto', 'on', 'off']; const nx = order[(order.indexOf(tvMode()) + 1) % 3]; tvval.textContent = TVM[nx]; setTVMode(nx); };
   // المشغّل الأساسي: مشغّلنا (بلا إعلانات) أو يوتيوب بواجهتنا (التشغيل من جهازك)
   const PLY = { nuvio: 'تلقائي', yt: 'يوتيوب' };
   const plBtn = el('button', 'drawer-item');
