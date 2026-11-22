@@ -1926,7 +1926,8 @@ body.shorts-clean .shorts-unclean svg { width: 24px; height: 24px; fill: none; s
 
 /* ================= فلتر الألوان (player.js → nuvioVf) =================
    متغيّر واحد عالصفحة كلها: المشغّل، مشغّل يوتيوب المضمّن، المشغّل الصغير، والشورتس */
-.np video, .yt-frame, .short-video, .short-yt iframe { filter: var(--nv-vf, none); }
+.yt-frame, .short-yt iframe { filter: var(--nv-vf, none); } /* مشغّل يوتيوب المضمّن: ألوان بس (المتصفح بيمنع فلاتر SVG هونيك) */
+.np video, .short-video { filter: var(--nv-vf-v, var(--nv-vf, none)); } /* الفيديو تبعنا: ألوان + حدّة الصورة */
 .np-vf-t { font-size: .8rem; font-weight: 800; color: var(--muted); padding: 10px 12px 4px; }
 .np-vf-pre { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 10px 6px; }
 .np-vf-chip { border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06); color: var(--sheet-fg); font: inherit; font-size: .85rem; font-weight: 700; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
@@ -1950,3 +1951,14 @@ body.shorts-clean .shorts-unclean svg { width: 24px; height: 24px; fill: none; s
     height: calc(min(100cqh, calc(100cqw / var(--ar))) + 2 * var(--crop));
   }
 }
+/* غاما فلتر الألوان: طبقة «soft-light» فوق الفيديو (player.js → vfApply) */
+.np-gamma { position: absolute; top: 0; right: 0; bottom: 0; left: 0; pointer-events: none; mix-blend-mode: soft-light; background: var(--nv-gamma-c, transparent); opacity: var(--nv-gamma-a, 0); }
+.np-vf-chip.mine { display: inline-flex; align-items: center; gap: 6px; padding-inline-end: 6px; }
+.np-vf-x { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,.16); font-size: .8rem; line-height: 1; }
+.np-vf-x:hover { background: rgba(255,255,255,.32); }
+.np-vf-empty { color: var(--muted); font-size: .8rem; padding: 2px 12px 6px; }
+.np-vf-sl.dis { opacity: .4; }
+.np-vf-save { display: flex; gap: 8px; align-items: center; padding: 6px 10px 0; }
+.np-vf-save input { flex: 1; min-width: 0; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06); color: var(--sheet-fg); font: inherit; font-size: .88rem; border-radius: 10px; padding: 9px 10px; outline: none; }
+.np-vf-save input:focus { border-color: #ec4899; }
+.np-vf-save .np-vf-reset { width: auto; margin: 0; white-space: nowrap; padding: 9px 14px; background: var(--grad); color: #fff; }

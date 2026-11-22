@@ -62,45 +62,63 @@
   /* ================= فلتر الألوان (متل لوحة ألوان كرت الشاشة) =================
      سطوع، تباين، غاما، حيوية الألوان، درجة اللون — مع جاهزات. بينحفظ لكل الفيديوهات (وكمان الشورتس والمشغّل الصغير).
      «إيقاف» بيرجّع الصورة الأصلية بلا ما تضيع إعداداتك. بيشتغل على كرت الشاشة (خفيف عالجهاز). */
-  const VF_DEF = { on: false, p: 'vivid', b: 100, c: 100, g: 1, s: 100, h: 0 };
+  const VF_DEF = { on: false, p: 'vivid', b: 100, c: 100, g: 1, s: 100, h: 0, k: 0 };
   const VF_PRESETS = [
-    ['vivid', 'زاهي', { b: 103, c: 110, g: 1, s: 150, h: 0 }],
-    ['game', 'ألعاب', { b: 100, c: 115, g: 1.15, s: 180, h: 0 }],
-    ['cinema', 'سينما', { b: 97, c: 118, g: 0.95, s: 118, h: 0 }],
-    ['bright', 'فاتح', { b: 112, c: 105, g: 1.35, s: 115, h: 0 }],
-    ['soft', 'ناعم', { b: 97, c: 92, g: 1, s: 88, h: 0 }],
-    ['bw', 'أبيض وأسود', { b: 100, c: 118, g: 1, s: 0, h: 0 }],
+    ['vivid', 'زاهي', { b: 103, c: 110, g: 1, s: 150, h: 0, k: 15 }],
+    ['game', 'ألعاب', { b: 100, c: 115, g: 1.15, s: 180, h: 0, k: 30 }],
+    ['cinema', 'سينما', { b: 97, c: 118, g: 0.95, s: 118, h: 0, k: 10 }],
+    ['bright', 'فاتح', { b: 112, c: 105, g: 1.35, s: 115, h: 0, k: 0 }],
+    ['soft', 'ناعم', { b: 97, c: 92, g: 1, s: 88, h: 0, k: 0 }],
+    ['bw', 'أبيض وأسود', { b: 100, c: 118, g: 1, s: 0, h: 0, k: 10 }],
   ];
+  const VF_KEYS = ['b', 'c', 'g', 's', 'h', 'k'];
   const VF_SLIDERS = [ // [مفتاح، اسم، أقل، أكتر، خطوة، كيف بينكتب]
     ['b', 'السطوع', 50, 150, 1, x => `${x}%`],
     ['c', 'التباين', 50, 200, 1, x => `${x}%`],
     ['g', 'غاما', 0.5, 2, 0.01, x => (+x).toFixed(2)],
     ['s', 'حيوية الألوان', 0, 300, 1, x => `${x}%`],
     ['h', 'درجة اللون', -180, 180, 1, x => `${x}°`],
+    ['k', 'حدّة الصورة', 0, 100, 1, x => `${x}%`],
   ];
+  // فلاتري: إعدادات حفظتها إنت باسم (بتطلع بالقائمة جنب الجاهزات)
+  const vfMine = () => { const P = window.nuvioPref; const l = P && P.get('vfMine'); return Array.isArray(l) ? l.filter(x => x && x.id && x.name) : []; };
+  const vfMineSet = l => { const P = window.nuvioPref; if (P) P.set('vfMine', l.slice(0, 20)); };
   const vfGet = () => { const P = window.nuvioPref; const v = P && P.get('vf'); return { ...VF_DEF, ...(v && typeof v === 'object' ? v : {}) }; };
   function vfApply(o = vfGet()) {
     const root = document.documentElement;
-    if (!o.on) { root.style.removeProperty('--nv-vf'); return; }
+    if (!o.on) { ['--nv-vf', '--nv-vf-v', '--nv-gamma-a', '--nv-gamma-c'].forEach(k => root.style.removeProperty(k)); return; }
     const parts = [];
-    if (Math.abs(o.g - 1) > 0.005 && document.body) { // غاما: ما إلها فلتر CSS، فمنستعمل فلتر SVG صغير
-      let f = document.getElementById('nv-gamma');
-      if (!f) {
-        const NS = 'http://www.w3.org/2000/svg';
-        const sv = document.createElementNS(NS, 'svg'); sv.setAttribute('width', '0'); sv.setAttribute('height', '0'); sv.setAttribute('aria-hidden', 'true'); sv.style.position = 'absolute';
-        f = document.createElementNS(NS, 'filter'); f.id = 'nv-gamma'; f.setAttribute('color-interpolation-filters', 'sRGB');
-        const ct = document.createElementNS(NS, 'feComponentTransfer');
-        for (const ch of ['R', 'G', 'B']) { const fn = document.createElementNS(NS, 'feFunc' + ch); fn.setAttribute('type', 'gamma'); fn.setAttribute('amplitude', '1'); fn.setAttribute('offset', '0'); ct.append(fn); }
-        f.append(ct); sv.append(f); document.body.append(sv);
-      }
-      f.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(fn => fn.setAttribute('exponent', String(+(1 / o.g).toFixed(3)))); // غاما أعلى = الصورة أفتح (متل إنفيديا)
-      parts.push('url(#nv-gamma)');
-    }
+    // غاما: ما إلها فلتر CSS (وفلتر SVG المتصفح بيرفضو عالفيديو وبيلغي كل الفلتر معو). بدالها طبقة فوق الفيديو بخلط «soft-light»:
+    // أبيض بيقرّب كل لون من جذرو التربيعي (= غاما 2)، وأسود من مربّعو (= غاما 0.5) — والشفافية بتحدّد قدّيش (مطابقة عالرمادي النص)
+    const g = +o.g || 1;
+    let ga = 0, gc = '#fff';
+    if (g > 1.005) ga = (Math.pow(0.5, 1 / g) - 0.5) / (Math.SQRT1_2 - 0.5);
+    else if (g < 0.995) { ga = (0.5 - Math.pow(0.5, 1 / g)) / 0.25; gc = '#000'; }
+    ga = Math.max(0, Math.min(1, ga));
+    if (ga > 0) { root.style.setProperty('--nv-gamma-a', ga.toFixed(3)); root.style.setProperty('--nv-gamma-c', gc); }
+    else { root.style.removeProperty('--nv-gamma-a'); root.style.removeProperty('--nv-gamma-c'); }
     if (o.b !== 100) parts.push(`brightness(${o.b}%)`);
     if (o.c !== 100) parts.push(`contrast(${o.c}%)`);
     if (o.s !== 100) parts.push(`saturate(${o.s}%)`);
     if (o.h) parts.push(`hue-rotate(${o.h}deg)`);
     if (parts.length) root.style.setProperty('--nv-vf', parts.join(' ')); else root.style.removeProperty('--nv-vf');
+    // حدّة الصورة: فلتر SVG (تقوية الحواف). بيشتغل بس على الفيديو تبعنا — المتصفح بيمنعو على مشغّل يوتيوب المضمّن (إطار من موقع تاني)،
+    // فبينحط بمتغيّر لحالو (--nv-vf-v) لحتى ما يلغي الألوان هونيك
+    const k = Math.max(0, Math.min(100, +o.k || 0));
+    if (k > 0 && document.body) {
+      let f = document.getElementById('nv-sharp');
+      if (!f) {
+        const NS = 'http://www.w3.org/2000/svg';
+        const sv = document.createElementNS(NS, 'svg'); sv.setAttribute('width', '0'); sv.setAttribute('height', '0'); sv.setAttribute('aria-hidden', 'true'); sv.style.position = 'absolute';
+        f = document.createElementNS(NS, 'filter'); f.id = 'nv-sharp'; f.setAttribute('color-interpolation-filters', 'sRGB');
+        const cm = document.createElementNS(NS, 'feConvolveMatrix'); cm.setAttribute('order', '3'); cm.setAttribute('preserveAlpha', 'true'); cm.setAttribute('edgeMode', 'duplicate');
+        f.append(cm); sv.append(f); document.body.append(sv);
+      }
+      const a = +(k / 100 * 0.8).toFixed(3); // ١٠٠٪ = تقوية قويّة بس بلا هالات بشعة
+      f.firstChild.setAttribute('kernelMatrix', `0 ${-a} 0 ${-a} ${+(1 + 4 * a).toFixed(3)} ${-a} 0 ${-a} 0`);
+      root.style.setProperty('--nv-vf-v', ['url(#nv-sharp)', ...parts].join(' '));
+    } else if (parts.length) root.style.setProperty('--nv-vf-v', parts.join(' '));
+    else root.style.removeProperty('--nv-vf-v');
   }
   function vfSet(o) { const P = window.nuvioPref; if (P) P.set('vf', o); vfApply(o); }
   window.nuvioVf = { get: vfGet, set: vfSet, apply: vfApply, presets: VF_PRESETS };
@@ -169,7 +187,7 @@
       this.unmuteEl.onclick = e => { e.stopPropagation(); this._unmute(); };
       ['pointerdown', 'pointerup'].forEach(n => this.unmuteEl.addEventListener(n, e => e.stopPropagation())); // الكبسة عالزر ما بتوقّف الفيديو
       this.ui.append(this.spinner, this.big, this.seekL, this.seekR, this.msgEl, this.speedEl, this.unmuteEl, bottom, this.menu);
-      box.replaceChildren(opts.media ? opts.media.el : v, this.ui);
+      box.replaceChildren(opts.media ? opts.media.el : v, mk('div', 'np-gamma'), this.ui); // np-gamma: غاما فلتر الألوان (فوق الفيديو، تحت الأزرار)
       this._bind();
       this._showUI();
       this._watchdog();
@@ -951,10 +969,27 @@
         let o = vfGet();
         const onRow = row('vf', 'تشغيل الفلتر', '', () => { o = { ...o, on: !o.on }; vfSet(o); sync(); }, o.on);
         const chips = mk('div', 'np-vf-pre');
+        const mineBox = mk('div', 'np-vf-pre');
         const sliders = mk('div', 'np-vf-sls');
         const inputs = {};
+        const embed = !!(this.opts.media && this.video.applyCc); // مشغّل يوتيوب المضمّن: الحدّة ما بتمشي
+        const drawMine = () => {
+          mineBox.replaceChildren();
+          const l = vfMine();
+          if (!l.length) { const e = mk('div', 'np-vf-empty'); e.textContent = 'لسّا ما حفظت فلتر. عدّل تحت واكبس «احفظ هالإعدادات».'; mineBox.append(e); return; }
+          for (const m of l) {
+            const b = mk('button', 'np-vf-chip mine'); b.dataset.p = m.id;
+            const t = mk('span'); t.textContent = m.name;
+            const x = mk('span', 'np-vf-x', '×'); x.title = 'امسح';
+            x.onclick = e => { e.stopPropagation(); vfMineSet(vfMine().filter(y => y.id !== m.id)); if (o.p === m.id) o = { ...o, p: 'custom' }; vfSet(o); drawMine(); sync(); };
+            b.append(t, x);
+            b.onclick = e => { e.stopPropagation(); const v = {}; VF_KEYS.forEach(k => { v[k] = m[k] != null ? m[k] : VF_DEF[k]; }); o = { ...o, ...v, p: m.id, on: true }; vfSet(o); sync(); };
+            mineBox.append(b);
+          }
+          sync();
+        };
         function sync() {
-          chips.querySelectorAll('button').forEach(b => b.classList.toggle('on', o.on && b.dataset.p === o.p));
+          [...chips.querySelectorAll('button'), ...mineBox.querySelectorAll('button')].forEach(b => b.classList.toggle('on', o.on && b.dataset.p === o.p));
           for (const [k, , , , , f] of VF_SLIDERS) { const it = inputs[k]; if (it) { it.input.value = o[k]; it.val.textContent = f(o[k]); } }
           onRow.querySelector('.np-sw').classList.toggle('on', o.on);
           sliders.classList.toggle('off', !o.on);
@@ -965,10 +1000,11 @@
           chips.append(b);
         }
         for (const [k, label, min, max, step, f] of VF_SLIDERS) {
-          const line = mk('label', 'np-vf-sl');
+          const line = mk('label', 'np-vf-sl' + (k === 'k' && embed ? ' dis' : ''));
           const name = mk('span', 'np-vf-n'); name.textContent = label;
           const input = mk('input'); input.type = 'range'; input.min = min; input.max = max; input.step = step; input.value = o[k]; input.dir = 'ltr';
           const val = mk('span', 'np-vf-v'); val.textContent = f(o[k]);
+          if (k === 'k' && embed) input.disabled = true;
           input.addEventListener('input', () => { o = { ...o, [k]: +input.value, p: 'custom', on: true }; vfSet(o); sync(); });
           ['pointerdown', 'click', 'touchstart'].forEach(n => input.addEventListener(n, e => e.stopPropagation(), { passive: true }));
           line.append(name, input, val);
@@ -977,12 +1013,33 @@
         }
         const reset = mk('button', 'np-vf-reset'); reset.textContent = 'رجّع الصورة الأصلية';
         reset.onclick = e => { e.stopPropagation(); o = { ...VF_DEF }; vfSet(o); sync(); };
+        // احفظ الإعدادات الحالية باسم ← بتطلع بـ«فلاتري»
+        const save = mk('div', 'np-vf-save');
+        const nameIn = mk('input'); nameIn.type = 'text'; nameIn.maxLength = 24; nameIn.placeholder = 'اسم الفلتر'; nameIn.dir = 'auto';
+        const saveB = mk('button', 'np-vf-reset'); saveB.textContent = 'احفظ هالإعدادات';
+        ['pointerdown', 'click', 'touchstart', 'keydown'].forEach(n => nameIn.addEventListener(n, e => e.stopPropagation(), { passive: true }));
+        saveB.onclick = e => {
+          e.stopPropagation();
+          const l = vfMine();
+          const name = (nameIn.value || '').trim() || `فلتري ${l.length + 1}`;
+          const m = { id: 'm' + Date.now().toString(36), name };
+          VF_KEYS.forEach(k => { m[k] = o[k]; });
+          vfMineSet([...l.filter(x => x.name !== name), m]);
+          o = { ...o, p: m.id, on: true }; vfSet(o);
+          nameIn.value = ''; drawMine();
+          saveB.textContent = 'انحفظ ✓'; setTimeout(() => { saveB.textContent = 'احفظ هالإعدادات'; }, 1500);
+        };
+        save.append(nameIn, saveB);
         const t1 = mk('div', 'np-vf-t'); t1.textContent = 'جاهزات';
+        const t3 = mk('div', 'np-vf-t'); t3.textContent = 'فلاتري';
         const t2 = mk('div', 'np-vf-t'); t2.textContent = 'تعديل يدوي';
-        sh.append(h, onRow, t1, chips, t2, sliders, reset);
+        const parts = [h, onRow, t1, chips, t3, mineBox, t2, sliders];
+        if (embed) { const n = mk('div', 'np-vf-empty'); n.textContent = 'حدّة الصورة بتشتغل بمشغّل Nuvio بس — هالفيديو شغّال بمشغّل يوتيوب المضمّن (المتصفح ما بيسمح).'; parts.push(n); }
+        sh.append(...parts, save, reset);
+        drawMine();
         sync();
       };
-      const vfLabel = () => { const o = vfGet(); if (!o.on) return 'مطفي'; const p = VF_PRESETS.find(x => x[0] === o.p); return p ? p[1] : 'مخصّص'; };
+      const vfLabel = () => { const o = vfGet(); if (!o.on) return 'مطفي'; const p = VF_PRESETS.find(x => x[0] === o.p); if (p) return p[1]; const m = vfMine().find(x => x.id === o.p); return m ? m.name : 'مخصّص'; };
       // الترتيب متل يوتيوب: المفاتيح فوق، والجودة تحت (أقرب شي للزر)
       const main = () => {
         sh.replaceChildren(mk('div', 'np-grip'));
