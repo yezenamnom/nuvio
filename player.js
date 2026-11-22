@@ -59,6 +59,53 @@
   window.nuvioLockScroll = lockScroll;
   const mk = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 
+  /* ================= فلتر الألوان (متل لوحة ألوان كرت الشاشة) =================
+     سطوع، تباين، غاما، حيوية الألوان، درجة اللون — مع جاهزات. بينحفظ لكل الفيديوهات (وكمان الشورتس والمشغّل الصغير).
+     «إيقاف» بيرجّع الصورة الأصلية بلا ما تضيع إعداداتك. بيشتغل على كرت الشاشة (خفيف عالجهاز). */
+  const VF_DEF = { on: false, p: 'vivid', b: 100, c: 100, g: 1, s: 100, h: 0 };
+  const VF_PRESETS = [
+    ['vivid', 'زاهي', { b: 103, c: 110, g: 1, s: 150, h: 0 }],
+    ['game', 'ألعاب', { b: 100, c: 115, g: 1.15, s: 180, h: 0 }],
+    ['cinema', 'سينما', { b: 97, c: 118, g: 0.95, s: 118, h: 0 }],
+    ['bright', 'فاتح', { b: 112, c: 105, g: 1.35, s: 115, h: 0 }],
+    ['soft', 'ناعم', { b: 97, c: 92, g: 1, s: 88, h: 0 }],
+    ['bw', 'أبيض وأسود', { b: 100, c: 118, g: 1, s: 0, h: 0 }],
+  ];
+  const VF_SLIDERS = [ // [مفتاح، اسم، أقل، أكتر، خطوة، كيف بينكتب]
+    ['b', 'السطوع', 50, 150, 1, x => `${x}%`],
+    ['c', 'التباين', 50, 200, 1, x => `${x}%`],
+    ['g', 'غاما', 0.5, 2, 0.01, x => (+x).toFixed(2)],
+    ['s', 'حيوية الألوان', 0, 300, 1, x => `${x}%`],
+    ['h', 'درجة اللون', -180, 180, 1, x => `${x}°`],
+  ];
+  const vfGet = () => { const P = window.nuvioPref; const v = P && P.get('vf'); return { ...VF_DEF, ...(v && typeof v === 'object' ? v : {}) }; };
+  function vfApply(o = vfGet()) {
+    const root = document.documentElement;
+    if (!o.on) { root.style.removeProperty('--nv-vf'); return; }
+    const parts = [];
+    if (Math.abs(o.g - 1) > 0.005 && document.body) { // غاما: ما إلها فلتر CSS، فمنستعمل فلتر SVG صغير
+      let f = document.getElementById('nv-gamma');
+      if (!f) {
+        const NS = 'http://www.w3.org/2000/svg';
+        const sv = document.createElementNS(NS, 'svg'); sv.setAttribute('width', '0'); sv.setAttribute('height', '0'); sv.setAttribute('aria-hidden', 'true'); sv.style.position = 'absolute';
+        f = document.createElementNS(NS, 'filter'); f.id = 'nv-gamma'; f.setAttribute('color-interpolation-filters', 'sRGB');
+        const ct = document.createElementNS(NS, 'feComponentTransfer');
+        for (const ch of ['R', 'G', 'B']) { const fn = document.createElementNS(NS, 'feFunc' + ch); fn.setAttribute('type', 'gamma'); fn.setAttribute('amplitude', '1'); fn.setAttribute('offset', '0'); ct.append(fn); }
+        f.append(ct); sv.append(f); document.body.append(sv);
+      }
+      f.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(fn => fn.setAttribute('exponent', String(+(1 / o.g).toFixed(3)))); // غاما أعلى = الصورة أفتح (متل إنفيديا)
+      parts.push('url(#nv-gamma)');
+    }
+    if (o.b !== 100) parts.push(`brightness(${o.b}%)`);
+    if (o.c !== 100) parts.push(`contrast(${o.c}%)`);
+    if (o.s !== 100) parts.push(`saturate(${o.s}%)`);
+    if (o.h) parts.push(`hue-rotate(${o.h}deg)`);
+    if (parts.length) root.style.setProperty('--nv-vf', parts.join(' ')); else root.style.removeProperty('--nv-vf');
+  }
+  function vfSet(o) { const P = window.nuvioPref; if (P) P.set('vf', o); vfApply(o); }
+  window.nuvioVf = { get: vfGet, set: vfSet, apply: vfApply, presets: VF_PRESETS };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => vfApply()); else setTimeout(() => vfApply(), 0);
+
   class NuvioPlayer {
     constructor(box, opts = {}) {
       this.box = box; this.opts = opts; this.shaka = null; this.dead = false;
@@ -863,6 +910,7 @@
         sv: '<path class="s" d="M3 12h2M7 8v8M11 5v14M15 8v8M19 10v4M21 12h0"/>',
         vb: '<path class="s" d="M5 9v6h3l5 4V5L8 9H5zM16.5 8.5a5 5 0 0 1 0 7"/>',
         am: '<rect class="s" x="5" y="7" width="14" height="10" rx="1.5"/><path class="s" d="M3 4l2 2M21 4l-2 2M3 20l2-2M21 20l-2-2M12 2v2M12 20v2"/>',
+        vf: '<path class="s" d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.9 1.2-1.8-.5-1-.1-2.2 1.2-2.2H17a4 4 0 0 0 4-4c0-5.5-4-10-9-10z"/><circle cx="7.5" cy="11" r="1.4"/><circle cx="10.5" cy="7" r="1.4"/><circle cx="15" cy="7.5" r="1.4"/>',
         hp: '<path class="s" d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect class="s" x="3" y="14" width="4" height="6" rx="1.5"/><rect class="s" x="17" y="14" width="4" height="6" rx="1.5"/>',
       };
       const icon = k => `<svg viewBox="0 0 24 24">${I[k]}</svg>`;
@@ -895,6 +943,46 @@
         const p = mk('div', 'np-note'); p.textContent = text;
         sh.append(h, p);
       };
+      // فلتر الألوان: تشغيل/إيقاف، جاهزات، وسلايدرات — كل تغيير بيبيّن فوراً عالفيديو
+      const vfPanel = () => {
+        sh.replaceChildren(mk('div', 'np-grip'));
+        const h = mk('button', 'np-sub-h'); h.textContent = '› فلتر الألوان';
+        h.onclick = e => { e.stopPropagation(); main(); };
+        let o = vfGet();
+        const onRow = row('vf', 'تشغيل الفلتر', '', () => { o = { ...o, on: !o.on }; vfSet(o); sync(); }, o.on);
+        const chips = mk('div', 'np-vf-pre');
+        const sliders = mk('div', 'np-vf-sls');
+        const inputs = {};
+        function sync() {
+          chips.querySelectorAll('button').forEach(b => b.classList.toggle('on', o.on && b.dataset.p === o.p));
+          for (const [k, , , , , f] of VF_SLIDERS) { const it = inputs[k]; if (it) { it.input.value = o[k]; it.val.textContent = f(o[k]); } }
+          onRow.querySelector('.np-sw').classList.toggle('on', o.on);
+          sliders.classList.toggle('off', !o.on);
+        }
+        for (const [id, label, val] of VF_PRESETS) {
+          const b = mk('button', 'np-vf-chip'); b.textContent = label; b.dataset.p = id;
+          b.onclick = e => { e.stopPropagation(); o = { ...o, ...val, p: id, on: true }; vfSet(o); sync(); };
+          chips.append(b);
+        }
+        for (const [k, label, min, max, step, f] of VF_SLIDERS) {
+          const line = mk('label', 'np-vf-sl');
+          const name = mk('span', 'np-vf-n'); name.textContent = label;
+          const input = mk('input'); input.type = 'range'; input.min = min; input.max = max; input.step = step; input.value = o[k]; input.dir = 'ltr';
+          const val = mk('span', 'np-vf-v'); val.textContent = f(o[k]);
+          input.addEventListener('input', () => { o = { ...o, [k]: +input.value, p: 'custom', on: true }; vfSet(o); sync(); });
+          ['pointerdown', 'click', 'touchstart'].forEach(n => input.addEventListener(n, e => e.stopPropagation(), { passive: true }));
+          line.append(name, input, val);
+          sliders.append(line);
+          inputs[k] = { input, val };
+        }
+        const reset = mk('button', 'np-vf-reset'); reset.textContent = 'رجّع الصورة الأصلية';
+        reset.onclick = e => { e.stopPropagation(); o = { ...VF_DEF }; vfSet(o); sync(); };
+        const t1 = mk('div', 'np-vf-t'); t1.textContent = 'جاهزات';
+        const t2 = mk('div', 'np-vf-t'); t2.textContent = 'تعديل يدوي';
+        sh.append(h, onRow, t1, chips, t2, sliders, reset);
+        sync();
+      };
+      const vfLabel = () => { const o = vfGet(); if (!o.on) return 'مطفي'; const p = VF_PRESETS.find(x => x[0] === o.p); return p ? p[1] : 'مخصّص'; };
       // الترتيب متل يوتيوب: المفاتيح فوق، والجودة تحت (أقرب شي للزر)
       const main = () => {
         sh.replaceChildren(mk('div', 'np-grip'));
@@ -916,6 +1004,8 @@
         }
         // الإضاءة السينمائية (كمبيوتر، الثيم الغامق)
         if (PF && window.nuvioAmbientOk && window.nuvioAmbientOk()) sh.append(row('am', 'الإضاءة السينمائية', '', r => { PF.set('ambient', PF.get('ambient') === false); r.querySelector('.np-sw').classList.toggle('on', PF.get('ambient') !== false); }, PF.get('ambient') !== false));
+        // فلتر الألوان
+        sh.append(row('vf', 'فلتر الألوان', vfLabel(), () => vfPanel()));
         // تكرار
         sh.append(row('lp', 'تكرار الفيديو', '', r => { this.setLoop(!this.loop); r.querySelector('.np-sw').classList.toggle('on', this.loop); }, !!this.loop));
         // إعدادات عامة من app.js
@@ -1081,7 +1171,7 @@
       this.st = -1; this.vid = ''; this.curDur = 0; this.ct0 = -1; this.ctMoveAt = 0; this.seekingTo = null;
       this.t0 = Math.max(0, Math.floor(start || 0)); this.ct = this.t0; this.ctAt = 0;
       this.loadAt = Date.now(); this._kicking = false;
-      this._ccN = 0;
+      this._ccN = 0; this._ccSched = false;
       const cc = YtMedia.ccOn() ? '&cc_load_policy=1&cc_lang_pref=ar' : '';
       const url = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(this.id)}?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&iv_load_policy=3&rel=0&playsinline=1&enablejsapi=1${cc}&start=${this.t0}&origin=${encodeURIComponent(location.origin)}&_=${Date.now()}`;
       // بالنافذة العايمة (بلا عنوان) يوتيوب بيرفض: منمرّق عبر صفحة وسيطة من موقعنا (ytpip.html)
@@ -1097,7 +1187,9 @@
       let d = e.data; try { d = typeof d === 'string' ? JSON.parse(d) : d; } catch { return; }
       if (!d || typeof d !== 'object') return;
       if (d.event === 'onError') { this.errorCode = d.info; this._emit('yterror'); return; }
-      if (d.event === 'onReady' || d.event === 'initialDelivery') { this._kick(); this.applyCc(); }
+      if (d.event === 'onReady' || d.event === 'initialDelivery') { this._kick(); this.applyCc(); if (d.event === 'onReady') this.cmd('addEventListener', ['onApiChange']); }
+      // يوتيوب بيحمّل الترجمة لحالو (بيتذكّر آخر مرة شغّلتها، أو صاحب الفيديو مفعّلها): إذا مطفية عنا، منرجع نطفيها
+      if (d.event === 'onApiChange' && !YtMedia.ccOn()) this.applyCc();
       const i = d.info; if (!i || typeof i !== 'object') return;
       if (i.videoData && i.videoData.video_id) this.vid = i.videoData.video_id;
       const pd = (i.progressState && i.progressState.duration) || i.duration;
@@ -1119,7 +1211,9 @@
       }
       if (typeof i.playerState === 'number' && i.playerState !== this.st) {
         const prev = this.st; this.st = i.playerState;
-        if (this.st === 1 && this._ccN < 3) { this._ccN++; this.applyCc(); } // يوتيوب بيشغّل الترجمة لحالو أحياناً لمّا يبلّش
+        if (this.st === 1 && (this._ccN < 3 || !YtMedia.ccOn())) { this._ccN++; this.applyCc(); } // يوتيوب بيشغّل الترجمة لحالو أحياناً لمّا يبلّش (أو بعد قفزة)
+        // الترجمة مطفية عنا بس يوتيوب متذكّر إنك شغّلتها مرة: بيحمّلها بعد ما يبلّش الفيديو بشوي — منرجع نطفيها كم مرة
+        if (this.st === 1 && !YtMedia.ccOn() && !this._ccSched) { this._ccSched = true; [1500, 4000, 9000].forEach(ms => setTimeout(() => { if (!YtMedia.ccOn() && this.f.isConnected) this.applyCc(); }, ms)); }
         if (this.revealed) this._stateEvents(prev);
       }
     }
@@ -1156,7 +1250,7 @@
     static ccOn() { return !!(window.nuvioPref && window.nuvioPref.get('cc')); }
     applyCc() {
       if (YtMedia.ccOn()) { this.cmd('loadModule', ['captions']); this.cmd('setOption', ['captions', 'track', { languageCode: 'ar' }]); }
-      else { this.cmd('unloadModule', ['captions']); this.cmd('unloadModule', ['cc']); }
+      else { this.cmd('setOption', ['captions', 'track', {}]); this.cmd('unloadModule', ['captions']); this.cmd('unloadModule', ['cc']); }
     }
     get currentTime() {
       if (this.seekingTo != null) return this.seekingTo;

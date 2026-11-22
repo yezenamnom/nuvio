@@ -470,29 +470,93 @@ function saverOn() {
   return !!(c && (c.saveData || c.type === 'cellular' || /(^|-)(2g|3g)$/.test(c.effectiveType || '')));
 }
 window.nuvioSaver = saverOn;
-/* تحميل مسبق (واي فاي / باقة مفتوحة): بس كم دقيقة لقدّام من الفيديو اللي عم تحضره (خفيف على سيرفرنا).
-   تلقائي = شغّال إلا إذا المتصفح قال إنك على بيانات الموبايل (الآيفون ما بيقول، فمنعتبرو واي فاي) */
+/* تحميل مسبق قوي (كم دقيقة لقدّام): بس إذا اخترت «دايماً».
+   «تلقائي» = ذكي: المخزون قدّام على قد ما الشبكة بدها (شوف smartBuffer) — هيك ما بيروح نت عالفاضي إذا طلعت من الفيديو بكّير */
 function strongPreload() {
   const m = prefs.get('preload');
   if (m === 'off' || saverOn()) return false;
-  if (m === 'on') return true;
-  const c = navigator.connection;
-  return !(c && (c.type === 'cellular' || c.saveData));
+  return m === 'on';
 }
 window.nuvioStrong = strongPreload;
-// أعلى جودة = قد الشاشة الحقيقية: ضلع الفيديو الطويل مع ضلع الشاشة الطويل، والقصير مع القصير.
-// (restrictToScreenSize تبع Shaka بيقارن ضلع الفيديو الطويل بعرض الشاشة، فالتلفون الواقف ما كان يطلع فوق 480p)
-function screenCap() {
+/* ================= الجودة الذكية =================
+   الجودة على قد المشغّل نفسو عالشاشة (مش قد الشاشة كلها): الفيديو بالصفحة عالتلفون 480p (أوضح من 360p تبع يوتيوب)،
+   وبملء الشاشة بتطلع لحالها لـ 1080p. ما منحمّل 720p/1080p لمربّع صغير ما رح تبيّن فيه الفرق — هيك بتوفّر نص النت.
+   كل ما يتغيّر حجم المشغّل (ملء الشاشة، تدوير، مشغّل صغير) منعيد الحساب. */
+function viewPixels(v) {
   const dpr = window.devicePixelRatio || 1;
-  const a = (screen.width || 0) * dpr, b = (screen.height || 0) * dpr;
-  if (!a || !b) return { maxWidth: Infinity, maxHeight: Infinity };
-  return { maxWidth: Math.ceil(Math.max(a, b)) + 8, maxHeight: Math.ceil(Math.min(a, b)) + 8 }; // +8: سماحية للتقريب
+  const fs = document.fullscreenElement || document.webkitFullscreenElement || (v && v.webkitDisplayingFullscreen);
+  let w = 0, h = 0;
+  if (v && !fs) { const r = v.getBoundingClientRect(); w = r.width; h = r.height; }
+  if (w < 40 || h < 40) { w = (fs ? screen.width : innerWidth) || 0; h = (fs ? screen.height : innerHeight) || 0; } // مش ظاهر لسّا: قد النافذة
+  if (!w || !h) return Infinity;
+  const ar = v && v.videoWidth && v.videoHeight ? v.videoWidth / v.videoHeight : 16 / 9;
+  const fit = w / h > ar ? h * h * ar : w * w / ar; // مساحة الفيديو جوّا المربّع (بلا الحواف السودا)
+  return fit * dpr * dpr;
 }
-const saverCfg = () => {
-  const cap = screenCap();
-  return saverOn()
-    ? { abr: { restrictions: { maxWidth: cap.maxWidth, maxHeight: Math.min(480, cap.maxHeight) }, defaultBandwidthEstimate: 6e5 } }
-    : { abr: { restrictions: { maxWidth: cap.maxWidth, maxHeight: cap.maxHeight } } };
+// بالـ TV أو شاشة كبيرة: الحدّ بيطلع لحالو (المساحة أكبر)
+const saverCfg = v => {
+  if (!v && window.__nuvioNp && window.__nuvioNp.video && window.__nuvioNp.video.isConnected) v = window.__nuvioNp.video;
+  const px = viewPixels(v);
+  const sv = saverOn();
+  // قد العرض (+١٠٪): مشغّل التلفون (608 سطر) → 480p، ملء الشاشة (1080) → 1080p.
+  // توفير (داتا الموبايل): ٦٠٪ من العرض → 360p بالصفحة (متل يوتيوب)، و480p بملء الشاشة كحد أقصى
+  let max = isFinite(px) ? Math.max(px * (sv ? 0.6 : 1.1), 230e3) : Infinity;
+  if (sv) max = Math.min(max, 430e3);
+  return { abr: { restrictions: { maxWidth: Infinity, maxHeight: Infinity, maxPixels: max } } };
+};
+window.nuvioQualityCfg = saverCfg;
+/* سرعة النت اللي شفناها آخر مرة (متوسط متحرّك): الفيديو الجاي بيبلّش بالجودة الصح من أول ثانية، بلا ما يبلّش ضعيف ويطلع */
+// لكل نوع شبكة لحالو (واي فاي / موبايل): سرعة البيت ما بتنفع لمّا تطلع عالداتا
+const bwKey = () => 'nuvio:bw:' + ((navigator.connection && navigator.connection.type) || 'x');
+function learnedBw() {
+  try { const s = JSON.parse(localStorage.getItem(bwKey()) || 'null'); if (s && s.v > 0 && Date.now() - s.at < 3 * 86400e3) return s.v; } catch { /* */ }
+  return 0;
+}
+function learnBw(bps) {
+  if (!(bps > 1e5) || !isFinite(bps)) return;
+  const old = learnedBw();
+  const v = old ? old * 0.6 + bps * 0.4 : bps;
+  try { localStorage.setItem(bwKey(), JSON.stringify({ v: Math.round(v), at: Date.now() })); } catch { /* */ }
+}
+// تقدير البداية: اللي تعلّمناه، بس مش أكتر من اللي المتصفح شايفو هلّق (downlink)؛ وبنسبة ٤٠٪ لحتى أول قطعة توصل بأقل من ثانية
+function startBw() {
+  let b = learnedBw() || 3e6;
+  const c = navigator.connection;
+  if (c && c.downlink > 0) b = Math.min(b, c.downlink * 1e6);
+  return Math.min(Math.max(b * 0.4, 5e5), 5e6);
+}
+window.nuvioLearnedBw = learnedBw;
+window.nuvioLearnBw = learnBw;
+window.nuvioStartBw = startBw;
+/* المخزون قدّام الذكي: على قد ما الشبكة بدها.
+   شبكة أسرع بكتير من الفيديو → ٣٠ ثانية بتكفي (بترجع تتعبّى بلحظة). شبكة على قدّها أو صار تقطيع → أكتر.
+   «تحميل مسبق: دايماً» → كم دقيقة متل قبل. «أبداً» → الحد الأدنى. */
+function smartBuffer(bitrate, est, stalls) {
+  const m = prefs.get('preload');
+  if (m === 'on' && !saverOn()) return Math.max(45, Math.min(240, Math.floor(70e6 * 8 / bitrate)));
+  if (m === 'off') return 20;
+  const ratio = est && bitrate ? est / bitrate : 2;
+  let goal = ratio >= 5 ? 40 : ratio >= 2.5 ? 60 : ratio >= 1.4 ? 90 : 120;
+  if (saverOn()) goal = Math.min(goal, 45); // داتا الموبايل: أقل احتياط (إذا طلعت من الفيديو، ما بيروح نت عالفاضي)
+  if (stalls) goal = Math.max(goal, Math.min(180, 90 + (stalls - 1) * 30)); // تقطّع؟ منكبّر الاحتياط فوراً
+  return Math.min(goal, Math.max(30, Math.floor(50e6 * 8 / bitrate))); // ما منعدّي ~50MB بذاكرة التشغيل
+}
+window.nuvioSmartBuffer = smartBuffer;
+/* الترميز: VP9 بيوفّر ~٣٠-٤٠٪ نت بنفس الدقة (يوتيوب نفسو بيستعملو) — بس منختارو إذا جهازك بيفكّو بالهاردوير
+   (ما بيسخّن التلفون ولا بيصرف بطارية). غير هيك H.264 (avc1) متل قبل. الجواب بينحفظ للفتحة الجاية. */
+let vp9Hw = (() => { try { return JSON.parse(localStorage.getItem('nuvio:vp9hw') || 'null'); } catch { return null; } })();
+try {
+  if (navigator.mediaCapabilities && navigator.mediaCapabilities.decodingInfo) {
+    navigator.mediaCapabilities.decodingInfo({ type: 'media-source', video: { contentType: 'video/webm; codecs="vp09.00.31.08"', width: 1280, height: 720, bitrate: 1500000, framerate: 30 } })
+      .then(r => { vp9Hw = !!(r && r.supported && r.smooth && r.powerEfficient); try { localStorage.setItem('nuvio:vp9hw', JSON.stringify(vp9Hw)); } catch { /* */ } })
+      .catch(() => {});
+  }
+} catch { /* */ }
+window.nuvioCodecs = () => {
+  let o = ''; try { o = localStorage.getItem('nuvio:codec') || ''; } catch { /* */ } // للتجربة: avc1 / vp9 إجباري
+  if (o === 'avc1') return ['avc1', 'vp9'];
+  if (o === 'vp9') return ['vp9', 'avc1'];
+  return vp9Hw ? ['vp9', 'avc1'] : ['avc1', 'vp9'];
 };
 
 /* ================= النسخة الاحتياطية ================= */
@@ -558,6 +622,11 @@ function mergeBackup(j) {
   return n;
 }
 
+/* المنصة اللي بتفتح أول شي: تطبيق أندرويد (1.0.5+) بيحفظها عندو، لحتى يعرف يفتح يوتيوب أو لأ قبل ما يحمّل الموقع */
+function appStartSync() {
+  if (!document.documentElement.hasAttribute('data-nuvio-yt')) return;
+  try { window.NuvioApp.postMessage('start:' + (prefs.get('startSec') || 'auto')); } catch { /* */ }
+}
 /* ================= القائمة الجانبية: الإعدادات والنسخة الاحتياطية ================= */
 function drawerSettings(d, sep, closeDrawerFn) {
   const sw = (icon, label, get, set, hint) => {
@@ -580,7 +649,7 @@ function drawerSettings(d, sep, closeDrawerFn) {
   const saverBtn = el('button', 'drawer-item');
   const sic = el('span', 'drawer-ico'); sic.innerHTML = window.ico ? window.ico('wifi') : '';
   const sval = el('span', 'drawer-count', SAVER[prefs.get('saver')] || 'تلقائي');
-  const stx = el('span', 'drawer-tx'); stx.append(el('span', null, 'توفير الإنترنت'), el('small', 'muted', 'جودة 480p على بيانات الموبايل'));
+  const stx = el('span', 'drawer-tx'); stx.append(el('span', null, 'توفير الإنترنت'), el('small', 'muted', 'على بيانات الموبايل: 360p بالصفحة و480p بملء الشاشة'));
   saverBtn.append(sic, stx, sval);
   saverBtn.onclick = () => {
     const order = ['auto', 'on', 'off'];
@@ -588,11 +657,11 @@ function drawerSettings(d, sep, closeDrawerFn) {
     prefs.set('saver', nx); sval.textContent = SAVER[nx];
     if (typeof player !== 'undefined' && player) try { player.configure(saverCfg()); } catch { /* */ }
   };
-  const PRE = { auto: 'واي فاي', on: 'دايماً', off: 'أبداً' };
+  const PRE = { auto: 'ذكي', on: 'دايماً', off: 'أبداً' };
   const preBtn = el('button', 'drawer-item');
   const pic = el('span', 'drawer-ico'); pic.innerHTML = window.ico ? window.ico('download') : '';
   const pval = el('span', 'drawer-count', PRE[prefs.get('preload')] || PRE.auto);
-  const ptx = el('span', 'drawer-tx'); ptx.append(el('span', null, 'تحميل مسبق'), el('small', 'muted', 'بيحمّل كم دقيقة لقدّام من الفيديو اللي عم تحضره'));
+  const ptx = el('span', 'drawer-tx'); ptx.append(el('span', null, 'تحميل مسبق'), el('small', 'muted', 'ذكي: على قد ما شبكتك بدها · دايماً: كم دقيقة لقدّام'));
   preBtn.append(pic, ptx, pval);
   preBtn.onclick = () => { const order = ['auto', 'on', 'off']; const nx = order[(order.indexOf(prefs.get('preload') || 'auto') + 1) % 3]; prefs.set('preload', nx); pval.textContent = PRE[nx]; };
   const TVM = { auto: 'تلقائي', on: 'دايماً', off: 'أبداً' };
@@ -610,6 +679,21 @@ function drawerSettings(d, sep, closeDrawerFn) {
   const pltx = el('span', 'drawer-tx'); pltx.append(el('span', null, 'المشغّل الأساسي'), el('small', 'muted', 'تلقائي: سيرفرنا، وإذا ما زبط يوتيوب على جهازك فوراً'));
   plBtn.append(plic, pltx, plval);
   plBtn.onclick = () => { const nx = prefs.get('player') === 'yt' ? 'nuvio' : 'yt'; prefs.set('player', nx); plval.textContent = PLY[nx]; note(nx === 'yt' ? 'الفيديوهات الجاية من يوتيوب (بواجهتنا)' : 'تلقائي: سيرفرنا أول، وإذا ما زبط يوتيوب'); };
+  // أول ما تفتح البرنامج: Nuvio ولا Nuvio Music (ولا يوتيوب، جوّا تطبيق أندرويد)
+  const inApp = document.documentElement.hasAttribute('data-nuvio-yt');
+  const STS = inApp ? { auto: 'متل آخر مرة', video: 'Nuvio', music: 'Nuvio Music', yt: 'يوتيوب' } : { video: 'Nuvio', music: 'Nuvio Music' };
+  const stKey = () => { const k = prefs.get('startSec') || 'auto'; return k in STS ? k : (inApp ? 'auto' : 'video'); };
+  const startBtn = el('button', 'drawer-item');
+  const stic = el('span', 'drawer-ico'); stic.innerHTML = window.ico ? window.ico('home') : '';
+  const stval = el('span', 'drawer-count', STS[stKey()]);
+  const sttx = el('span', 'drawer-tx'); sttx.append(el('span', null, 'أول ما تفتح البرنامج'), el('small', 'muted', inApp ? 'شو بيفتح أول شي: Nuvio، الموسيقى، أو يوتيوب' : 'شو بيفتح أول شي: الفيديوهات ولا الموسيقى'));
+  startBtn.append(stic, sttx, stval);
+  startBtn.onclick = () => {
+    const order = Object.keys(STS);
+    const nx = order[(order.indexOf(stKey()) + 1) % order.length];
+    prefs.set('startSec', nx); stval.textContent = STS[nx];
+    appStartSync();
+  };
   const hidden = store.get('nope', []).length + store.get('nopeCh', []).length;
   // المظهر: 3 ثيمات
   const themeRow = el('div', 'drawer-item theme-row');
@@ -632,6 +716,7 @@ function drawerSettings(d, sep, closeDrawerFn) {
   rateBtn.onclick = () => { const i = HOLD_RATES.indexOf(+prefs.get('holdRate')); const nx = HOLD_RATES[(i + 1) % HOLD_RATES.length]; prefs.set('holdRate', nx); rval.textContent = `${nx}×`; };
   const rows = [
     themeRow,
+    startBtn,
     sep('الإعدادات'),
     plBtn,
     sw('bolt', 'ضغطة مطوّلة = تسريع', () => prefs.get('holdSpeed'), v => prefs.set('holdSpeed', v), 'اضغط على الفيديو وضلّك ضاغط'),
@@ -647,6 +732,7 @@ function drawerSettings(d, sep, closeDrawerFn) {
       : null,
     // كمبيوتر: الفيديو الصغير والنافذة العايمة
     DESK_PTR ? sw('eye', 'معاينة لمّا تمرّق الماوس', () => prefs.get('hoverPreview') !== false, v => prefs.set('hoverPreview', v), 'الفيديو بيشتغل بلا صوت مكان الصورة') : null,
+    !DESK_PTR ? sw('eye', 'معاينة بالضغطة المطوّلة', () => prefs.get('holdPreview') !== false, v => prefs.set('holdPreview', v), 'اضغط على فيديو بالصفحة وضلّك ضاغط: بيشتغل بلا صوت') : null,
     DESK_PTR ? sw('play', 'فيديو صغير لمّا تنزل بالصفحة', () => prefs.get('floatScroll') !== false, v => prefs.set('floatScroll', v), 'بيطلع عالطرف، وبتقدر تسحبو وتكبّرو من زواياه') : null,
     DESK_PTR && window.documentPictureInPicture ? sw('later', 'نافذة عايمة لمّا تروح لتبويب تاني', () => prefs.get('autoPip') !== false, v => prefs.set('autoPip', v), 'الفيديو بيضل ظاهر فوق كل شي، حتى ببرامج تانية') : null,
     saverBtn,
@@ -973,7 +1059,7 @@ function shortsMenu(v, sl) {
     { type: 'choice', icon: 'bolt', label: 'سرعة الضغط المطوّل', options: HOLD_RATES.map(r => [r, `${r}×`]), get: () => +prefs.get('holdRate') || 2, set: x => prefs.set('holdRate', x) },
     { type: 'toggle', icon: 'music', label: 'كتم الصوت', get: () => video.muted, set: x => { video.muted = x; if (!x) video.play().catch(() => {}); } },
     ...shortsAvRows(st),
-    { type: 'choice', icon: 'wifi', label: 'توفير الإنترنت', options: [['auto', 'تلقائي'], ['on', 'دايماً (480p)'], ['off', 'أبداً']], get: () => prefs.get('saver'), set: x => { prefs.set('saver', x); if (st.sp) try { st.sp.configure(saverCfg()); } catch { /* */ } } },
+    { type: 'choice', icon: 'wifi', label: 'توفير الإنترنت', options: [['auto', 'تلقائي'], ['on', 'دايماً (360p–480p)'], ['off', 'أبداً']], get: () => prefs.get('saver'), set: x => { prefs.set('saver', x); if (st.sp) try { st.sp.configure(saverCfg(video)); } catch { /* */ } } },
     { type: 'toggle', icon: 'eye', label: 'خبّي الأزرار (أو كبّر الفيديو بإصبعين)', get: () => !!prefs.get('shortsClean'), set: x => { if (st.setClean) st.setClean(x); if (!x && st.resetZoom) st.resetZoom(); } },
     { type: 'action', icon: 'list', label: 'ضيف لقائمة تشغيل', fn: () => addToPlaylist(v) },
     { type: 'action', icon: 'later', label: queue.has(v.id) ? 'شيل من «شغّل بعدين»' : 'شغّل بعدين', fn: () => note(queue.toggle(v) ? 'انضاف لـ«شغّل بعدين» ✓' : 'انشال من «شغّل بعدين»') },
@@ -1238,13 +1324,13 @@ async function renderShorts(startId, ch) {
         await s.sp.attach(vEl);
         s.sp.getNetworkingEngine().registerRequestFilter(async (type, req) => { req.uris = await Promise.all(req.uris.map(fixUrl)); });
         s.sp.configure({
-          preferredVideoCodecs: ['avc1', 'vp9'],
+          preferredVideoCodecs: window.nuvioCodecs ? nuvioCodecs() : ['avc1', 'vp9'],
           streaming: { bufferingGoal: 12, rebufferingGoal: 0.6, segmentPrefetchLimit: 2, retryParameters: { maxAttempts: 6, baseDelay: 300, backoffFactor: 1.5, timeout: 15000, stallTimeout: 6000, connectionTimeout: 8000 } },
           manifest: { dash: { ignoreMinBufferTime: true } },
           abr: { enabled: true, defaultBandwidthEstimate: 1.5e6, switchInterval: 2 },
         });
       }
-      s.sp.configure(saverCfg());
+      s.sp.configure(saverCfg(vEl));
       s.sp.configure({ preferredAudioLanguage: prefs.get('shortsAud') || '' }); // فاضي = الأصلي (اللي يوتيوب معلّمو «original»)
       let ok = false;
       const pm = s.pre.get(v.id);
@@ -1453,6 +1539,29 @@ function updateBottomNav() {
   if (meIc) { const u = accUser(); meIc.textContent = u ? (u.name || u.email).trim().charAt(0).toUpperCase() : 'N'; }
   const subsBtn = nav.querySelector('[data-path="/subs"]');
   if (subsBtn) subsBtn.classList.toggle('dot', subs.list().some(c => chNew.has(c.id)));
+  if (path !== '/watch') { clearTimeout(bnavKickT); bnavKickT = setTimeout(bnavKick, 380); }
+}
+/* سفاري الآيفون أحياناً ما بيرجع يرسم الشريط التحتاني بعد ما ترجع من الفيديو
+   أو من ملء الشاشة أو تدوير التلفون: منتأكد إنو موجود، ومنجبرو ينرسم من جديد */
+let bnavKickT = 0;
+function bnavKick() {
+  if (document.documentElement.classList.contains('tv')) return;
+  const path = (location.hash.slice(1) || '/').split('?')[0];
+  if (path !== '/watch' && document.body.classList.contains('watching')) document.body.classList.remove('watching');
+  let nav = document.querySelector('.bnav');
+  if (!nav) { buildBottomNav(); nav = document.querySelector('.bnav'); }
+  if (nav && nav.parentNode !== document.body) document.body.append(nav);
+  if (!nav || (nav.getAnimations && nav.getAnimations().length)) return;
+  nav.style.display = 'none'; void nav.offsetHeight; nav.style.display = ''; // (بنفس اللحظة: ما بيرمش)
+}
+{
+  const kickSoon = () => { clearTimeout(bnavKickT); bnavKickT = setTimeout(bnavKick, 400); };
+  addEventListener('pageshow', kickSoon);
+  addEventListener('orientationchange', kickSoon);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) kickSoon(); });
+  document.addEventListener('webkitendfullscreen', kickSoon, true); // آيفون: طلعت من ملء الشاشة تبع النظام
+  document.addEventListener('fullscreenchange', kickSoon);
+  document.addEventListener('webkitfullscreenchange', kickSoon);
 }
 
 /* ================= صفحة «أنا»: السجل ومكتبتك =================
