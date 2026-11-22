@@ -1314,6 +1314,7 @@
       }
       if (typeof i.playerState === 'number' && i.playerState !== this.st) {
         const prev = this.st; this.st = i.playerState;
+        if (this.st === 3) this.bufSince = Date.now(); // يوتيوب عم يحمّل (نت بطيء): هو بيكمّل لحالو
         if (this.st === 1 && (this._ccN < 3 || !YtMedia.ccOn())) { this._ccN++; this.applyCc(); } // يوتيوب بيشغّل الترجمة لحالو أحياناً لمّا يبلّش (أو بعد قفزة)
         // الترجمة مطفية عنا بس يوتيوب متذكّر إنك شغّلتها مرة: بيحمّلها بعد ما يبلّش الفيديو بشوي — منرجع نطفيها كم مرة
         if (this.st === 1 && !YtMedia.ccOn() && !this._ccSched) { this._ccSched = true; [1500, 4000, 9000].forEach(ms => setTimeout(() => { if (!YtMedia.ccOn() && this.f.isConnected) this.applyCc(); }, ms)); }

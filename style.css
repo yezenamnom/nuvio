@@ -1411,11 +1411,14 @@ html.tv .tv-sinput.tv-f { border-color: #fff; }
 .emb-spin { position: relative; width: 44px; height: 44px; border-radius: 50%; border: 3px solid rgba(255,255,255,.25); border-top-color: #fff; animation: embspin .8s linear infinite; }
 .emb-msg { position: relative; color: #fff; font-size: .9rem; font-weight: 700; text-shadow: 0 1px 6px rgba(0,0,0,.7); text-align: center; padding: 0 14px; }
 .emb-fail { background: rgba(0,0,0,.85); }
+.emb-msg.low { margin-top: 128px; font-size: .8rem; font-weight: 600; max-width: 320px; line-height: 1.5; } /* تحت زر التشغيل، مش فوقو */
 @keyframes embspin { to { transform: rotate(360deg); } }
 
 /* مشغّل يوتيوب المضمّن بواجهتنا: الإطار مقصوص من فوق وتحت (العنوان وشعار يوتيوب برّا الصورة) ومسكّر عاللمس */
 .yt-frame { position: absolute; top: 0; right: 0; bottom: 0; left: 0; overflow: hidden; background: #000; --crop: 60px; }
-.player-box .yt-frame iframe { position: absolute; left: 0; top: calc(-1 * var(--crop)); width: 100%; height: calc(100% + 2 * var(--crop)); border: 0; pointer-events: none; }
+.player-box .yt-frame iframe { position: absolute; left: 0; top: calc(-1 * var(--crop)); width: 100%; height: calc(100% + 2 * var(--crop)); border: 0; pointer-events: none; clip-path: inset(var(--crop) 0); }
+/* clip-path: منقصّ من الإطار نفسو (مش بس من المربّع): عالتلفون الواقف المشغّل أعلى من الفيديو، فالقصّ كان يصغر
+   وكلمة YouTube تحت كانت أحياناً تبيّن. هلّق اللي بيبيّن هو الفيديو بس، مهما كان حجم المشغّل */
 .player-box.fs .yt-frame, :fullscreen .yt-frame { --crop: 110px; }
 .yt-frame .emb-cover { z-index: 1; }
 
@@ -1946,7 +1949,7 @@ body.shorts-clean .shorts-unclean svg { width: 24px; height: 24px; fill: none; s
 /* مشغّل يوتيوب المضمّن: الإطار على قد الفيديو بالضبط (مش قد المربّع) — هيك القصّ اللي بيخبّي عنوان يوتيوب وشعارو
    بياكل من الحواف السودا بس، والصورة بتبيّن كاملة حتى بوضع المسرح وملء الشاشة العريضة (المربّع أعرض من الفيديو) */
 @supports (container-type: size) {
-  .yt-frame { container-type: size; --ar: 1.7778; }
+  .yt-frame { container-type: size; --ar: var(--vr, 1.7778); } /* --vr = نسبة الفيديو الحقيقية: الطولي بيعبّي طول المشغّل، مش صغير بنصّو */
   .player-box .yt-frame iframe {
     left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: min(100cqw, calc(100cqh * var(--ar)));

@@ -219,6 +219,39 @@ const getChannel = id => cached('c:' + id, 10 * 60e3, () => withFallback(i => ap
 /* ================= محوّلات الـ API ================= */
 const abs = (base, u) => (!u ? '' : u.startsWith('//') ? 'https:' + u : u.startsWith('/') ? base + u : u);
 const ytThumb = (id, q = 'mqdefault') => `https://i.ytimg.com/vi/${id}/${q}.jpg`;
+/* نسبة الفيديو (عرض÷طول) من صورة صغيرة من يوتيوب (frame0 / oar2 بيجو بنسبة الفيديو الأصلية: الطولي طولي، والـ4:3 مربّع أكتر).
+   بتشتغل عكل الأجهزة بلا سيرفرنا ولا الإضافة — هيك الطولي بيكبر عالطول حتى بمشغّل يوتيوب، والتكبير ما بيلفّو بالعرض */
+const ratioMemo = new Map();
+function ytRatio(id) {
+  if (ratioMemo.has(id)) return ratioMemo.get(id);
+  const snap = r => { for (const c of [16 / 9, 9 / 16, 4 / 3, 3 / 4, 1, 21 / 9]) if (Math.abs(r / c - 1) < 0.04) return c; return r; };
+  const p = new Promise(ok => {
+    const one = (q, next) => {
+      const im = new Image(); im.referrerPolicy = 'no-referrer'; im.decoding = 'async';
+      const bad = () => (next ? next() : ok(0));
+      im.onload = () => { const w = im.naturalWidth, h = im.naturalHeight; if (w > 1 && h > 1 && !(w === 120 && h === 90)) ok(snap(w / h)); else bad(); }; // 120×90 = «ما في صورة»
+      im.onerror = bad;
+      im.src = ytThumb(id, q);
+    };
+    one('frame0', () => one('oar2', null));
+    setTimeout(() => ok(0), 8000);
+  });
+  ratioMemo.set(id, p);
+  p.then(r => { if (!r) ratioMemo.delete(id); });
+  return p;
+}
+/* مشغّل يوتيوب ممكن (مش «موقعي»): منفتح الخط لسيرفر يوتيوب من هلّق، فأول فيديو بيبلّش أسرع */
+try { if (prefs.get('player') !== 'own') { const l = document.createElement('link'); l.rel = 'preconnect'; l.href = 'https://www.youtube-nocookie.com'; document.head.append(l); } } catch { /* */ }
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+/* الآيفون بوضع توفير البطارية: Safari بيمنع أي تشغيل لحالو (حتى بلا صوت) وبيبطّئ الرسم لـ30 إطار بالثانية — من هون منعرف تقريباً */
+function lowPowerGuess() {
+  return new Promise(ok => {
+    if (document.hidden) { ok(false); return; }
+    let n = 0; const t0 = performance.now();
+    const f = () => { n++; const d = performance.now() - t0; if (d < 900) requestAnimationFrame(f); else ok(n / (d / 1000) < 42); };
+    requestAnimationFrame(f);
+  });
+}
 
 /* بعض السيرفرات بتبعت الوصف كـ HTML بس: منحوّلو لنص، والروابط بتضل روابط كاملة */
 function htmlText(html) {
@@ -2460,6 +2493,8 @@ async function renderWatch(id, startTime) {
     },
   });
   np.video.poster = ytThumb(id, 'hqdefault');
+  // نسبة الفيديو من أول لحظة (قبل ما يحمّل): الطولي بيكبر عالطول فوراً، والفيديو نفسو بيصحّحها إذا عرفها
+  ytRatio(id).then(r => { if (r && np && !np.dead && !np.ratio && box.isConnected) np.setRatio(r); });
   if (np.setLowLayer) np.setLowLayer(lowLayer.id === id ? lowLayer.coveredTime(1) : 0);
   // القفز لمحل مش محمّل: منبلّش فوراً بأحسن جودة محمّلة هونيك (720/480/360، وإلا 144p)، وبعد ثانية منرجع لجودتك
   let lowBack = 0, lowHome = null, lowAbr = true, lowWait = false;
@@ -2709,11 +2744,15 @@ async function renderWatch(id, startTime) {
     if (prev) { try { prev.video.pause(); } catch { /* */ } prev.destroy(); }
     box.classList.remove('ui', 'paused', 'loading');
     box.classList.add('emb');
-    const opts = { ...(prev ? prev.opts : {}), media, onStall: t => reloadAt(t, 'stall'), onError: t => reloadAt(t, 'error') };
+    // يوتيوب عم يحمّل بالنص (نت بطيء): هو بيكمّل لحالو — إعادة تحميل الإطار بتمسح اللي محمّل وبتأخّر أكتر. منعيد بس إذا طوّل كتير (30 ث)
+    const onStall = t => { if (media.st === 3 && Date.now() - (media.bufSince || 0) < 30000) return; reloadAt(t, 'stall'); };
+    const opts = { ...(prev ? prev.opts : {}), media, onStall, onError: t => reloadAt(t, 'error') };
     delete opts.onNext;
     np = new NuvioPlayer(box, opts);
     window.__nuvioNp = np;
     np.video.poster = ytThumb(id, 'hqdefault');
+    if (prev && prev.ratio) np.setRatio(prev.ratio);
+    ytRatio(id).then(r => { if (r && np && !np.dead && !np.ratio && box.isConnected) np.setRatio(r); }); // مشغّل يوتيوب ما بيعطي أبعاد الفيديو
     qoe.attach(np.video);
     // صور المعاينة: إذا عرفناها من قبل، وإلا منسأل سيرفرنا (الصور نفسها من يوتيوب، بتبيّن عكل الأجهزة)
     if (sbSpec) applySb();
@@ -2729,13 +2768,13 @@ async function renderWatch(id, startTime) {
       if (ex.chapters) ex.chapters(shown.description || '');
     }
     const want = +(pv && pv.duration) || 0;
-    let tries = 0, mids = 0, goodCt = 0, dur = want, failed = false, waitUser = false, adSince = 0;
+    let tries = 0, mids = 0, goodCt = 0, dur = want, failed = false, waitUser = false, adSince = 0, nudgeAt = 0;
     const reloadAt = (t, why) => {
       if (failed || !box.isConnected) return;
       if (why && mids >= 3) return;
       if (why) mids++;
       tries = 0; adSince = 0;
-      cover.hidden = false; msg.textContent = why === 'ad' ? 'عم شيل الإعلان…' : '';
+      cover.hidden = false; msg.classList.remove('low'); msg.textContent = why === 'ad' ? 'عم شيل الإعلان…' : '';
       media.hide(); tries++; media.load(t);
     };
     // انتقل المشغّل لمحل تاني بالصفحة (المشغّل الصغير) وإطار يوتيوب انعاد تحميلو: منكمّل من نفس الثانية
@@ -2763,7 +2802,7 @@ async function renderWatch(id, startTime) {
     const isContent = () => {
       if (!dur && media.dur) dur = media.dur;
       // لازم يكون وصلنا وقت من يوتيوب نفسو (ct0) والفيديو عم يمشي فعلاً — مش بس الثانية اللي طلبناها
-      return !adLike() && media.ct0 >= 0 && media.st === 1 && media.ct >= media.t0 - 1.5 && media.ct - Math.max(media.ct0, media.t0 - 1.5) > 0.6;
+      return !adLike() && media.ct0 >= 0 && media.st === 1 && media.ct >= media.t0 - 1.5 && media.ct - Math.max(media.ct0, media.t0 - 1.5) > 0.4;
     };
     const showAd = now => {
       if (!adSince) { adSince = now; media.cmd('mute'); }
@@ -2786,7 +2825,10 @@ async function renderWatch(id, startTime) {
             if (!blocked) return;
             // ما بلّش لهلّق (الآيفون منع التشغيل أو يوتيوب بطيء): زر التشغيل تبعنا بيبيّن، بس منضل نحاول بالخلفية،
             // وإذا بلّش لحالو بيكمّل (قبل كنّا نوقّفو!) — وأي كبسة منك بالصفحة بتشغّلو
-            waitUser = true; msg.textContent = ''; media.block(); return;
+            waitUser = true; msg.textContent = ''; media.block();
+            // الآيفون: إذا شكلو وضع توفير البطارية (هو اللي بيمنع)، منقلّك ليش ومنقلّك إنو كبسة بأي محل بتكفّي
+            if (IS_IOS) lowPowerGuess().then(lp => { if (lp && waitUser && !media.revealed && box.isConnected) { msg.textContent = 'شكلو وضع توفير البطارية شغّال، فالآيفون مانع التشغيل لحالو — اكبس أي محل ليبلّش'; msg.classList.add('low'); } });
+            return;
           }
           if (adLike()) {
             // إعلان: مرة وحدة منعيد (أحياناً بيروح). إذا رجع، منستنّاه يخلص تحت الصورة بلا صوت ومع عدّاد — بلا لفّ
@@ -2811,9 +2853,15 @@ async function renderWatch(id, startTime) {
         media.hide(); cover.hidden = false; tries = 9; showAd(now); // tries=9: ما في إعادة تحميل، بس انتظار
         return;
       }
-      if (frozen) { reloadAt(goodCt, 'stall'); return; }
+      if (frozen) {
+        // الوقت ما عم يتحرّك: يمكن بس رسايل يوتيوب وقفت. أول شي منرجع نشترك ومنقلّو «شغّل»، ومنعيد التحميل بس إذا ضل واقف
+        if (!nudgeAt) { nudgeAt = now; media._listen(); media.cmd('playVideo'); return; }
+        if (now - nudgeAt > 8000) { nudgeAt = 0; reloadAt(goodCt, 'stall'); }
+        return;
+      }
+      nudgeAt = 0;
       if (media.st === 1) goodCt = media.ct;
-    }, 400);
+    }, 250);
     function stop() { clearInterval(iv); }
     tries = 1;
     media.load(at);
@@ -3913,7 +3961,7 @@ function enableSwipeDown(box) {
 
 /* ================= تحديث تلقائي للنسخة =================
    التلفون بيحفظ النسخة القديمة؛ فمنفحص ملف صغير، وإذا في نسخة أجدد منحمّلها. */
-const APP_VERSION = '20261122164922';
+const APP_VERSION = '20261123003923';
 async function checkUpdate() {
   try {
     const r = await fetch(`version.txt?x=${Date.now()}`, { cache: 'no-store' });
